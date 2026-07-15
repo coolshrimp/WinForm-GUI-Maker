@@ -1,4 +1,4 @@
-/* FormForge designer webview styles.
+/* UI Maker designer webview styles.
  *
  * The chrome (toolbar, toolbox, properties panel) follows the active VS Code
  * theme via --vscode-* variables. The design surface itself deliberately stays
@@ -180,17 +180,27 @@ html, body {
     position: relative;
     background: #fff;
     min-height: 100px;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
 }
 
 /* ----------------------------------------------------------------- controls */
 
+/* Elements are laid out by their parent's CSS grid/flex approximation of the
+ * WPF panel; only Canvas children get inline absolute positioning. */
 .ff-control {
-    position: absolute;
     color: #000;
     font-size: 12px;
     font-family: "Segoe UI", sans-serif;
-    cursor: move;
     user-select: none;
+    min-width: 0;
+    min-height: 0;
+}
+
+.ff-movable {
+    cursor: move;
 }
 
 .ff-hidden-control {
@@ -220,6 +230,9 @@ html, body {
     justify-content: center;
     background: #ddd;
     border: 1px solid #707070;
+    padding: 1px 6px;
+    min-height: 21px;
+    white-space: nowrap; /* WPF buttons clip, they don't wrap */
 }
 
 .ff-look-label {
@@ -227,11 +240,25 @@ html, body {
     background: transparent;
 }
 
+.ff-look-text {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    line-height: 1.3;
+}
+
 .ff-look-input {
     padding: 0 6px;
     background: #fff;
     border: 1px solid #7a7a7a;
     justify-content: flex-start;
+    min-height: 20px;
+}
+
+/* Multi-line TextBox: text starts at the top-left like a real editor. */
+.ff-look-textarea {
+    align-items: flex-start;
+    padding: 3px 6px;
 }
 
 .ff-combo-arrow {
@@ -320,17 +347,87 @@ html, body {
     background: transparent;
 }
 
-.ff-look-groupbox {
-    border: 1px solid #b0b0b0;
+.ff-look-gb {
+    border: 1px solid #b5b5b5;
     border-radius: 3px;
-    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
 }
 
-.ff-group-header {
-    margin: -8px 0 0 8px;
-    padding: 0 4px;
-    background: #fff;
+.ff-gb-header {
+    flex: 0 0 auto;
     font-size: 11px;
+    padding: 2px 8px 0;
+    color: #333;
+}
+
+.ff-gb-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    padding: 4px;
+}
+
+/* TabControl: header strip + active tab content. */
+.ff-look-tabs {
+    background: transparent;
+}
+
+.ff-tab-strip {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    padding: 2px 2px 0;
+}
+
+.ff-tab-head {
+    padding: 3px 12px;
+    background: #f0f0f0;
+    border: 1px solid #d9d9d9;
+    border-bottom: none;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ff-tab-head.active {
+    background: #fff;
+    position: relative;
+    top: 1px;
+    border-top: 2px solid #0078d4;
+    z-index: 1;
+}
+
+.ff-tab-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    border: 1px solid #d9d9d9;
+    background: #fff;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+}
+
+/* GridSplitter / Separator: simple neutral bars. */
+.ff-look-splitter {
+    background: #d4d4d4;
+    min-width: 3px;
+    min-height: 3px;
+}
+
+.ff-look-separator {
+    background: #d4d4d4;
+    min-height: 2px;
+    margin: 2px 0;
+}
+
+/* Remaining space container used by the DockPanel approximation. */
+.ff-dockrest {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
 }
 
 .ff-look-unknown {

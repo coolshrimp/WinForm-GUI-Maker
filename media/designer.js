@@ -1,9 +1,15 @@
-// FormForge designer webview.
+// UI Maker designer webview.
 //
 // Renders a XAML Window as an interactive canvas. The XAML text document is
 // the single source of truth: this script parses it into an XML DOM, renders
 // HTML approximations of each control, and serializes the DOM back to text
 // whenever the user changes something on the canvas.
+//
+// Layout: WPF panels are approximated with CSS — Grid rows/columns become a
+// CSS grid, StackPanel/WrapPanel/DockPanel become flexbox, ScrollViewer
+// scrolls, TabControl shows one clickable tab at a time. Styles referenced
+// with {StaticResource} from <Window.Resources> are resolved for the visual
+// properties the preview understands.
 //
 // Messages to the extension host:
 //   { type: 'ready' }                            webview loaded, send content
@@ -45,13 +51,25 @@
         Image:       { icon: '🖼', w: 120, h: 90,  attrs: { Stretch: 'Uniform' },  props: ['Source', 'Stretch'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         ProgressBar: { icon: '▱', w: 180, h: 18,  attrs: { Value: '40' },         props: ['Minimum', 'Maximum', 'Value', 'IsIndeterminate'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
         Slider:      { icon: '⬌', w: 180, h: 24,  attrs: { Minimum: '0', Maximum: '100', Value: '25' }, props: ['Minimum', 'Maximum', 'Value', 'TickFrequency'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        Border:      { icon: '▢', w: 200, h: 120, attrs: { BorderBrush: '#FF808080', BorderThickness: '1' }, props: ['BorderBrush', 'BorderThickness', 'CornerRadius'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
+        Border:      { icon: '▢', w: 200, h: 120, attrs: { BorderBrush: '#FF808080', BorderThickness: '1' }, props: ['BorderBrush', 'BorderThickness', 'CornerRadius', 'Padding'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         GroupBox:    { icon: '⬒', w: 220, h: 140, attrs: { Header: 'GroupBox' },  props: ['Header'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         DatePicker:  { icon: '📅', w: 140, h: 28,  attrs: {},                      props: ['SelectedDate'], events: ['SelectedDateChanged'], defaultEvent: 'SelectedDateChanged' }
     };
 
+    /** Extra property-panel entries for layout containers (not in the toolbox). */
+    const PANEL_PROPS = {
+        StackPanel: ['Orientation'],
+        WrapPanel: ['Orientation'],
+        DockPanel: ['LastChildFill'],
+        TabControl: [],
+        TabItem: ['Header'],
+        ScrollViewer: ['VerticalScrollBarVisibility', 'HorizontalScrollBarVisibility'],
+        Grid: []
+    };
+
     /** Properties shown for every control, in panel order. */
-    const COMMON_PROPS = ['Width', 'Height', 'Margin', 'Background', 'Foreground',
+    const COMMON_PROPS = ['Width', 'Height', 'Margin', 'HorizontalAlignment', 'VerticalAlignment',
+        'Grid.Row', 'Grid.Column', 'Background', 'Foreground',
         'FontSize', 'FontWeight', 'IsEnabled', 'Visibility', 'ToolTip'];
 
     /** Window-level properties/events shown when nothing is selected. */
@@ -62,28 +80,40 @@
     const ENUM_VALUES = {
         Visibility: ['Visible', 'Hidden', 'Collapsed'],
         FontWeight: ['Thin', 'Light', 'Normal', 'Medium', 'SemiBold', 'Bold', 'Black'],
+        HorizontalAlignment: ['Left', 'Center', 'Right', 'Stretch'],
+        VerticalAlignment: ['Top', 'Center', 'Bottom', 'Stretch'],
+        Orientation: ['Vertical', 'Horizontal'],
         IsEnabled: ['True', 'False'],
         IsChecked: ['True', 'False'],
         IsReadOnly: ['True', 'False'],
         IsEditable: ['True', 'False'],
         IsIndeterminate: ['True', 'False'],
         AcceptsReturn: ['True', 'False'],
+        LastChildFill: ['True', 'False'],
         AutoGenerateColumns: ['True', 'False'],
         TextWrapping: ['NoWrap', 'Wrap', 'WrapWithOverflow'],
         Stretch: ['None', 'Fill', 'Uniform', 'UniformToFill'],
+        VerticalScrollBarVisibility: ['Auto', 'Visible', 'Hidden', 'Disabled'],
+        HorizontalScrollBarVisibility: ['Auto', 'Visible', 'Hidden', 'Disabled'],
         ResizeMode: ['NoResize', 'CanMinimize', 'CanResize', 'CanResizeWithGrip'],
         WindowStartupLocation: ['Manual', 'CenterScreen', 'CenterOwner']
     };
+
+    /** Panels that accept toolbox drops. */
+    const DROP_PANELS = ['Grid', 'Canvas', 'StackPanel', 'WrapPanel', 'DockPanel'];
 
     // ------------------------------------------------------------------ state
 
     let xamlText = '';          // last text we parsed or produced
     let xamlDoc = null;         // XMLDocument of the current XAML
     let windowEl = null;        // root element (Window / UserControl / Page)
-    let layoutRoot = null;      // panel whose children we design (Grid/Canvas)
-    let layoutMode = 'Grid';    // 'Grid' (margins) or 'Canvas' (attached props)
+    let contentRoot = null;     // the window's single content element
+    let layoutRoot = null;      // top-level panel used for fallback drops
     let selected = null;        // currently selected XML element or null
+    let selectedPath = '';      // index path of the selection (survives re-parse)
     let visuals = [];           // [{ el, div }] rendered this pass
+    let styles = { byKey: new Map(), byType: new Map() }; // resolved <Style> resources
+    const uiTabs = new Map();   // TabControl path -> active tab index
     let activeTab = 'props';    // 'props' | 'events'
     let zoom = 1;
     let config = { gridSize: 8, snap: true, docName: 'Window.xaml' };
@@ -123,7 +153,7 @@
         bannerEl.hidden = true;
 
         if (!xamlText.trim()) {
-            xamlDoc = windowEl = layoutRoot = selected = null;
+            xamlDoc = windowEl = contentRoot = layoutRoot = selected = null;
             showBanner('This file is empty.', 'Insert starter window', insertStarterXaml);
             renderEmpty();
             return;
@@ -139,44 +169,135 @@
 
         xamlDoc = parsed;
         windowEl = xamlDoc.documentElement;
+        collectStyles();
         selected = restoreSelection();
 
         if (windowEl.localName === 'Application') {
-            layoutRoot = null;
+            contentRoot = layoutRoot = null;
             showBanner('App.xaml holds application resources, not a visual layout. Open a Window instead.',
                 '</> View Code', () => vscode.postMessage({ type: 'openCode' }));
             renderEmpty();
             return;
         }
 
-        // The design surface is the first panel child of the root element.
-        layoutRoot = firstElementChild(windowEl, ['Grid', 'Canvas', 'StackPanel', 'DockPanel', 'WrapPanel']);
-        layoutMode = layoutRoot && layoutRoot.localName === 'Canvas' ? 'Canvas' : 'Grid';
-
-        if (layoutRoot && !['Grid', 'Canvas'].includes(layoutRoot.localName)) {
-            showBanner(`Root panel is a ${layoutRoot.localName} — drag positioning writes margins, which ` +
-                'that panel may ignore. A Grid or Canvas root gives full designer support.');
-        }
+        // The window's content is its first non-property element child
+        // (skipping <Window.Resources> and friends).
+        contentRoot = elementChildren(windowEl)[0] ?? null;
+        layoutRoot = contentRoot && DROP_PANELS.includes(contentRoot.localName) ? contentRoot : null;
 
         render();
     }
 
-    /** First direct child element whose local name is in `names` (or any panel). */
-    function firstElementChild(parent, names) {
-        for (const child of parent.children) {
-            if (names.includes(child.localName)) { return child; }
-        }
-        // Fall back to the first element child at all (e.g. a Border wrapper).
-        return parent.firstElementChild ?? null;
+    /** Direct element children, excluding property elements like <Grid.RowDefinitions>. */
+    function elementChildren(parent) {
+        return [...parent.children].filter(c => !c.localName.includes('.'));
     }
 
-    /** After a re-parse, re-select the element with the previous x:Name. */
+    /** The property element <Type.Name> of `el`, or null. */
+    function propertyElement(el, name) {
+        return [...el.children].find(c => c.localName === `${el.localName}.${name}`) ?? null;
+    }
+
+    /** After a re-parse, re-select the element with the previous x:Name or path. */
     function restoreSelection() {
-        if (!selected || !xamlDoc) { return null; }
-        const name = getName(selected);
-        if (!name) { return null; }
-        for (const el of xamlDoc.getElementsByTagName('*')) {
-            if (getName(el) === name) { return el; }
+        if (!xamlDoc) { return null; }
+        if (selected) {
+            const name = getName(selected);
+            if (name) {
+                for (const el of xamlDoc.getElementsByTagName('*')) {
+                    if (getName(el) === name) { return el; }
+                }
+            }
+        }
+        return selectedPath ? elAtPath(selectedPath) : null;
+    }
+
+    // --------------------------------------------------------- element paths
+    // Re-parsing creates brand new DOM nodes, so per-element UI state (active
+    // tab, selection fallback) is keyed by the element's child-index path.
+
+    function pathOf(el) {
+        const idx = [];
+        let n = el;
+        while (n && n !== xamlDoc.documentElement) {
+            const p = n.parentNode;
+            if (!p || p.nodeType !== Node.ELEMENT_NODE) { break; }
+            idx.unshift([...p.children].indexOf(n));
+            n = p;
+        }
+        return idx.join('/');
+    }
+
+    function elAtPath(path) {
+        if (!xamlDoc) { return null; }
+        let n = xamlDoc.documentElement;
+        if (path === '') { return n; }
+        for (const i of path.split('/')) {
+            n = n.children[Number(i)];
+            if (!n) { return null; }
+        }
+        return n;
+    }
+
+    // ================================================================== styles
+    // Minimal StaticResource support: <Style x:Key TargetType> with
+    // <Setter Property Value> pairs from any *.Resources block under the root.
+    // Enough to preview styled TextBlocks/Borders the way VS renders them.
+
+    function collectStyles() {
+        styles = { byKey: new Map(), byType: new Map() };
+        if (!windowEl) { return; }
+        for (const child of windowEl.children) {
+            if (!child.localName.endsWith('.Resources')) { continue; }
+            collectStylesFrom(child);
+        }
+    }
+
+    function collectStylesFrom(container) {
+        for (const node of container.children) {
+            if (node.localName === 'ResourceDictionary') { collectStylesFrom(node); continue; }
+            if (node.localName !== 'Style') { continue; }
+            const setters = {};
+            for (const s of node.children) {
+                if (s.localName !== 'Setter') { continue; }
+                const p = (s.getAttribute('Property') || '').split('.').pop();
+                const v = s.getAttribute('Value');
+                if (p && v !== null && !v.includes('{')) { setters[p] = v; }
+            }
+            const basedOn = resourceKey(node.getAttribute('BasedOn'));
+            const entry = { setters, basedOn };
+            const key = node.getAttributeNS(X_NS, 'Key') || node.getAttribute('x:Key');
+            const target = (node.getAttribute('TargetType') || '').split(':').pop();
+            if (key) { styles.byKey.set(key, entry); }
+            else if (target) { styles.byType.set(target, entry); }
+        }
+    }
+
+    /** Extract KEY from "{StaticResource KEY}" / "{DynamicResource KEY}". */
+    function resourceKey(v) {
+        const m = /\{\s*(?:StaticResource|DynamicResource)\s+([^}]+?)\s*\}/.exec(v || '');
+        return m ? m[1] : null;
+    }
+
+    /**
+     * Effective value of a visual property: explicit attribute first, then the
+     * element's Style="{StaticResource ...}" setters, then the implicit style
+     * for its type. Returns null when nothing applies.
+     */
+    function styleProp(el, name) {
+        const attr = el.getAttribute(name);
+        if (attr !== null && attr !== '') { return attr; }
+
+        const seen = new Set();
+        let entry = null;
+        const key = resourceKey(el.getAttribute('Style'));
+        if (key) { entry = styles.byKey.get(key) ?? null; }
+        if (!entry) { entry = styles.byType.get(el.localName) ?? null; }
+        while (entry) {
+            if (name in entry.setters) { return entry.setters[name]; }
+            if (!entry.basedOn || seen.has(entry.basedOn)) { break; }
+            seen.add(entry.basedOn);
+            entry = styles.byKey.get(entry.basedOn) ?? null;
         }
         return null;
     }
@@ -201,60 +322,50 @@
         surfaceEl.style.height = `${winH - 32}px`; // minus mock title bar
         windowBox.style.transform = `scale(${zoom})`;
 
-        const bg = windowEl.getAttribute('Background') || layoutRoot?.getAttribute('Background');
-        surfaceEl.style.background = toCssColor(bg) || '#ffffff';
+        const bg = toCssColor(windowEl.getAttribute('Background')) || '#ffffff';
+        surfaceEl.style.background = bg;
+        surfaceEl.style.setProperty('--ff-surface-bg', bg);
 
         // Grid dots follow the snap size.
         surfaceEl.style.backgroundImage = config.snap
             ? 'radial-gradient(circle, rgba(0,0,0,0.18) 1px, transparent 1px)' : 'none';
         surfaceEl.style.backgroundSize = `${config.gridSize}px ${config.gridSize}px`;
 
-        // Controls.
+        // Content tree.
         surfaceEl.innerHTML = '';
         visuals = [];
-        if (layoutRoot) {
-            for (const el of layoutRoot.children) {
-                // Property elements like <Grid.RowDefinitions> are not controls.
-                if (el.localName.includes('.')) { continue; }
-                const div = buildControlVisual(el);
-                surfaceEl.appendChild(div);
-                visuals.push({ el, div });
-            }
+        if (contentRoot) {
+            surfaceEl.appendChild(renderElement(contentRoot, 'cell'));
         }
 
         drawSelection();
         renderPanel();
     }
 
-    /** Create the HTML approximation of one control. */
-    function buildControlVisual(el) {
+    /**
+     * Recursively create the HTML approximation of one element.
+     * `kind` says how the PARENT positions this child:
+     *   'cell'    single-cell grid (Window content, Border/GroupBox/TabItem child)
+     *   'grid'    Grid child (row/column placement + alignment)
+     *   'stack-v' vertical StackPanel child
+     *   'stack-h' horizontal StackPanel child
+     *   'wrap'    WrapPanel child
+     *   'canvas'  Canvas child (absolute Canvas.Left/Top)
+     *   'scroll'  ScrollViewer content (plain block flow)
+     */
+    function renderElement(el, kind) {
         const type = el.localName;
-        const box = getLayout(el);
-
         const div = document.createElement('div');
         div.className = `ff-control ff-c-${type.toLowerCase()}`;
-        div.style.left = `${box.x}px`;
-        div.style.top = `${box.y}px`;
-        div.style.width = `${box.w}px`;
-        div.style.height = `${box.h}px`;
 
-        // Shared visual attributes.
-        const bg = toCssColor(el.getAttribute('Background'));
-        const fg = toCssColor(el.getAttribute('Foreground'));
-        if (bg) { div.style.background = bg; }
-        if (fg) { div.style.color = fg; }
-        const fs = el.getAttribute('FontSize');
-        if (fs) { div.style.fontSize = `${fs}px`; }
-        const fw = el.getAttribute('FontWeight');
-        if (fw) { div.style.fontWeight = fw.toLowerCase() === 'bold' ? 'bold' : fw; }
-        const vis = el.getAttribute('Visibility');
-        if (vis && vis !== 'Visible') { div.classList.add('ff-hidden-control'); }
-        if (el.getAttribute('IsEnabled') === 'False') { div.classList.add('ff-disabled-control'); }
+        applyVisual(div, el);
+        placeChild(div, el, kind);
+        buildContent(div, el);
 
-        div.appendChild(buildInner(type, el));
+        if (movability(el)) { div.classList.add('ff-movable'); }
 
-        // Selection + drag behaviour.
         div.addEventListener('mousedown', e => {
+            if (e.button !== 0) { return; }
             e.preventDefault();
             e.stopPropagation();
             select(el);
@@ -266,14 +377,308 @@
             wireDefaultEvent(el);
         });
 
+        visuals.push({ el, div });
         return div;
+    }
+
+    /** Shared visual attributes (colors, fonts, visibility, enabled state). */
+    function applyVisual(div, el) {
+        const bg = toCssColor(styleProp(el, 'Background'));
+        const fg = toCssColor(styleProp(el, 'Foreground'));
+        if (bg) { div.style.background = bg; }
+        if (fg) { div.style.color = fg; }
+        const fs = num(styleProp(el, 'FontSize'), NaN);
+        if (Number.isFinite(fs)) { div.style.fontSize = `${fs}px`; }
+        const fw = styleProp(el, 'FontWeight');
+        if (fw) { div.style.fontWeight = fw.toLowerCase() === 'bold' ? 'bold' : fw; }
+        const fst = styleProp(el, 'FontStyle');
+        if (fst && fst.toLowerCase() === 'italic') { div.style.fontStyle = 'italic'; }
+        const ff = styleProp(el, 'FontFamily');
+        if (ff && !ff.includes('{')) { div.style.fontFamily = ff; }
+        const tt = el.getAttribute('ToolTip');
+        if (tt && !tt.includes('{')) { div.title = tt; }
+        const vis = styleProp(el, 'Visibility');
+        if (vis && vis !== 'Visible') { div.classList.add('ff-hidden-control'); }
+        if (el.getAttribute('IsEnabled') === 'False') { div.classList.add('ff-disabled-control'); }
+    }
+
+    /** Margin, size, and alignment inside the parent's layout model. */
+    function placeChild(div, el, kind) {
+        const m = parseMargin(styleProp(el, 'Margin'));
+        if (m.l || m.t || m.r || m.b) {
+            div.style.margin = `${m.t}px ${m.r}px ${m.b}px ${m.l}px`;
+        }
+
+        const w = num(styleProp(el, 'Width'), NaN);
+        const h = num(styleProp(el, 'Height'), NaN);
+        if (Number.isFinite(w)) { div.style.width = `${w}px`; }
+        if (Number.isFinite(h)) { div.style.height = `${h}px`; }
+        for (const [attr, css] of [['MinWidth', 'minWidth'], ['MinHeight', 'minHeight'],
+                                   ['MaxWidth', 'maxWidth'], ['MaxHeight', 'maxHeight']]) {
+            const v = num(styleProp(el, attr), NaN);
+            if (Number.isFinite(v)) { div.style[css] = `${v}px`; }
+        }
+
+        // WPF quirk: an explicit size turns default Stretch into Center.
+        let ha = styleProp(el, 'HorizontalAlignment') || 'Stretch';
+        let va = styleProp(el, 'VerticalAlignment') || 'Stretch';
+        if (Number.isFinite(w) && ha === 'Stretch') { ha = 'Center'; }
+        if (Number.isFinite(h) && va === 'Stretch') { va = 'Center'; }
+        const jh = alignCss(ha);
+        const jv = alignCss(va);
+
+        switch (kind) {
+            case 'grid': {
+                const r = int(el.getAttribute('Grid.Row'));
+                const c = int(el.getAttribute('Grid.Column'));
+                const rs = Math.max(1, int(el.getAttribute('Grid.RowSpan'), 1));
+                const cs = Math.max(1, int(el.getAttribute('Grid.ColumnSpan'), 1));
+                div.style.gridRow = `${r + 1} / span ${rs}`;
+                div.style.gridColumn = `${c + 1} / span ${cs}`;
+                div.style.justifySelf = jh;
+                div.style.alignSelf = jv;
+                break;
+            }
+            case 'cell':
+                div.style.gridRow = '1';
+                div.style.gridColumn = '1';
+                div.style.justifySelf = jh;
+                div.style.alignSelf = jv;
+                break;
+            case 'stack-v':
+                div.style.flex = '0 0 auto';
+                div.style.alignSelf = jh;
+                break;
+            case 'stack-h':
+                div.style.flex = '0 0 auto';
+                div.style.alignSelf = jv;
+                break;
+            case 'wrap':
+                div.style.flex = '0 0 auto';
+                div.style.alignSelf = jv === 'stretch' ? 'auto' : jv;
+                break;
+            case 'canvas':
+                div.style.position = 'absolute';
+                div.style.left = `${num(el.getAttribute('Canvas.Left'), 0)}px`;
+                div.style.top = `${num(el.getAttribute('Canvas.Top'), 0)}px`;
+                break;
+            case 'scroll':
+            default:
+                break; // plain block flow
+        }
+    }
+
+    function alignCss(a) {
+        switch (a) {
+            case 'Left': case 'Top': return 'start';
+            case 'Center': return 'center';
+            case 'Right': case 'Bottom': return 'end';
+            default: return 'stretch';
+        }
+    }
+
+    /** Per-type content: children for panels, chrome for leaf controls. */
+    function buildContent(div, el) {
+        const type = el.localName;
+        switch (type) {
+            case 'Grid': {
+                div.style.display = 'grid';
+                div.style.gridTemplateRows = gridTracks(el, 'Row');
+                div.style.gridTemplateColumns = gridTracks(el, 'Column');
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'grid')); }
+                break;
+            }
+            case 'StackPanel': {
+                const horiz = (styleProp(el, 'Orientation') || 'Vertical') === 'Horizontal';
+                div.style.display = 'flex';
+                div.style.flexDirection = horiz ? 'row' : 'column';
+                div.style.alignItems = 'stretch';
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, horiz ? 'stack-h' : 'stack-v')); }
+                break;
+            }
+            case 'WrapPanel': {
+                const vert = (styleProp(el, 'Orientation') || 'Horizontal') === 'Vertical';
+                div.style.display = 'flex';
+                div.style.flexWrap = 'wrap';
+                div.style.flexDirection = vert ? 'column' : 'row';
+                div.style.alignContent = 'flex-start';
+                div.style.alignItems = 'flex-start';
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'wrap')); }
+                break;
+            }
+            case 'DockPanel':
+                buildDock(div, el);
+                break;
+            case 'Canvas': {
+                if (!div.style.position) { div.style.position = 'relative'; }
+                div.style.overflow = 'hidden';
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'canvas')); }
+                break;
+            }
+            case 'ScrollViewer': {
+                const vs = el.getAttribute('VerticalScrollBarVisibility') || 'Visible';
+                const hs = el.getAttribute('HorizontalScrollBarVisibility') || 'Disabled';
+                div.style.overflowY = (vs === 'Disabled' || vs === 'Hidden') ? 'hidden' : 'auto';
+                div.style.overflowX = (hs === 'Disabled' || hs === 'Hidden') ? 'hidden' : 'auto';
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'scroll')); }
+                break;
+            }
+            case 'Border': {
+                applyBorder(div, el);
+                singleCell(div);
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'cell')); }
+                break;
+            }
+            case 'GroupBox': {
+                div.classList.add('ff-look-gb');
+                const header = document.createElement('div');
+                header.className = 'ff-gb-header';
+                header.textContent = el.getAttribute('Header')
+                    || collapse(propertyElement(el, 'Header')?.textContent) || 'GroupBox';
+                const content = document.createElement('div');
+                content.className = 'ff-gb-content';
+                for (const c of elementChildren(el)) { content.appendChild(renderElement(c, 'cell')); }
+                div.append(header, content);
+                break;
+            }
+            case 'TabControl':
+                buildTabControl(div, el);
+                break;
+            case 'GridSplitter':
+                div.classList.add('ff-look-splitter');
+                break;
+            case 'Separator':
+                div.classList.add('ff-look-separator');
+                break;
+            case 'TextBlock': {
+                const inner = document.createElement('div');
+                inner.className = 'ff-inner ff-look-text';
+                inner.textContent = el.getAttribute('Text') ?? collapse(el.textContent);
+                const wrapMode = styleProp(el, 'TextWrapping');
+                if (wrapMode && wrapMode !== 'NoWrap') { inner.style.whiteSpace = 'normal'; }
+                const ta = styleProp(el, 'TextAlignment');
+                if (ta) { inner.style.textAlign = ta.toLowerCase(); }
+                div.appendChild(inner);
+                break;
+            }
+            default: {
+                // Leaf control chrome; nested element content renders inside it.
+                const inner = buildInner(type, el);
+                const kids = elementChildren(el).filter(c => c.localName !== 'ListBoxItem');
+                if (kids.length) {
+                    inner.textContent = '';
+                    singleCell(inner);
+                    for (const c of kids) { inner.appendChild(renderElement(c, 'cell')); }
+                }
+                div.appendChild(inner);
+            }
+        }
+    }
+
+    /** Turn a container div into a single-cell CSS grid (stretchable child). */
+    function singleCell(div) {
+        div.style.display = 'grid';
+        div.style.gridTemplateRows = 'minmax(0, 1fr)';
+        div.style.gridTemplateColumns = 'minmax(0, 1fr)';
+    }
+
+    /** grid-template value for a Grid's Row/Column definitions. */
+    function gridTracks(el, axis) {
+        const defs = propertyElement(el, `${axis}Definitions`);
+        if (!defs) { return 'minmax(0, 1fr)'; }
+        const sizeAttr = axis === 'Row' ? 'Height' : 'Width';
+        const out = [];
+        for (const d of defs.children) {
+            if (d.localName !== `${axis}Definition`) { continue; }
+            out.push(trackSize(d.getAttribute(sizeAttr) || '*'));
+        }
+        return out.join(' ') || 'minmax(0, 1fr)';
+    }
+
+    function trackSize(v) {
+        v = v.trim();
+        if (/^auto$/i.test(v)) { return 'auto'; }
+        const star = /^(\d*\.?\d*)\*$/.exec(v);
+        if (star) { return `minmax(0, ${parseFloat(star[1] || '1') || 1}fr)`; }
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? `${n}px` : 'auto';
+    }
+
+    /**
+     * DockPanel approximation: each docked child slices off one side of the
+     * remaining space via a nested flex container; the last child fills what
+     * is left (unless LastChildFill="False").
+     */
+    function buildDock(div, el) {
+        const kids = elementChildren(el);
+        const lastFill = (el.getAttribute('LastChildFill') ?? 'True') !== 'False';
+        let host = div;
+        kids.forEach((child, i) => {
+            const isLast = i === kids.length - 1;
+            if (isLast && lastFill) {
+                singleCell(host);
+                host.appendChild(renderElement(child, 'cell'));
+                return;
+            }
+            const dock = child.getAttribute('DockPanel.Dock') || 'Left';
+            const vertical = dock === 'Top' || dock === 'Bottom';
+            host.style.display = 'flex';
+            host.style.flexDirection = (vertical ? 'column' : 'row') +
+                (dock === 'Right' || dock === 'Bottom' ? '-reverse' : '');
+            const v = renderElement(child, vertical ? 'stack-v' : 'stack-h');
+            v.style.flex = '0 0 auto';
+            const rest = document.createElement('div');
+            rest.className = 'ff-dockrest';
+            host.append(v, rest);
+            host = rest;
+        });
+    }
+
+    /** TabControl: clickable header strip + the active TabItem's content. */
+    function buildTabControl(div, el) {
+        div.classList.add('ff-look-tabs');
+        div.style.display = 'flex';
+        div.style.flexDirection = 'column';
+
+        const items = elementChildren(el).filter(c => c.localName === 'TabItem');
+        const key = pathOf(el);
+        let active = uiTabs.get(key) ?? 0;
+        if (active >= items.length) { active = 0; }
+
+        const strip = document.createElement('div');
+        strip.className = 'ff-tab-strip';
+        items.forEach((ti, i) => {
+            const head = document.createElement('div');
+            head.className = 'ff-tab-head' + (i === active ? ' active' : '');
+            head.textContent = ti.getAttribute('Header')
+                || collapse(propertyElement(ti, 'Header')?.textContent) || `Tab ${i + 1}`;
+            head.addEventListener('mousedown', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                uiTabs.set(key, i);
+                selected = ti;
+                selectedPath = pathOf(ti);
+                render();
+            });
+            strip.appendChild(head);
+        });
+
+        const content = document.createElement('div');
+        content.className = 'ff-tab-content';
+        const activeItem = items[active];
+        if (activeItem) {
+            const cc = elementChildren(activeItem)[0];
+            if (cc) { content.appendChild(renderElement(cc, 'cell')); }
+            visuals.push({ el: activeItem, div: content });
+        }
+        div.append(strip, content);
     }
 
     /** Inner markup that mimics the WPF control's default look. */
     function buildInner(type, el) {
         const inner = document.createElement('div');
         inner.className = 'ff-inner';
-        const content = el.getAttribute('Content') ?? '';
+        const content = el.getAttribute('Content') ?? collapse(el.textContent);
         const text = el.getAttribute('Text') ?? '';
 
         switch (type) {
@@ -281,18 +686,24 @@
                 inner.classList.add('ff-look-button');
                 inner.textContent = content || 'Button';
                 break;
-            case 'Label':
+            case 'Label': {
                 inner.classList.add('ff-look-label');
                 inner.textContent = content || '';
+                const pad = styleProp(el, 'Padding');
+                const p = parseMargin(pad || '5');
+                inner.style.padding = `${p.t}px ${p.r}px ${p.b}px ${p.l}px`;
                 break;
-            case 'TextBlock':
-                inner.classList.add('ff-look-label');
-                inner.textContent = text || '';
-                break;
-            case 'TextBox':
+            }
+            case 'TextBox': {
                 inner.classList.add('ff-look-input');
+                // Multi-line-ish boxes read better top-left aligned.
+                if (el.getAttribute('TextWrapping') || el.getAttribute('AcceptsReturn') === 'True'
+                    || el.getAttribute('VerticalScrollBarVisibility')) {
+                    inner.classList.add('ff-look-textarea');
+                }
                 inner.textContent = text;
                 break;
+            }
             case 'PasswordBox':
                 inner.classList.add('ff-look-input');
                 inner.textContent = '••••••';
@@ -340,14 +751,6 @@
                 inner.innerHTML = `<div class="ff-slider-track"></div><div class="ff-slider-thumb" style="left:${pct}%"></div>`;
                 break;
             }
-            case 'Border':
-                inner.classList.add('ff-look-border');
-                applyBorder(inner, el);
-                break;
-            case 'GroupBox':
-                inner.classList.add('ff-look-groupbox');
-                inner.innerHTML = `<span class="ff-group-header">${escapeHtml(el.getAttribute('Header') || 'GroupBox')}</span>`;
-                break;
             case 'DatePicker':
                 inner.classList.add('ff-look-input');
                 inner.innerHTML = 'Select a date <span class="ff-combo-arrow">📅</span>';
@@ -360,12 +763,19 @@
         return inner;
     }
 
-    function applyBorder(inner, el) {
-        const brush = toCssColor(el.getAttribute('BorderBrush')) || '#808080';
-        const thick = (el.getAttribute('BorderThickness') || '1').split(',')[0];
-        const radius = (el.getAttribute('CornerRadius') || '0').split(',')[0];
-        inner.style.border = `${thick}px solid ${brush}`;
-        inner.style.borderRadius = `${radius}px`;
+    function applyBorder(target, el) {
+        const brush = toCssColor(styleProp(el, 'BorderBrush')) || '#808080';
+        const t = parseMargin(styleProp(el, 'BorderThickness') || '1');
+        target.style.borderStyle = 'solid';
+        target.style.borderColor = brush;
+        target.style.borderWidth = `${t.t}px ${t.r}px ${t.b}px ${t.l}px`;
+        const radius = (styleProp(el, 'CornerRadius') || '0').split(',')[0];
+        target.style.borderRadius = `${radius}px`;
+        const pad = styleProp(el, 'Padding');
+        if (pad) {
+            const p = parseMargin(pad);
+            target.style.padding = `${p.t}px ${p.r}px ${p.b}px ${p.l}px`;
+        }
     }
 
     function progressPct(el) {
@@ -379,8 +789,38 @@
 
     function select(el) {
         selected = el;
+        selectedPath = el ? pathOf(el) : '';
         drawSelection();
         renderPanel();
+    }
+
+    /** Position/size of a rendered div relative to the design surface. */
+    function rectOf(div) {
+        const s = surfaceEl.getBoundingClientRect();
+        const r = div.getBoundingClientRect();
+        return {
+            x: (r.left - s.left) / zoom,
+            y: (r.top - s.top) / zoom,
+            w: r.width / zoom,
+            h: r.height / zoom
+        };
+    }
+
+    /**
+     * How the selected element may be dragged, if at all:
+     *   'canvas'  parent is a Canvas — writes Canvas.Left/Top
+     *   'margin'  parent is a Grid and the element is already absolutely
+     *             placed VS-style (Left/Top alignment) — writes Margin
+     *   null      layout is owned by the parent panel (StackPanel, cell, ...)
+     */
+    function movability(el) {
+        const p = el.parentNode;
+        if (!p || p.nodeType !== Node.ELEMENT_NODE) { return null; }
+        if (p.localName === 'Canvas') { return 'canvas'; }
+        if (p.localName === 'Grid'
+            && el.getAttribute('HorizontalAlignment') === 'Left'
+            && el.getAttribute('VerticalAlignment') === 'Top') { return 'margin'; }
+        return null;
     }
 
     function drawSelection() {
@@ -392,7 +832,7 @@
             return;
         }
 
-        const box = getLayout(selected);
+        const box = rectOf(hit.div);
         const sel = document.createElement('div');
         sel.className = 'ff-selection';
         sel.style.left = `${box.x - 1}px`;
@@ -419,22 +859,41 @@
         }
         surfaceEl.appendChild(sel);
 
-        setStatus(`${getName(selected) || selected.localName} — ${Math.round(box.w)}×${Math.round(box.h)} at (${Math.round(box.x)}, ${Math.round(box.y)})`);
+        const mode = movability(selected);
+        const place = mode ? `at (${Math.round(box.x)}, ${Math.round(box.y)})`
+            : `— layout managed by ${selected.parentNode?.localName ?? 'parent'}`;
+        setStatus(`${getName(selected) || selected.localName} — ${Math.round(box.w)}×${Math.round(box.h)} ${place}`);
     }
 
     // Clicking empty canvas selects the window itself.
     surfaceEl.addEventListener('mousedown', () => {
-        selected = null;
-        drawSelection();
-        renderPanel();
+        select(null);
     });
+
+    // Keep the overlay glued to the control when an inner ScrollViewer scrolls.
+    surfaceEl.addEventListener('scroll', () => drawSelection(), true);
 
     // ------------------------------------------------------------ move/resize
 
     function startMove(e, el, div) {
-        const start = getLayout(el);
+        const mode = movability(el);
+        if (!mode) { return; } // selection only — parent panel owns the position
+
+        const m0 = parseMargin(el.getAttribute('Margin'));
+        const start = mode === 'canvas'
+            ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
+            : { x: m0.l, y: m0.t };
         const sx = e.clientX, sy = e.clientY;
         let moved = false;
+
+        const apply = (nx, ny) => {
+            if (mode === 'canvas') {
+                div.style.left = `${nx}px`;
+                div.style.top = `${ny}px`;
+            } else {
+                div.style.margin = `${ny}px ${m0.r}px ${m0.b}px ${nx}px`;
+            }
+        };
 
         const onMove = ev => {
             const dx = (ev.clientX - sx) / zoom;
@@ -443,18 +902,22 @@
             moved = true;
             const nx = snap(Math.max(0, start.x + dx));
             const ny = snap(Math.max(0, start.y + dy));
-            div.style.left = `${nx}px`;
-            div.style.top = `${ny}px`;
-            positionSelectionOverlay(nx, ny, start.w, start.h);
+            apply(nx, ny);
+            drawSelectionAround(div);
             setStatus(`${getName(el) || el.localName} — (${nx}, ${ny})`);
         };
         const onUp = ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             if (!moved) { return; }
-            const dx = (ev.clientX - sx) / zoom;
-            const dy = (ev.clientY - sy) / zoom;
-            setLayout(el, snap(Math.max(0, start.x + dx)), snap(Math.max(0, start.y + dy)), start.w, start.h);
+            const nx = snap(Math.max(0, start.x + (ev.clientX - sx) / zoom));
+            const ny = snap(Math.max(0, start.y + (ev.clientY - sy) / zoom));
+            if (mode === 'canvas') {
+                el.setAttribute('Canvas.Left', String(nx));
+                el.setAttribute('Canvas.Top', String(ny));
+            } else {
+                el.setAttribute('Margin', `${nx},${ny},${m0.r},${m0.b}`);
+            }
             commit();
         };
         document.addEventListener('mousemove', onMove);
@@ -462,37 +925,55 @@
     }
 
     function startResize(e, el, dir) {
-        const start = getLayout(el);
+        const hit = visuals.find(v => v.el === el);
+        if (!hit) { return; }
+        const start = rectOf(hit.div);
+        const mode = movability(el);
+        const m0 = parseMargin(el.getAttribute('Margin'));
+        const pos0 = mode === 'canvas'
+            ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
+            : { x: m0.l, y: m0.t };
         const sx = e.clientX, sy = e.clientY;
 
         const compute = ev => {
             const dx = (ev.clientX - sx) / zoom;
             const dy = (ev.clientY - sy) / zoom;
-            let { x, y, w, h } = start;
+            let w = start.w, h = start.h, px = pos0.x, py = pos0.y;
             if (dir.includes('e')) { w = Math.max(10, start.w + dx); }
             if (dir.includes('s')) { h = Math.max(10, start.h + dy); }
-            if (dir.includes('w')) { w = Math.max(10, start.w - dx); x = start.x + start.w - w; }
-            if (dir.includes('n')) { h = Math.max(10, start.h - dy); y = start.y + start.h - h; }
-            return { x: snap(Math.max(0, x)), y: snap(Math.max(0, y)), w: snap(w), h: snap(h) };
+            if (dir.includes('w')) { w = Math.max(10, start.w - dx); if (mode) { px = pos0.x + start.w - w; } }
+            if (dir.includes('n')) { h = Math.max(10, start.h - dy); if (mode) { py = pos0.y + start.h - h; } }
+            return {
+                w: snap(w), h: snap(h),
+                px: snap(Math.max(0, px)), py: snap(Math.max(0, py))
+            };
         };
 
         const onMove = ev => {
             const b = compute(ev);
-            const hit = visuals.find(v => v.el === el);
-            if (hit) {
-                hit.div.style.left = `${b.x}px`;
-                hit.div.style.top = `${b.y}px`;
-                hit.div.style.width = `${b.w}px`;
-                hit.div.style.height = `${b.h}px`;
+            hit.div.style.width = `${b.w}px`;
+            hit.div.style.height = `${b.h}px`;
+            if (mode === 'canvas') {
+                hit.div.style.left = `${b.px}px`;
+                hit.div.style.top = `${b.py}px`;
+            } else if (mode === 'margin') {
+                hit.div.style.margin = `${b.py}px ${m0.r}px ${m0.b}px ${b.px}px`;
             }
-            positionSelectionOverlay(b.x, b.y, b.w, b.h);
+            drawSelectionAround(hit.div);
             setStatus(`${getName(el) || el.localName} — ${b.w}×${b.h}`);
         };
         const onUp = ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             const b = compute(ev);
-            setLayout(el, b.x, b.y, b.w, b.h);
+            el.setAttribute('Width', String(b.w));
+            el.setAttribute('Height', String(b.h));
+            if (mode === 'canvas') {
+                el.setAttribute('Canvas.Left', String(b.px));
+                el.setAttribute('Canvas.Top', String(b.py));
+            } else if (mode === 'margin') {
+                el.setAttribute('Margin', `${b.px},${b.py},${m0.r},${m0.b}`);
+            }
             commit();
         };
         document.addEventListener('mousemove', onMove);
@@ -500,53 +981,14 @@
     }
 
     /** Live-update the overlay during a drag without a full re-render. */
-    function positionSelectionOverlay(x, y, w, h) {
+    function drawSelectionAround(div) {
         const sel = surfaceEl.querySelector('.ff-selection');
-        if (sel) {
-            sel.style.left = `${x - 1}px`;
-            sel.style.top = `${y - 1}px`;
-            sel.style.width = `${w}px`;
-            sel.style.height = `${h}px`;
-        }
-    }
-
-    // ----------------------------------------------------------------- layout
-
-    /** Effective x/y/w/h of a control on the design surface. */
-    function getLayout(el) {
-        const def = CONTROLS[el.localName] ?? { w: 100, h: 30 };
-        let x, y;
-        if (layoutMode === 'Canvas') {
-            x = num(el.getAttribute('Canvas.Left'), 0);
-            y = num(el.getAttribute('Canvas.Top'), 0);
-        } else {
-            const m = parseMargin(el.getAttribute('Margin'));
-            x = m.l;
-            y = m.t;
-        }
-        return {
-            x, y,
-            w: num(el.getAttribute('Width'), def.w),
-            h: num(el.getAttribute('Height'), def.h)
-        };
-    }
-
-    /**
-     * Write position/size back to the element, using the same convention the
-     * Visual Studio designer uses for a Grid root (top-left alignment plus
-     * margin), or Canvas attached properties for a Canvas root.
-     */
-    function setLayout(el, x, y, w, h) {
-        if (layoutMode === 'Canvas') {
-            el.setAttribute('Canvas.Left', String(x));
-            el.setAttribute('Canvas.Top', String(y));
-        } else {
-            el.setAttribute('HorizontalAlignment', 'Left');
-            el.setAttribute('VerticalAlignment', 'Top');
-            el.setAttribute('Margin', `${x},${y},0,0`);
-        }
-        el.setAttribute('Width', String(w));
-        el.setAttribute('Height', String(h));
+        if (!sel) { return; }
+        const b = rectOf(div);
+        sel.style.left = `${b.x - 1}px`;
+        sel.style.top = `${b.y - 1}px`;
+        sel.style.width = `${b.w}px`;
+        sel.style.height = `${b.h}px`;
     }
 
     function parseMargin(str) {
@@ -590,33 +1032,66 @@
         if (!type || !xamlDoc || !windowEl) { return; }
         e.preventDefault();
 
-        if (!ensureLayoutRoot()) { return; }
+        // Drop into the deepest panel under the cursor; fall back to the root.
+        let target = null;
+        let node = document.elementFromPoint(e.clientX, e.clientY);
+        while (node && node !== surfaceEl) {
+            const hit = visuals.find(v => v.div === node);
+            if (hit && DROP_PANELS.includes(hit.el.localName)) { target = hit; break; }
+            node = node.parentElement;
+        }
+        if (!target) {
+            if (!ensureLayoutRoot()) { return; }
+            const rootHit = visuals.find(v => v.el === layoutRoot);
+            target = rootHit ?? { el: layoutRoot, div: surfaceEl };
+        }
 
-        const rect = surfaceEl.getBoundingClientRect();
         const def = CONTROLS[type];
-        const x = snap(Math.max(0, (e.clientX - rect.left) / zoom - def.w / 2));
-        const y = snap(Math.max(0, (e.clientY - rect.top) / zoom - def.h / 2));
-
-        // Build the new control element with defaults + a fresh unique name.
         const el = xamlDoc.createElementNS(PRES_NS, type);
         setName(el, uniqueName(type));
         for (const [k, v] of Object.entries(def.attrs)) {
             el.setAttribute(k, v);
         }
-        setLayout(el, x, y, def.w, def.h);
-        layoutRoot.appendChild(el);
+        el.setAttribute('Width', String(def.w));
+        el.setAttribute('Height', String(def.h));
+
+        const panel = target.el.localName;
+        if (panel === 'Grid' || panel === 'Canvas') {
+            const box = target.div === surfaceEl
+                ? { x: 0, y: 0 }
+                : rectOf(target.div);
+            const sRect = surfaceEl.getBoundingClientRect();
+            const x = snap(Math.max(0, (e.clientX - sRect.left) / zoom - box.x - def.w / 2));
+            const y = snap(Math.max(0, (e.clientY - sRect.top) / zoom - box.y - def.h / 2));
+            if (panel === 'Canvas') {
+                el.setAttribute('Canvas.Left', String(x));
+                el.setAttribute('Canvas.Top', String(y));
+            } else {
+                el.setAttribute('HorizontalAlignment', 'Left');
+                el.setAttribute('VerticalAlignment', 'Top');
+                el.setAttribute('Margin', `${x},${y},0,0`);
+            }
+        }
+        // Stack/Wrap/Dock panels position their own children — just append.
+        target.el.appendChild(el);
 
         selected = el;
+        selectedPath = null;
         commit();
+        selectedPath = pathOf(selected);
     });
 
     /** Create a root Grid on demand so dropping onto an empty Window works. */
     function ensureLayoutRoot() {
         if (layoutRoot) { return true; }
         if (!windowEl || windowEl.localName === 'Application') { return false; }
+        if (contentRoot) {
+            setStatus(`Cannot drop here — the window content is a ${contentRoot.localName}.`);
+            return false;
+        }
         layoutRoot = xamlDoc.createElementNS(PRES_NS, 'Grid');
         windowEl.appendChild(layoutRoot);
-        layoutMode = 'Grid';
+        contentRoot = layoutRoot;
         return true;
     }
 
@@ -679,7 +1154,7 @@
         }
         const names = isWindow
             ? WINDOW_PROPS
-            : [...(CONTROLS[el.localName]?.props ?? []), ...COMMON_PROPS];
+            : [...(CONTROLS[el.localName]?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS];
 
         for (const prop of names) {
             propsBody.appendChild(propRow(prop, el.getAttribute(prop) ?? '', v => {
@@ -862,34 +1337,54 @@
             deleteSelected();
             e.preventDefault();
         } else if (e.key === 'Escape') {
-            selected = null;
-            drawSelection();
-            renderPanel();
+            select(null);
         } else if (e.key.startsWith('Arrow')) {
+            const mode = movability(selected);
+            if (!mode) { return; }
             const step = e.shiftKey ? config.gridSize : 1;
-            const b = getLayout(selected);
             const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
             const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-            setLayout(selected, Math.max(0, b.x + dx), Math.max(0, b.y + dy), b.w, b.h);
+            if (mode === 'canvas') {
+                el2attr(selected, 'Canvas.Left', dx);
+                el2attr(selected, 'Canvas.Top', dy);
+            } else {
+                const m = parseMargin(selected.getAttribute('Margin'));
+                selected.setAttribute('Margin',
+                    `${Math.max(0, m.l + dx)},${Math.max(0, m.t + dy)},${m.r},${m.b}`);
+            }
             commit();
             e.preventDefault();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-            // Duplicate: clone, offset, rename.
+            // Duplicate: clone, offset, rename, insert next to the original.
             const clone = selected.cloneNode(true);
             setName(clone, uniqueName(selected.localName));
-            const b = getLayout(selected);
-            layoutRoot.appendChild(clone);
+            const mode = movability(selected);
+            if (mode === 'canvas') {
+                el2attr(clone, 'Canvas.Left', config.gridSize);
+                el2attr(clone, 'Canvas.Top', config.gridSize);
+            } else if (mode === 'margin') {
+                const m = parseMargin(clone.getAttribute('Margin'));
+                clone.setAttribute('Margin', `${m.l + config.gridSize},${m.t + config.gridSize},${m.r},${m.b}`);
+            }
+            selected.parentNode.insertBefore(clone, selected.nextSibling);
             selected = clone;
-            setLayout(clone, b.x + config.gridSize, b.y + config.gridSize, b.w, b.h);
             commit();
+            selectedPath = pathOf(clone);
             e.preventDefault();
         }
     });
+
+    /** Add `delta` to a numeric attribute (missing counts as 0, floor 0). */
+    function el2attr(el, attr, delta) {
+        if (!delta) { return; }
+        el.setAttribute(attr, String(Math.max(0, num(el.getAttribute(attr), 0) + delta)));
+    }
 
     function deleteSelected() {
         if (!selected) { return; }
         selected.remove();
         selected = null;
+        selectedPath = '';
         commit();
     }
 
@@ -956,6 +1451,16 @@
     function num(v, fallback) {
         const n = parseFloat(v);
         return Number.isFinite(n) ? n : fallback;
+    }
+
+    function int(v, fallback = 0) {
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? n : fallback;
+    }
+
+    /** Collapse XML text runs ("  How to\n   Repair " -> "How to Repair"). */
+    function collapse(s) {
+        return (s || '').replace(/\s+/g, ' ').trim();
     }
 
     /** Translate a XAML brush value to CSS ("#AARRGGBB" -> rgba, names pass through). */
