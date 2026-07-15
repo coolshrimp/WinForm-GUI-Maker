@@ -1,0 +1,14 @@
+# Build output
+out/
+dist/
+*.vsix
+
+# Dependencies
+node_modules/
+
+# Test artifacts
+.vscode-test/
+
+# OS noise
+Thumbs.db
+.DS_Store

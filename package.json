@@ -1,0 +1,161 @@
+{
+    "name": "formforge",
+    "displayName": "FormForge — .NET Form Designer",
+    "description": "Visual drag-and-drop designer, build/run/debug/release buttons, and project scaffolding for .NET desktop apps (WPF & WinForms) inside VS Code.",
+    "version": "0.1.0",
+    "publisher": "formforge",
+    "license": "MIT",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Visualization",
+        "Programming Languages",
+        "Other"
+    ],
+    "keywords": [
+        "wpf",
+        "xaml",
+        "winforms",
+        "designer",
+        "dotnet",
+        "form designer",
+        "gui builder"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "customEditors": [
+            {
+                "viewType": "formforge.designer",
+                "displayName": "FormForge Designer",
+                "selector": [
+                    {
+                        "filenamePattern": "*.xaml"
+                    }
+                ],
+                "priority": "option"
+            }
+        ],
+        "commands": [
+            {
+                "command": "formforge.newProject",
+                "title": "New .NET Desktop Project",
+                "category": "FormForge",
+                "icon": "$(new-folder)"
+            },
+            {
+                "command": "formforge.openDesigner",
+                "title": "Open in Designer",
+                "category": "FormForge",
+                "icon": "$(layout)"
+            },
+            {
+                "command": "formforge.openCodeBeside",
+                "title": "View XAML Source (Beside)",
+                "category": "FormForge",
+                "icon": "$(code)"
+            },
+            {
+                "command": "formforge.build",
+                "title": "Build",
+                "category": "FormForge",
+                "icon": "$(tools)"
+            },
+            {
+                "command": "formforge.run",
+                "title": "Run App",
+                "category": "FormForge",
+                "icon": "$(play)"
+            },
+            {
+                "command": "formforge.debug",
+                "title": "Debug App",
+                "category": "FormForge",
+                "icon": "$(debug-alt)"
+            },
+            {
+                "command": "formforge.release",
+                "title": "Build Release (Publish)",
+                "category": "FormForge",
+                "icon": "$(package)"
+            },
+            {
+                "command": "formforge.stop",
+                "title": "Stop Running App",
+                "category": "FormForge",
+                "icon": "$(debug-stop)"
+            }
+        ],
+        "menus": {
+            "editor/title": [
+                {
+                    "command": "formforge.openDesigner",
+                    "when": "resourceExtname == .xaml && activeCustomEditorId != formforge.designer",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "formforge.openCodeBeside",
+                    "when": "activeCustomEditorId == formforge.designer",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "formforge.run",
+                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|csproj)$/",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "formforge.debug",
+                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|csproj)$/",
+                    "group": "navigation@3"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "command": "formforge.openDesigner",
+                    "when": "resourceExtname == .xaml",
+                    "group": "navigation@10"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "formforge.openDesigner",
+                    "when": "resourceExtname == .xaml"
+                },
+                {
+                    "command": "formforge.openCodeBeside",
+                    "when": "activeCustomEditorId == formforge.designer"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "FormForge",
+            "properties": {
+                "formforge.gridSize": {
+                    "type": "number",
+                    "default": 8,
+                    "minimum": 1,
+                    "maximum": 64,
+                    "description": "Snap grid size (pixels) on the design canvas."
+                },
+                "formforge.snapToGrid": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Snap control positions and sizes to the grid."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "vscode:prepublish": "npm run compile"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.0",
+        "@types/vscode": "^1.85.0",
+        "typescript": "^5.4.0"
+    }
+}

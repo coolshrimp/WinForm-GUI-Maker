@@ -1,0 +1,8 @@
+# Files excluded from the packaged VSIX
+.vscode/**
+.gitignore
+src/**
+docs/**
+tsconfig.json
+**/*.map
+node_modules/**
