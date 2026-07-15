@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Window frame with title bar -->
+  <rect x="2.5" y="3.5" width="19" height="17" rx="1.6"/>
+  <line x1="2.5" y1="8" x2="21.5" y2="8"/>
+  <!-- Title bar buttons -->
+  <line x1="16.4" y1="5.75" x2="16.4" y2="5.76"/>
+  <line x1="19" y1="5.75" x2="19" y2="5.76"/>
+  <!-- A button and a text field on the form -->
+  <rect x="5.5" y="10.75" width="6.5" height="3.5" rx="0.75"/>
+  <line x1="15" y1="12.5" x2="18.5" y2="12.5"/>
+  <line x1="5.5" y1="17.25" x2="13" y2="17.25"/>
+</svg>

@@ -1,7 +1,8 @@
-// FormForge — extension entry point.
+// UI Maker — extension entry point.
 //
 // Responsibilities:
 //   * Register the visual designer (custom editor for *.xaml files).
+//   * Register the UI Maker activity-bar side panel.
 //   * Register the Build / Run / Debug / Release / Stop commands.
 //   * Show status-bar buttons whenever the workspace contains a .csproj.
 //   * Register the "New .NET Desktop Project" scaffolding command.
@@ -10,6 +11,7 @@ import * as vscode from 'vscode';
 import { DesignerProvider } from './designerProvider';
 import { DotnetTools } from './dotnetTools';
 import { newProject } from './scaffold';
+import { registerSidebar } from './sidebar';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
 const statusItems: vscode.StatusBarItem[] = [];
@@ -21,6 +23,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // --- Visual designer (custom editor for .xaml) -------------------------
     context.subscriptions.push(DesignerProvider.register(context));
 
+    // --- Activity-bar side panel --------------------------------------------
+    registerSidebar(context);
+
     // --- Commands -----------------------------------------------------------
     context.subscriptions.push(
         vscode.commands.registerCommand('formforge.newProject', () => newProject()),
@@ -29,7 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('formforge.openDesigner', (uri?: vscode.Uri) => {
             const target = uri ?? vscode.window.activeTextEditor?.document.uri;
             if (!target || !target.fsPath.toLowerCase().endsWith('.xaml')) {
-                vscode.window.showWarningMessage('FormForge: select a .xaml file to open in the designer.');
+                vscode.window.showWarningMessage('UI Maker: select a .xaml file to open in the designer.');
                 return;
             }
             return vscode.commands.executeCommand('vscode.openWith', target, DesignerProvider.viewType);
@@ -72,11 +77,11 @@ export function deactivate(): void {
 /** Build the row of status-bar buttons (right-to-left priority ordering). */
 function createStatusItems(context: vscode.ExtensionContext): void {
     const defs: Array<[string, string, string]> = [
-        ['formforge.build',   '$(tools) Build',      'FormForge: dotnet build'],
-        ['formforge.run',     '$(play) Run',         'FormForge: build and launch the app'],
-        ['formforge.debug',   '$(debug-alt) Debug',  'FormForge: build and debug the app'],
-        ['formforge.release', '$(package) Release',  'FormForge: dotnet publish -c Release'],
-        ['formforge.stop',    '$(debug-stop)',       'FormForge: stop the running app']
+        ['formforge.build',   '$(tools) Build',      'UI Maker: dotnet build'],
+        ['formforge.run',     '$(play) Run',         'UI Maker: build and launch the app'],
+        ['formforge.debug',   '$(debug-alt) Debug',  'UI Maker: build and debug the app'],
+        ['formforge.release', '$(package) Release',  'UI Maker: dotnet publish -c Release'],
+        ['formforge.stop',    '$(debug-stop)',       'UI Maker: stop the running app']
     ];
     let priority = 100;
     for (const [command, text, tooltip] of defs) {

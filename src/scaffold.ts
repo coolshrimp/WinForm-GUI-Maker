@@ -1,4 +1,4 @@
-// FormForge — "New .NET Desktop Project" scaffolding.
+// UI Maker — "New .NET Desktop Project" scaffolding.
 //
 // Wraps `dotnet new wpf|winforms` behind a short wizard:
 // template -> project name -> destination folder -> open the result.
@@ -54,7 +54,7 @@ export async function newProject(): Promise<void> {
 
     const target = path.join(picked[0].fsPath, name);
     if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
-        vscode.window.showErrorMessage(`FormForge: "${target}" already exists and is not empty.`);
+        vscode.window.showErrorMessage(`UI Maker: "${target}" already exists and is not empty.`);
         return;
     }
 
@@ -65,7 +65,7 @@ export async function newProject(): Promise<void> {
             () => execFile('dotnet', ['new', template.id, '-n', name, '-o', target])
         );
     } catch (err) {
-        vscode.window.showErrorMessage(`FormForge: dotnet new failed — ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(`UI Maker: dotnet new failed — ${err instanceof Error ? err.message : String(err)}`);
         return;
     }
 
@@ -73,7 +73,7 @@ export async function newProject(): Promise<void> {
     const here = 'Open';
     const newWindow = 'Open in New Window';
     const choice = await vscode.window.showInformationMessage(
-        `FormForge: project "${name}" created.`, here, newWindow
+        `UI Maker: project "${name}" created.`, here, newWindow
     );
     if (choice) {
         await vscode.commands.executeCommand(

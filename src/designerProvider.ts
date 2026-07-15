@@ -1,4 +1,4 @@
-// FormForge — custom text editor that hosts the visual designer webview.
+// UI Maker — custom text editor that hosts the visual designer webview.
 //
 // The .xaml file remains a plain text document; the webview renders it and
 // sends back full replacement text on every design change. Two-way sync:
@@ -136,13 +136,13 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
           content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${styleUri}" rel="stylesheet">
-    <title>FormForge Designer</title>
+    <title>UI Maker Designer</title>
 </head>
 <body>
     <div id="ff-root">
         <!-- Top toolbar: view + canvas options -->
         <div id="ff-toolbar">
-            <span class="ff-brand">FormForge</span>
+            <span class="ff-brand">UI Maker</span>
             <button id="ff-btn-code" title="Open XAML source in a split editor">&lt;/&gt; View Code</button>
             <label class="ff-check"><input type="checkbox" id="ff-snap" checked> Snap</label>
             <label class="ff-field">Grid <input type="number" id="ff-grid" min="1" max="64" value="8"></label>

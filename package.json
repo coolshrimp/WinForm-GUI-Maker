@@ -1,8 +1,8 @@
 {
     "name": "formforge",
-    "displayName": "FormForge — .NET Form Designer",
-    "description": "Visual drag-and-drop designer, build/run/debug/release buttons, and project scaffolding for .NET desktop apps (WPF & WinForms) inside VS Code.",
-    "version": "0.1.0",
+    "displayName": "UI Maker — .NET UI Designer",
+    "description": "Visual drag-and-drop designer, side panel, build/run/debug/release buttons, and project scaffolding for .NET desktop apps (WPF & WinForms) inside VS Code.",
+    "version": "0.3.0",
     "publisher": "formforge",
     "license": "MIT",
     "engines": {
@@ -27,10 +27,29 @@
     ],
     "main": "./out/extension.js",
     "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "uimaker",
+                    "title": "UI Maker",
+                    "icon": "media/sidebar-icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "uimaker": [
+                {
+                    "id": "formforge.sidebar",
+                    "name": "Designer",
+                    "icon": "media/sidebar-icon.svg",
+                    "contextualTitle": "UI Maker"
+                }
+            ]
+        },
         "customEditors": [
             {
                 "viewType": "formforge.designer",
-                "displayName": "FormForge Designer",
+                "displayName": "UI Maker Designer",
                 "selector": [
                     {
                         "filenamePattern": "*.xaml"
@@ -43,53 +62,71 @@
             {
                 "command": "formforge.newProject",
                 "title": "New .NET Desktop Project",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(new-folder)"
             },
             {
                 "command": "formforge.openDesigner",
                 "title": "Open in Designer",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(layout)"
             },
             {
                 "command": "formforge.openCodeBeside",
                 "title": "View XAML Source (Beside)",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(code)"
             },
             {
                 "command": "formforge.build",
                 "title": "Build",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(tools)"
             },
             {
                 "command": "formforge.run",
                 "title": "Run App",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(play)"
             },
             {
                 "command": "formforge.debug",
                 "title": "Debug App",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(debug-alt)"
             },
             {
                 "command": "formforge.release",
                 "title": "Build Release (Publish)",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(package)"
             },
             {
                 "command": "formforge.stop",
                 "title": "Stop Running App",
-                "category": "FormForge",
+                "category": "UI Maker",
                 "icon": "$(debug-stop)"
+            },
+            {
+                "command": "formforge.refreshSidebar",
+                "title": "Refresh",
+                "category": "UI Maker",
+                "icon": "$(refresh)"
             }
         ],
         "menus": {
+            "view/title": [
+                {
+                    "command": "formforge.newProject",
+                    "when": "view == formforge.sidebar",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "formforge.refreshSidebar",
+                    "when": "view == formforge.sidebar",
+                    "group": "navigation@2"
+                }
+            ],
             "editor/title": [
                 {
                     "command": "formforge.openDesigner",
@@ -127,11 +164,15 @@
                 {
                     "command": "formforge.openCodeBeside",
                     "when": "activeCustomEditorId == formforge.designer"
+                },
+                {
+                    "command": "formforge.refreshSidebar",
+                    "when": "false"
                 }
             ]
         },
         "configuration": {
-            "title": "FormForge",
+            "title": "UI Maker",
             "properties": {
                 "formforge.gridSize": {
                     "type": "number",

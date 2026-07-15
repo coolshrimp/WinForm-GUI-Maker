@@ -1,4 +1,4 @@
-// FormForge — thin wrappers around the .NET CLI.
+// UI Maker — thin wrappers around the .NET CLI.
 //
 // Build and Release run as VS Code Tasks so compiler errors land in the
 // Problems panel (via the $msCompile problem matcher). Run uses a dedicated
@@ -33,7 +33,7 @@ export class DotnetTools implements vscode.Disposable {
         if (!project) { return; }
         this.stop();
         this.runTerminal = vscode.window.createTerminal({
-            name: 'FormForge: Run',
+            name: 'UI Maker: Run',
             cwd: path.dirname(project)
         });
         this.runTerminal.show(true);
@@ -55,20 +55,20 @@ export class DotnetTools implements vscode.Disposable {
         // Build first; a failed build should surface errors, not a debugger.
         const exitCode = await this.execTaskAndWait('build', ['build', project, '-c', 'Debug']);
         if (exitCode !== 0) {
-            vscode.window.showErrorMessage('FormForge: build failed — fix the errors before debugging.');
+            vscode.window.showErrorMessage('UI Maker: build failed — fix the errors before debugging.');
             return;
         }
 
         const program = this.findOutputAssembly(project);
         if (!program) {
-            vscode.window.showWarningMessage('FormForge: could not locate the build output. Launching without the debugger.');
+            vscode.window.showWarningMessage('UI Maker: could not locate the build output. Launching without the debugger.');
             await this.run();
             return;
         }
 
         const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project));
         const config: vscode.DebugConfiguration = {
-            name: 'FormForge: Debug',
+            name: 'UI Maker: Debug',
             type: 'coreclr',
             request: 'launch',
             program,
@@ -86,7 +86,7 @@ export class DotnetTools implements vscode.Disposable {
         if (!started) {
             const install = 'Install C# Extension';
             const choice = await vscode.window.showWarningMessage(
-                'FormForge: debugging needs the C# extension (ms-dotnettools.csharp). The app was launched without the debugger.',
+                'UI Maker: debugging needs the C# extension (ms-dotnettools.csharp). The app was launched without the debugger.',
                 install
             );
             if (choice === install) {
@@ -108,7 +108,7 @@ export class DotnetTools implements vscode.Disposable {
         const publishDir = this.findPublishDir(project);
         const open = 'Open Output Folder';
         const choice = await vscode.window.showInformationMessage(
-            `FormForge: release build published${publishDir ? ` to ${publishDir}` : ''}.`,
+            `UI Maker: release build published${publishDir ? ` to ${publishDir}` : ''}.`,
             ...(publishDir ? [open] : [])
         );
         if (choice === open && publishDir) {
@@ -138,7 +138,7 @@ export class DotnetTools implements vscode.Disposable {
         const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules}/**', 16);
         if (found.length === 0) {
             const create = 'New Project';
-            const choice = await vscode.window.showWarningMessage('FormForge: no .csproj found in this workspace.', create);
+            const choice = await vscode.window.showWarningMessage('UI Maker: no .csproj found in this workspace.', create);
             if (choice === create) { void vscode.commands.executeCommand('formforge.newProject'); }
             return undefined;
         }
@@ -150,7 +150,7 @@ export class DotnetTools implements vscode.Disposable {
                 description: vscode.workspace.asRelativePath(f),
                 fsPath: f.fsPath
             })),
-            { placeHolder: 'FormForge: select the project' }
+            { placeHolder: 'UI Maker: select the project' }
         );
         return pick?.fsPath;
     }
@@ -172,7 +172,7 @@ export class DotnetTools implements vscode.Disposable {
             { type: 'formforge', task: name },
             vscode.TaskScope.Workspace,
             name,
-            'FormForge',
+            'UI Maker',
             new vscode.ShellExecution('dotnet', args),
             '$msCompile'
         );

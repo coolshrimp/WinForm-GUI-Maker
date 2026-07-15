@@ -1,4 +1,4 @@
-// FormForge — C# code-behind integration.
+// UI Maker — C# code-behind integration.
 //
 // When the user wires an event in the designer, the XAML gets the attribute
 // (done by the webview) and this module makes sure a matching handler method
@@ -34,7 +34,7 @@ const EVENT_ARGS: Record<string, string> = {
 export async function ensureEventHandler(xamlPath: string, handler: string, eventName: string): Promise<void> {
     const csPath = `${xamlPath}.cs`;
     if (!fs.existsSync(csPath)) {
-        vscode.window.showWarningMessage(`FormForge: no code-behind file found (${csPath}).`);
+        vscode.window.showWarningMessage(`UI Maker: no code-behind file found (${csPath}).`);
         return;
     }
 
@@ -50,7 +50,7 @@ export async function ensureEventHandler(xamlPath: string, handler: string, even
     } else {
         const insertAt = findClassEnd(text);
         if (insertAt < 0) {
-            vscode.window.showWarningMessage('FormForge: could not find a class body in the code-behind.');
+            vscode.window.showWarningMessage('UI Maker: could not find a class body in the code-behind.');
             return;
         }
 

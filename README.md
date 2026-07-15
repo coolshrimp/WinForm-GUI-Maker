@@ -1,23 +1,23 @@
-# FormForge
+# UI Maker
 
 **Design, build, and run .NET desktop apps — without ever leaving VS Code.**
 
-FormForge is an open-source Visual Studio Code extension that brings a drag-and-drop
+UI Maker is an open-source Visual Studio Code extension that brings a drag-and-drop
 form designer, one-click build/run/debug/release buttons, and project scaffolding for
 .NET desktop applications (WPF and Windows Forms) directly into the editor. No more
 switching to full Visual Studio just to lay out a window.
 
 ---
 
-## Why FormForge?
+## Why UI Maker?
 
 The .NET CLI (`dotnet`) can create, build, and run desktop apps entirely from VS Code,
 but there has never been a good *visual* way to design the UI here. Editing
 `MainWindow.xaml` by hand is fine for experts — and a wall for everyone else.
 
-FormForge closes that gap:
+UI Maker closes that gap:
 
-| Pain point | FormForge answer |
+| Pain point | UI Maker answer |
 |---|---|
 | Hand-writing XAML layout | Drag-and-drop visual designer with snap-to-grid canvas |
 | Guessing property names | Properties panel with the common properties per control |
@@ -28,8 +28,17 @@ FormForge closes that gap:
 
 ## Features
 
+### 🧰 UI Maker side panel
+Click the **UI Maker icon in the activity bar** (the window-with-controls glyph on
+the far left) to open the side panel:
+
+- **Actions** — New Project, Build, Run, Debug, Release, and Stop, one click away.
+- **XAML Windows** — every `.xaml` file in the workspace; click one to open it
+  straight in the visual designer. The list updates automatically as files are
+  added, renamed, or removed.
+
 ### 🎨 Visual Designer for XAML
-Open any `.xaml` window in the FormForge Designer:
+Open any `.xaml` window in the UI Maker Designer:
 
 - **Toolbox** of common WPF controls — Button, Label, TextBox, TextBlock, CheckBox,
   RadioButton, ComboBox, ListBox, DataGrid, Image, ProgressBar, Slider, Border,
@@ -37,7 +46,7 @@ Open any `.xaml` window in the FormForge Designer:
 - **Design canvas** that mimics a real window (title bar, client area) with
   snap-to-grid placement, drag to move, and 8-point resize handles.
 - **Properties panel** — edit Name, size, margins, content, colors, fonts, and more.
-- **Events panel** — type a handler name (or accept the default) and FormForge sets
+- **Events panel** — type a handler name (or accept the default) and UI Maker sets
   the XAML attribute *and* generates the C# method stub in the `.xaml.cs` code-behind.
 - **Double-click a control** to wire its default event, exactly like classic designers.
 - Keyboard support: arrow keys nudge, `Shift`+arrows move by grid, `Delete` removes,
@@ -59,17 +68,18 @@ Status-bar buttons (and editor-title shortcuts) drive the .NET CLI for you:
 - **Stop** — kills the running app.
 
 ### 🚀 Project scaffolding
-`FormForge: New .NET Desktop Project` asks for a template (WPF or Windows Forms),
+`UI Maker: New .NET Desktop Project` asks for a template (WPF or Windows Forms),
 a name, and a folder — then generates a ready-to-run app and offers to open it.
 
 ## Getting started
 
 1. Install the [.NET SDK](https://dotnet.microsoft.com/download) (8.0 or newer recommended).
-2. Install FormForge (from source, see below — Marketplace listing planned).
-3. Run **`FormForge: New .NET Desktop Project`** from the Command Palette
+2. Install UI Maker (from source, see below — Marketplace listing planned).
+3. Run **`UI Maker: New .NET Desktop Project`** from the Command Palette
    (`Ctrl+Shift+P`), or open a folder that already contains a `.csproj`.
-4. Right-click a `.xaml` file → **Open With… → FormForge Designer**
-   (or click the designer icon in the editor title bar).
+4. Click the **UI Maker icon in the activity bar** and pick a window under
+   **XAML Windows** — or right-click a `.xaml` file → **Open With… →
+   UI Maker Designer** (or click the designer icon in the editor title bar).
 5. Drag controls from the toolbox, set properties, wire events.
 6. Hit **▶ Run** in the status bar.
 
@@ -83,20 +93,20 @@ npm run compile
 ```
 
 Open the folder in VS Code and press `F5` — an Extension Development Host window
-launches with FormForge loaded.
+launches with UI Maker loaded.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `FormForge: New .NET Desktop Project` | Scaffold a WPF or WinForms app via `dotnet new` |
-| `FormForge: Open in Designer` | Open the current `.xaml` file in the visual designer |
-| `FormForge: View XAML Source (Beside)` | Split view — XAML text editor next to the designer |
-| `FormForge: Build` | `dotnet build` (Debug configuration) |
-| `FormForge: Run App` | Build and launch the app |
-| `FormForge: Debug App` | Build and launch under the debugger |
-| `FormForge: Build Release (Publish)` | `dotnet publish -c Release` |
-| `FormForge: Stop Running App` | Terminate the app started by Run |
+| `UI Maker: New .NET Desktop Project` | Scaffold a WPF or WinForms app via `dotnet new` |
+| `UI Maker: Open in Designer` | Open the current `.xaml` file in the visual designer |
+| `UI Maker: View XAML Source (Beside)` | Split view — XAML text editor next to the designer |
+| `UI Maker: Build` | `dotnet build` (Debug configuration) |
+| `UI Maker: Run App` | Build and launch the app |
+| `UI Maker: Debug App` | Build and launch under the debugger |
+| `UI Maker: Build Release (Publish)` | `dotnet publish -c Release` |
+| `UI Maker: Stop Running App` | Terminate the app started by Run |
 
 ## Settings
 
@@ -104,6 +114,10 @@ launches with FormForge loaded.
 |---|---|---|
 | `formforge.gridSize` | `8` | Snap grid size in pixels on the design canvas |
 | `formforge.snapToGrid` | `true` | Snap control positions/sizes to the grid |
+
+> UI Maker started life as "FormForge", and the internal identifiers
+> (settings keys, command IDs, the extension ID) keep that name so existing
+> installs and settings continue to work.
 
 ## How it works
 
@@ -121,14 +135,19 @@ launches with FormForge loaded.
 
 Files like `MainWindow.xaml` belong to **WPF** (or WinUI), which is the modern,
 markup-based way to build Windows desktop UIs — and the best fit for a visual
-designer, so that's what FormForge targets first. **Windows Forms** stores its layout
-in generated C# (`*.Designer.cs`) instead of markup; FormForge can already scaffold,
+designer, so that's what UI Maker targets first. **Windows Forms** stores its layout
+in generated C# (`*.Designer.cs`) instead of markup; UI Maker can already scaffold,
 build, and run WinForms projects, and a WinForms visual designer is on the roadmap.
 
-## Known limitations (v0.1)
+## Known limitations (v0.3)
 
-- The designer targets a root `Grid` or `Canvas` panel with absolutely-positioned
-  children. Nested layout panels render, but editing inside them is limited.
+- Nested layouts (Grid rows/columns, StackPanel, DockPanel, TabControl,
+  ScrollViewer, …) **render** faithfully, and any element can be selected,
+  resized, and edited in the panels — but drag-to-move is only offered for
+  Canvas children and absolutely-placed Grid children (`Left`/`Top`
+  alignment), because moving a stacked/docked child would rewrite its layout.
+- Styles are resolved for `{StaticResource}` setters; templates, triggers, and
+  bindings are ignored in the preview.
 - Saving from the designer normalizes the XAML formatting (like most visual designers).
 - The visual preview is an approximation — always confirm with **Run**.
 - Windows-only targets (WPF/WinForms are Windows frameworks).
@@ -136,7 +155,8 @@ build, and run WinForms projects, and a WinForms visual designer is on the roadm
 ## Roadmap
 
 - [ ] Windows Forms visual designer (`*.Designer.cs` round-tripping)
-- [ ] Nested layout editing (StackPanel / DockPanel / Grid rows & columns)
+- [x] Nested layout rendering (StackPanel / DockPanel / Grid rows & columns / TabControl)
+- [ ] Drag-reordering inside StackPanel / DockPanel children
 - [ ] Alignment & distribution tools, multi-select
 - [ ] Style/resource editing and live theme preview
 - [ ] Marketplace publishing and prebuilt VSIX releases
@@ -149,4 +169,4 @@ designer webview (plain JS/CSS).
 
 ## License
 
-[MIT](LICENSE)
+MIT — see the LICENSE file.
