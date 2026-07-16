@@ -133,11 +133,12 @@ launches with UI Maker loaded.
 
 ### A note on WPF vs. Windows Forms
 
-Files like `MainWindow.xaml` belong to **WPF** (or WinUI), which is the modern,
-markup-based way to build Windows desktop UIs — and the best fit for a visual
-designer, so that's what UI Maker targets first. **Windows Forms** stores its layout
-in generated C# (`*.Designer.cs`) instead of markup; UI Maker can already scaffold,
-build, and run WinForms projects, and a WinForms visual designer is on the roadmap.
+Files like `MainWindow.xaml` belong to **WPF** (or WinUI), the markup-based way
+to build Windows desktop UIs. **Windows Forms** stores its layout in generated
+C# (`*.Designer.cs`) instead — and UI Maker designs both: open a `.xaml` window
+or a `Form.Designer.cs` file in the designer and get the same drag-and-drop
+canvas, properties panel, and event wiring. WinForms edits are surgical — only
+the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 
 ## Known limitations (v0.3)
 
@@ -154,8 +155,9 @@ build, and run WinForms projects, and a WinForms visual designer is on the roadm
 
 ## Roadmap
 
-- [ ] Windows Forms visual designer (`*.Designer.cs` round-tripping)
+- [x] Windows Forms visual designer (`*.Designer.cs` round-tripping)
 - [x] Nested layout rendering (StackPanel / DockPanel / Grid rows & columns / TabControl)
+- [ ] WinForms Anchor/Dock-aware preview and control renaming
 - [ ] Drag-reordering inside StackPanel / DockPanel children
 - [ ] Alignment & distribution tools, multi-select
 - [ ] Style/resource editing and live theme preview

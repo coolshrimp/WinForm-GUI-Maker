@@ -30,11 +30,12 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('formforge.newProject', () => newProject()),
 
-        // Re-open the given (or active) .xaml file using the designer editor.
+        // Re-open the given (or active) designable file in the designer editor.
         vscode.commands.registerCommand('formforge.openDesigner', (uri?: vscode.Uri) => {
             const target = uri ?? vscode.window.activeTextEditor?.document.uri;
-            if (!target || !target.fsPath.toLowerCase().endsWith('.xaml')) {
-                vscode.window.showWarningMessage('UI Maker: select a .xaml file to open in the designer.');
+            const p = target?.fsPath.toLowerCase() ?? '';
+            if (!target || !(p.endsWith('.xaml') || p.endsWith('.designer.cs'))) {
+                vscode.window.showWarningMessage('UI Maker: select a .xaml or *.Designer.cs file to open in the designer.');
                 return;
             }
             return vscode.commands.executeCommand('vscode.openWith', target, DesignerProvider.viewType);

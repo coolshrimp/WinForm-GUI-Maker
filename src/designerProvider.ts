@@ -107,7 +107,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
                 // Event wiring: guarantee the C# handler stub exists.
                 case 'addHandler':
-                    await ensureEventHandler(document.uri.fsPath, msg.handler, msg.event);
+                    await ensureEventHandler(document.uri.fsPath, msg.handler, msg.event, msg.argsType);
                     break;
             }
         }));

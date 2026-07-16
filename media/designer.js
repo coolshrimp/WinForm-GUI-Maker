@@ -53,7 +53,20 @@
         Slider:      { icon: '⬌', w: 180, h: 24,  attrs: { Minimum: '0', Maximum: '100', Value: '25' }, props: ['Minimum', 'Maximum', 'Value', 'TickFrequency'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
         Border:      { icon: '▢', w: 200, h: 120, attrs: { BorderBrush: '#FF808080', BorderThickness: '1' }, props: ['BorderBrush', 'BorderThickness', 'CornerRadius', 'Padding'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         GroupBox:    { icon: '⬒', w: 220, h: 140, attrs: { Header: 'GroupBox' },  props: ['Header'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
-        DatePicker:  { icon: '📅', w: 140, h: 28,  attrs: {},                      props: ['SelectedDate'], events: ['SelectedDateChanged'], defaultEvent: 'SelectedDateChanged' }
+        DatePicker:  { icon: '📅', w: 140, h: 28,  attrs: {},                      props: ['SelectedDate'], events: ['SelectedDateChanged'], defaultEvent: 'SelectedDateChanged' },
+        Calendar:    { icon: '📆', w: 180, h: 170, attrs: {},                      props: ['SelectedDate', 'DisplayMode'], events: ['SelectedDatesChanged'], defaultEvent: 'SelectedDatesChanged' },
+        ListView:    { icon: '☰', w: 250, h: 150, attrs: {},                      props: ['SelectedIndex'], events: ['SelectionChanged', 'MouseDoubleClick'], defaultEvent: 'SelectionChanged' },
+        TreeView:    { icon: '🌲', w: 200, h: 150, attrs: {},                      props: [], events: ['SelectedItemChanged', 'MouseDoubleClick'], defaultEvent: 'SelectedItemChanged' },
+        RichTextBox: { icon: '📝', w: 220, h: 120, attrs: {},                      props: ['IsReadOnly', 'AcceptsReturn'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        Expander:    { icon: '▸', w: 220, h: 120, attrs: { Header: 'Expander', IsExpanded: 'True' }, props: ['Header', 'IsExpanded'], events: ['Expanded', 'Collapsed'], defaultEvent: 'Expanded' },
+        Separator:   { icon: '─', w: 160, h: 4,   attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
+        TabControl:  { icon: '⧉', w: 320, h: 200, attrs: {},                      props: [], events: ['SelectionChanged'], defaultEvent: 'SelectionChanged' },
+        Grid:        { icon: '#',  w: 260, h: 180, attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
+        StackPanel:  { icon: '☷', w: 220, h: 160, attrs: {},                      props: ['Orientation'], events: [], defaultEvent: 'Loaded' },
+        WrapPanel:   { icon: '⠿', w: 220, h: 120, attrs: {},                      props: ['Orientation'], events: [], defaultEvent: 'Loaded' },
+        DockPanel:   { icon: '◫', w: 260, h: 180, attrs: {},                      props: ['LastChildFill'], events: [], defaultEvent: 'Loaded' },
+        Canvas:      { icon: '⬚', w: 260, h: 180, attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
+        ScrollViewer:{ icon: '↕', w: 240, h: 160, attrs: {},                      props: ['VerticalScrollBarVisibility'], events: [], defaultEvent: 'Loaded' }
     };
 
     /** Extra property-panel entries for layout containers (not in the toolbox). */
@@ -104,16 +117,19 @@
 
     // ------------------------------------------------------------------ state
 
+    let docMode = 'xaml';       // 'xaml' (WPF markup) | 'winforms' (*.Designer.cs)
     let xamlText = '';          // last text we parsed or produced
     let xamlDoc = null;         // XMLDocument of the current XAML
     let windowEl = null;        // root element (Window / UserControl / Page)
     let contentRoot = null;     // the window's single content element
     let layoutRoot = null;      // top-level panel used for fallback drops
-    let selected = null;        // currently selected XML element or null
+    let selected = null;        // selected XML element / WinForms record / null
     let selectedPath = '';      // index path of the selection (survives re-parse)
     let visuals = [];           // [{ el, div }] rendered this pass
     let styles = { byKey: new Map(), byType: new Map() }; // resolved <Style> resources
-    const uiTabs = new Map();   // TabControl path -> active tab index
+    let wfControls = new Map(); // WinForms mode: name -> control record
+    let wfForm = null;          // WinForms mode: the form itself
+    const uiTabs = new Map();   // TabControl path/name -> active tab index
     let activeTab = 'props';    // 'props' | 'events'
     let zoom = 1;
     let config = { gridSize: 8, snap: true, docName: 'Window.xaml' };
@@ -151,6 +167,17 @@
 
     function parseAndRender() {
         bannerEl.hidden = true;
+
+        // WinForms designer files are C#, not XAML — hand them to the
+        // dedicated parser/renderer.
+        const wantWinForms = /\.designer\.cs$/i.test(config.docName)
+            || (/InitializeComponent\s*\(\s*\)/.test(xamlText) && /System\.Windows\.Forms/.test(xamlText));
+        if (wantWinForms) {
+            if (docMode !== 'winforms') { docMode = 'winforms'; buildToolbox(); }
+            wfParseAndRender();
+            return;
+        }
+        if (docMode !== 'xaml') { docMode = 'xaml'; buildToolbox(); }
 
         if (!xamlText.trim()) {
             xamlDoc = windowEl = contentRoot = layoutRoot = selected = null;
@@ -312,7 +339,9 @@
     }
 
     function render() {
+        if (docMode === 'winforms') { wfRender(); return; }
         if (!windowEl || !xamlDoc) { renderEmpty(); return; }
+        surfaceEl.style.display = 'grid';
 
         // Window frame: size, title, background.
         const winW = num(windowEl.getAttribute('Width'), 800);
@@ -544,6 +573,22 @@
             case 'TabControl':
                 buildTabControl(div, el);
                 break;
+            case 'Expander': {
+                div.classList.add('ff-look-gb');
+                const expanded = (styleProp(el, 'IsExpanded') ?? 'False') !== 'False';
+                const header = document.createElement('div');
+                header.className = 'ff-gb-header';
+                header.textContent = `${expanded ? '▾' : '▸'} ${el.getAttribute('Header')
+                    || collapse(propertyElement(el, 'Header')?.textContent) || 'Expander'}`;
+                div.appendChild(header);
+                if (expanded) {
+                    const content = document.createElement('div');
+                    content.className = 'ff-gb-content';
+                    for (const c of elementChildren(el)) { content.appendChild(renderElement(c, 'cell')); }
+                    div.appendChild(content);
+                }
+                break;
+            }
             case 'GridSplitter':
                 div.classList.add('ff-look-splitter');
                 break;
@@ -755,6 +800,21 @@
                 inner.classList.add('ff-look-input');
                 inner.innerHTML = 'Select a date <span class="ff-combo-arrow">📅</span>';
                 break;
+            case 'Calendar':
+                inner.classList.add('ff-look-list', 'ff-look-calendar');
+                inner.innerHTML = '<div class="ff-cal-head">◀ Month ▶</div>' +
+                    '<div class="ff-cal-grid">' + 'SMTWTFS'.split('').map(d => `<span>${d}</span>`).join('') + '</div>';
+                break;
+            case 'ListView':
+                inner.classList.add('ff-look-list');
+                inner.innerHTML = '<div class="ff-grid-header"><span>Name</span><span>Value</span></div>';
+                break;
+            case 'TreeView':
+                inner.classList.add('ff-look-list');
+                break;
+            case 'RichTextBox':
+                inner.classList.add('ff-look-input', 'ff-look-textarea');
+                break;
             default:
                 // Unknown control: neutral placeholder box labelled with its type.
                 inner.classList.add('ff-look-unknown');
@@ -789,7 +849,7 @@
 
     function select(el) {
         selected = el;
-        selectedPath = el ? pathOf(el) : '';
+        selectedPath = (el && !el.__wf) ? pathOf(el) : '';
         drawSelection();
         renderPanel();
     }
@@ -814,6 +874,7 @@
      *   null      layout is owned by the parent panel (StackPanel, cell, ...)
      */
     function movability(el) {
+        if (el.__wf) { return el === wfForm ? null : 'wf'; } // WinForms: absolute by design
         const p = el.parentNode;
         if (!p || p.nodeType !== Node.ELEMENT_NODE) { return null; }
         if (p.localName === 'Canvas') { return 'canvas'; }
@@ -843,7 +904,7 @@
         // Name tag above the control.
         const tag = document.createElement('span');
         tag.className = 'ff-selection-tag';
-        tag.textContent = getName(selected) || selected.localName;
+        tag.textContent = getName(selected) || wfType(selected);
         sel.appendChild(tag);
 
         // Eight resize handles, named by compass direction.
@@ -860,9 +921,10 @@
         surfaceEl.appendChild(sel);
 
         const mode = movability(selected);
+        const owner = selected.__wf ? 'the form' : (selected.parentNode?.localName ?? 'parent');
         const place = mode ? `at (${Math.round(box.x)}, ${Math.round(box.y)})`
-            : `— layout managed by ${selected.parentNode?.localName ?? 'parent'}`;
-        setStatus(`${getName(selected) || selected.localName} — ${Math.round(box.w)}×${Math.round(box.h)} ${place}`);
+            : `— layout managed by ${owner}`;
+        setStatus(`${getName(selected) || wfType(selected)} — ${Math.round(box.w)}×${Math.round(box.h)} ${place}`);
     }
 
     // Clicking empty canvas selects the window itself.
@@ -879,19 +941,20 @@
         const mode = movability(el);
         if (!mode) { return; } // selection only — parent panel owns the position
 
-        const m0 = parseMargin(el.getAttribute('Margin'));
-        const start = mode === 'canvas'
-            ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
+        const m0 = mode === 'margin' ? parseMargin(el.getAttribute('Margin')) : { l: 0, t: 0, r: 0, b: 0 };
+        const start =
+            mode === 'wf' ? (wfPoint(el.props.Location) ?? { x: 0, y: 0 })
+            : mode === 'canvas' ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
             : { x: m0.l, y: m0.t };
         const sx = e.clientX, sy = e.clientY;
         let moved = false;
 
         const apply = (nx, ny) => {
-            if (mode === 'canvas') {
+            if (mode === 'margin') {
+                div.style.margin = `${ny}px ${m0.r}px ${m0.b}px ${nx}px`;
+            } else {
                 div.style.left = `${nx}px`;
                 div.style.top = `${ny}px`;
-            } else {
-                div.style.margin = `${ny}px ${m0.r}px ${m0.b}px ${nx}px`;
             }
         };
 
@@ -904,7 +967,7 @@
             const ny = snap(Math.max(0, start.y + dy));
             apply(nx, ny);
             drawSelectionAround(div);
-            setStatus(`${getName(el) || el.localName} — (${nx}, ${ny})`);
+            setStatus(`${getName(el) || wfType(el)} — (${nx}, ${ny})`);
         };
         const onUp = ev => {
             document.removeEventListener('mousemove', onMove);
@@ -912,13 +975,16 @@
             if (!moved) { return; }
             const nx = snap(Math.max(0, start.x + (ev.clientX - sx) / zoom));
             const ny = snap(Math.max(0, start.y + (ev.clientY - sy) / zoom));
-            if (mode === 'canvas') {
+            if (mode === 'wf') {
+                wfApply(wfSetLine(el.name, 'Location', `new System.Drawing.Point(${nx}, ${ny})`));
+            } else if (mode === 'canvas') {
                 el.setAttribute('Canvas.Left', String(nx));
                 el.setAttribute('Canvas.Top', String(ny));
+                commit();
             } else {
                 el.setAttribute('Margin', `${nx},${ny},${m0.r},${m0.b}`);
+                commit();
             }
-            commit();
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -929,9 +995,10 @@
         if (!hit) { return; }
         const start = rectOf(hit.div);
         const mode = movability(el);
-        const m0 = parseMargin(el.getAttribute('Margin'));
-        const pos0 = mode === 'canvas'
-            ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
+        const m0 = mode === 'margin' ? parseMargin(el.getAttribute('Margin')) : { l: 0, t: 0, r: 0, b: 0 };
+        const pos0 =
+            mode === 'wf' ? (wfPoint(el.props.Location) ?? { x: 0, y: 0 })
+            : mode === 'canvas' ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
             : { x: m0.l, y: m0.t };
         const sx = e.clientX, sy = e.clientY;
 
@@ -953,19 +1020,25 @@
             const b = compute(ev);
             hit.div.style.width = `${b.w}px`;
             hit.div.style.height = `${b.h}px`;
-            if (mode === 'canvas') {
+            if (mode === 'canvas' || mode === 'wf') {
                 hit.div.style.left = `${b.px}px`;
                 hit.div.style.top = `${b.py}px`;
             } else if (mode === 'margin') {
                 hit.div.style.margin = `${b.py}px ${m0.r}px ${m0.b}px ${b.px}px`;
             }
             drawSelectionAround(hit.div);
-            setStatus(`${getName(el) || el.localName} — ${b.w}×${b.h}`);
+            setStatus(`${getName(el) || wfType(el)} — ${b.w}×${b.h}`);
         };
         const onUp = ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             const b = compute(ev);
+            if (mode === 'wf') {
+                let t = wfSetLine(el.name, 'Size', `new System.Drawing.Size(${b.w}, ${b.h})`);
+                t = wfSetLine(el.name, 'Location', `new System.Drawing.Point(${b.px}, ${b.py})`, t);
+                wfApply(t);
+                return;
+            }
             el.setAttribute('Width', String(b.w));
             el.setAttribute('Height', String(b.h));
             if (mode === 'canvas') {
@@ -1007,7 +1080,9 @@
 
     function buildToolbox() {
         const host = $('ff-toolbox-items');
-        for (const [type, def] of Object.entries(CONTROLS)) {
+        host.innerHTML = '';
+        const catalog = docMode === 'winforms' ? WF_CONTROLS : CONTROLS;
+        for (const [type, def] of Object.entries(catalog)) {
             const item = document.createElement('div');
             item.className = 'ff-tool';
             item.draggable = true;
@@ -1029,7 +1104,13 @@
 
     surfaceEl.addEventListener('drop', e => {
         const type = e.dataTransfer.getData('text/formforge-control');
-        if (!type || !xamlDoc || !windowEl) { return; }
+        if (!type) { return; }
+        if (docMode === 'winforms') {
+            e.preventDefault();
+            wfDrop(e, type);
+            return;
+        }
+        if (!xamlDoc || !windowEl) { return; }
         e.preventDefault();
 
         // Drop into the deepest panel under the cursor; fall back to the root.
@@ -1098,7 +1179,13 @@
     // ============================================================ name helpers
 
     function getName(el) {
+        if (el.__wf) { return el === wfForm ? '' : el.name; }
         return el.getAttributeNS(X_NS, 'Name') || el.getAttribute('Name') || '';
+    }
+
+    /** Type label that works for XML elements and WinForms records alike. */
+    function wfType(el) {
+        return el.__wf ? el.type : el.localName;
     }
 
     function setName(el, name) {
@@ -1127,6 +1214,8 @@
 
     function renderPanel() {
         propsBody.innerHTML = '';
+
+        if (docMode === 'winforms') { wfRenderPanel(); return; }
 
         const el = selected;
         const isWindow = !el;
@@ -1266,6 +1355,14 @@
     }
 
     function wireDefaultEvent(el) {
+        if (el.__wf) {
+            const wdef = WF_CONTROLS[el.type];
+            activeTab = 'events';
+            $('ff-tab-props').classList.remove('active');
+            $('ff-tab-events').classList.add('active');
+            wfWireEvent(el, wdef?.defaultEvent ?? 'Click', el.events[wdef?.defaultEvent ?? 'Click'] || '');
+            return;
+        }
         const def = CONTROLS[el.localName];
         if (!def) { return; }
         // Switch to the events tab so the user sees what happened.
@@ -1344,6 +1441,13 @@
             const step = e.shiftKey ? config.gridSize : 1;
             const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
             const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+            if (mode === 'wf') {
+                const p = wfPoint(selected.props.Location) ?? { x: 0, y: 0 };
+                wfApply(wfSetLine(selected.name, 'Location',
+                    `new System.Drawing.Point(${Math.max(0, p.x + dx)}, ${Math.max(0, p.y + dy)})`));
+                e.preventDefault();
+                return;
+            }
             if (mode === 'canvas') {
                 el2attr(selected, 'Canvas.Left', dx);
                 el2attr(selected, 'Canvas.Top', dy);
@@ -1355,6 +1459,7 @@
             commit();
             e.preventDefault();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+            if (selected.__wf) { return; } // duplicate not supported for WinForms yet
             // Duplicate: clone, offset, rename, insert next to the original.
             const clone = selected.cloneNode(true);
             setName(clone, uniqueName(selected.localName));
@@ -1382,6 +1487,10 @@
 
     function deleteSelected() {
         if (!selected) { return; }
+        if (selected.__wf) {
+            if (selected !== wfForm) { wfDeleteControl(selected); }
+            return;
+        }
         selected.remove();
         selected = null;
         selectedPath = '';
@@ -1444,6 +1553,752 @@
         xamlText = starter;
         vscode.postMessage({ type: 'edit', text: starter });
         parseAndRender();
+    }
+
+    // ============================================================ WinForms mode
+    //
+    // *.Designer.cs support. The InitializeComponent method that Visual Studio
+    // generates is machine-written and highly regular, so it can be parsed with
+    // line-oriented patterns and edited surgically: every change replaces or
+    // inserts individual statements, leaving the rest of the file untouched.
+
+    /** WinForms toolbox: default sizes match the Visual Studio toolbox. */
+    const WF_CONTROLS = {
+        Button:         { icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'Enabled', 'Visible', 'TabIndex'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
+        Label:          { icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'Enabled', 'Visible'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        TextBox:        { icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'Enabled', 'Visible'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
+        CheckBox:       { icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'Enabled', 'Visible'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
+        RadioButton:    { icon: '◉', w: 95,  h: 19,  text: 'radioButton', props: ['Text', 'Checked', 'Enabled', 'Visible'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
+        ComboBox:       { icon: '▾', w: 121, h: 23,  text: '',            props: ['Text', 'Enabled', 'Visible'], events: ['SelectedIndexChanged', 'TextChanged'], defaultEvent: 'SelectedIndexChanged' },
+        ListBox:        { icon: '≡', w: 120, h: 94,  text: '',            props: ['Enabled', 'Visible'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
+        ListView:       { icon: '☰', w: 160, h: 97,  text: '',            props: ['Enabled', 'Visible'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
+        TreeView:       { icon: '🌲', w: 160, h: 97,  text: '',            props: ['Enabled', 'Visible'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
+        DataGridView:   { icon: '▦', w: 240, h: 150, text: '',            props: ['ReadOnly', 'Enabled', 'Visible'], events: ['CellClick', 'CellValueChanged', 'SelectionChanged'], defaultEvent: 'CellClick' },
+        PictureBox:     { icon: '🖼', w: 100, h: 50,  text: '',            props: ['Enabled', 'Visible'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        ProgressBar:    { icon: '▱', w: 100, h: 23,  text: '',            props: ['Enabled', 'Visible'], events: ['Click'], defaultEvent: 'Click' },
+        TrackBar:       { icon: '⬌', w: 104, h: 45,  text: '',            props: ['Enabled', 'Visible'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
+        NumericUpDown:  { icon: '↕', w: 120, h: 23,  text: '',            props: ['Enabled', 'Visible'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        DateTimePicker: { icon: '📅', w: 200, h: 23,  text: '',            props: ['Enabled', 'Visible'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        MaskedTextBox:  { icon: '#',  w: 100, h: 23,  text: '',            props: ['Text', 'Enabled', 'Visible'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        RichTextBox:    { icon: '¶',  w: 150, h: 96,  text: '',            props: ['Text', 'ReadOnly', 'Enabled', 'Visible'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        GroupBox:       { icon: '⬒', w: 200, h: 100, text: 'groupBox',    props: ['Text', 'Enabled', 'Visible'], events: ['Enter'], defaultEvent: 'Enter' },
+        Panel:          { icon: '▢', w: 200, h: 100, text: '',            props: ['Enabled', 'Visible'], events: ['Click', 'Paint'], defaultEvent: 'Click' }
+    };
+
+    /** Delegate + args types for WinForms events that are not plain EventHandler. */
+    const WF_EVENT_TYPES = {
+        KeyDown:          { handler: 'System.Windows.Forms.KeyEventHandler', args: 'KeyEventArgs' },
+        KeyUp:            { handler: 'System.Windows.Forms.KeyEventHandler', args: 'KeyEventArgs' },
+        KeyPress:         { handler: 'System.Windows.Forms.KeyPressEventHandler', args: 'KeyPressEventArgs' },
+        MouseDown:        { handler: 'System.Windows.Forms.MouseEventHandler', args: 'MouseEventArgs' },
+        MouseUp:          { handler: 'System.Windows.Forms.MouseEventHandler', args: 'MouseEventArgs' },
+        MouseMove:        { handler: 'System.Windows.Forms.MouseEventHandler', args: 'MouseEventArgs' },
+        CellClick:        { handler: 'System.Windows.Forms.DataGridViewCellEventHandler', args: 'DataGridViewCellEventArgs' },
+        CellValueChanged: { handler: 'System.Windows.Forms.DataGridViewCellEventHandler', args: 'DataGridViewCellEventArgs' },
+        FormClosing:      { handler: 'System.Windows.Forms.FormClosingEventHandler', args: 'FormClosingEventArgs' },
+        AfterSelect:      { handler: 'System.Windows.Forms.TreeViewEventHandler', args: 'TreeViewEventArgs' },
+        Paint:            { handler: 'System.Windows.Forms.PaintEventHandler', args: 'PaintEventArgs' }
+    };
+    const WF_DEFAULT_EVENT_TYPE = { handler: 'System.EventHandler', args: 'EventArgs' };
+
+    const WF_FORM_EVENTS = ['Load', 'Shown', 'FormClosing', 'Resize', 'KeyDown'];
+    const WF_CONTAINERS = ['GroupBox', 'Panel', 'TabPage'];
+
+    // ------------------------------------------------------------- wf parsing
+
+    function wfParseAndRender() {
+        wfControls = new Map();
+        const text = xamlText;
+
+        const cls = /partial\s+class\s+(\w+)/.exec(text);
+        wfForm = { __wf: true, name: cls ? cls[1] : 'Form', type: 'Form', props: {}, events: {}, children: [] };
+
+        if (!/InitializeComponent\s*\(\s*\)[\s\S]*?\{/.test(text)) {
+            showBanner('No InitializeComponent method found — this Designer.cs file has no form layout to design.');
+            renderEmpty();
+            return;
+        }
+
+        // Control instantiations: this.name = new System.Windows.Forms.Type(...);
+        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\s*=\s*new\s+System\.Windows\.Forms\.(\w+)\(/gm)) {
+            wfControls.set(m[1], {
+                __wf: true, name: m[1], type: m[2],
+                props: {}, events: {}, children: [], columns: [], items: [], parent: null
+            });
+        }
+
+        // Property assignments (single-line): this.name.Prop = value;
+        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\.([\w]+)\s*=\s*(.+);\s*$/gm)) {
+            const ctrl = wfControls.get(m[1]);
+            if (ctrl) { ctrl.props[m[2]] = m[3]; }
+        }
+
+        // Form-level assignments: this.Prop = value; (control names filtered out).
+        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\s*=\s*(.+);\s*$/gm)) {
+            if (!wfControls.has(m[1])) { wfForm.props[m[1]] = m[2]; }
+        }
+
+        // Events: this.name.Event += new Delegate(this.Handler);
+        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\.(\w+)\s*\+=\s*new\s+[\w\.]+\(this\.(\w+)\);/gm)) {
+            const ctrl = wfControls.get(m[1]);
+            if (ctrl) { ctrl.events[m[2]] = m[3]; }
+        }
+        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\s*\+=\s*new\s+[\w\.]+\(this\.(\w+)\);/gm)) {
+            wfForm.events[m[1]] = m[2];
+        }
+
+        // Hierarchy: parent.Controls.Add(this.child) / this.Controls.Add(this.child)
+        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\.Controls\.Add\(this\.(\w+)\);/gm)) {
+            const parent = wfControls.get(m[1]);
+            const child = wfControls.get(m[2]);
+            if (parent && child) { parent.children.push(child); child.parent = parent; }
+        }
+        for (const m of text.matchAll(/^[ \t]*this\.Controls\.Add\(this\.(\w+)\);/gm)) {
+            const child = wfControls.get(m[1]);
+            if (child) { wfForm.children.push(child); child.parent = wfForm; }
+        }
+
+        // DataGridView columns / MenuStrip items (multi-line AddRange arrays).
+        for (const m of text.matchAll(/this\.(\w+)\.Columns\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
+            const ctrl = wfControls.get(m[1]);
+            if (ctrl) { ctrl.columns = [...m[2].matchAll(/this\.(\w+)/g)].map(x => x[1]); }
+        }
+        for (const m of text.matchAll(/this\.(\w+)\.Items\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
+            const ctrl = wfControls.get(m[1]);
+            if (ctrl) { ctrl.items = [...m[2].matchAll(/this\.(\w+)/g)].map(x => x[1]); }
+        }
+
+        // Re-select the record with the same name after the re-parse.
+        if (selected && selected.__wf) {
+            selected = selected.type === 'Form' ? wfForm : (wfControls.get(selected.name) ?? null);
+        } else if (selected) {
+            selected = null; // switched over from a XAML document
+        }
+
+        bannerEl.hidden = true;
+        wfRender();
+    }
+
+    // ------------------------------------------------------------ wf renderer
+
+    function wfRender() {
+        if (!wfForm) { renderEmpty(); return; }
+
+        const cs = wfSizeVal(wfForm.props.ClientSize) ?? { w: 600, h: 400 };
+        titleText.textContent = wfString(wfForm.props.Text) ?? config.docName;
+        windowBox.style.width = `${cs.w}px`;
+        windowBox.style.transform = `scale(${zoom})`;
+        surfaceEl.style.display = 'block';
+        surfaceEl.style.height = `${cs.h}px`;
+        surfaceEl.style.background = wfColor(wfForm.props.BackColor) || '#f0f0f0';
+        surfaceEl.style.backgroundImage = config.snap
+            ? 'radial-gradient(circle, rgba(0,0,0,0.18) 1px, transparent 1px)' : 'none';
+        surfaceEl.style.backgroundSize = `${config.gridSize}px ${config.gridSize}px`;
+
+        surfaceEl.innerHTML = '';
+        visuals = [];
+        // Controls.Add order is reverse z-order: first added paints on top.
+        for (const child of [...wfForm.children].reverse()) {
+            surfaceEl.appendChild(wfVisual(child));
+        }
+
+        drawSelection();
+        renderPanel();
+    }
+
+    /** Absolute-positioned visual for one WinForms control (recursive). */
+    function wfVisual(ctrl) {
+        const div = document.createElement('div');
+        div.className = `ff-control ff-movable ff-c-wf-${ctrl.type.toLowerCase()}`;
+        const loc = wfPoint(ctrl.props.Location) ?? { x: 0, y: 0 };
+        const size = wfSizeVal(ctrl.props.Size) ?? { w: 100, h: 23 };
+        div.style.position = 'absolute';
+        div.style.left = `${loc.x}px`;
+        div.style.top = `${loc.y}px`;
+        div.style.width = `${size.w}px`;
+        div.style.height = `${size.h}px`;
+
+        const bg = wfColor(ctrl.props.BackColor);
+        const fg = wfColor(ctrl.props.ForeColor);
+        if (bg) { div.style.background = bg; }
+        if (fg) { div.style.color = fg; }
+        const font = wfFont(ctrl.props.Font);
+        if (font) {
+            if (font.family) { div.style.fontFamily = font.family; }
+            if (font.px) { div.style.fontSize = `${font.px}px`; }
+            if (font.bold) { div.style.fontWeight = 'bold'; }
+            if (font.italic) { div.style.fontStyle = 'italic'; }
+        }
+        if (ctrl.props.Enabled?.trim() === 'false') { div.classList.add('ff-disabled-control'); }
+        if (ctrl.props.Visible?.trim() === 'false') { div.classList.add('ff-hidden-control'); }
+
+        wfBuildContent(div, ctrl);
+
+        div.addEventListener('mousedown', e => {
+            if (e.button !== 0) { return; }
+            e.preventDefault();
+            e.stopPropagation();
+            select(ctrl);
+            startMove(e, ctrl, div);
+        });
+        div.addEventListener('dblclick', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            wireDefaultEvent(ctrl);
+        });
+
+        visuals.push({ el: ctrl, div });
+        return div;
+    }
+
+    function wfBuildContent(div, ctrl) {
+        const text = wfString(ctrl.props.Text) ?? '';
+        const inner = document.createElement('div');
+        inner.className = 'ff-inner';
+
+        switch (ctrl.type) {
+            case 'GroupBox': {
+                div.classList.add('ff-wf-group');
+                const header = document.createElement('span');
+                header.className = 'ff-wf-group-header';
+                header.textContent = text || ctrl.name;
+                div.appendChild(header);
+                for (const c of [...ctrl.children].reverse()) { div.appendChild(wfVisual(c)); }
+                return;
+            }
+            case 'Panel':
+                div.classList.add('ff-wf-panel');
+                for (const c of [...ctrl.children].reverse()) { div.appendChild(wfVisual(c)); }
+                return;
+            case 'TabControl': {
+                div.classList.add('ff-look-tabs');
+                const pages = ctrl.children.filter(c => c.type === 'TabPage');
+                let active = uiTabs.get(ctrl.name) ?? 0;
+                if (active >= pages.length) { active = 0; }
+                const strip = document.createElement('div');
+                strip.className = 'ff-tab-strip';
+                pages.forEach((pg, i) => {
+                    const head = document.createElement('div');
+                    head.className = 'ff-tab-head' + (i === active ? ' active' : '');
+                    head.textContent = wfString(pg.props.Text) ?? pg.name;
+                    head.addEventListener('mousedown', e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        uiTabs.set(ctrl.name, i);
+                        selected = pg;
+                        render();
+                    });
+                    strip.appendChild(head);
+                });
+                div.appendChild(strip);
+                const pg = pages[active];
+                if (pg) {
+                    const pgLoc = wfPoint(pg.props.Location) ?? { x: 4, y: 24 };
+                    const pgSize = wfSizeVal(pg.props.Size);
+                    const page = document.createElement('div');
+                    page.className = 'ff-wf-page';
+                    page.style.left = `${pgLoc.x}px`;
+                    page.style.top = `${pgLoc.y}px`;
+                    if (pgSize) {
+                        page.style.width = `${pgSize.w}px`;
+                        page.style.height = `${pgSize.h}px`;
+                    }
+                    for (const c of [...pg.children].reverse()) { page.appendChild(wfVisual(c)); }
+                    div.appendChild(page);
+                    visuals.push({ el: pg, div: page });
+                }
+                return;
+            }
+            case 'MenuStrip': {
+                div.classList.add('ff-wf-menustrip');
+                for (const itemName of ctrl.items) {
+                    const item = wfControls.get(itemName);
+                    const span = document.createElement('span');
+                    span.textContent = item ? (wfString(item.props.Text) ?? itemName) : itemName;
+                    div.appendChild(span);
+                }
+                return;
+            }
+            case 'DataGridView': {
+                inner.classList.add('ff-look-list');
+                const cells = ctrl.columns
+                    .map(cn => wfControls.get(cn))
+                    .map(c => escapeHtml((c && wfString(c.props.HeaderText)) || (c ? c.name : '')));
+                inner.innerHTML = `<div class="ff-grid-header">${(cells.length ? cells : ['Col1', 'Col2', 'Col3'])
+                    .map(h => `<span>${h}</span>`).join('')}</div>`;
+                break;
+            }
+            case 'Button':
+                inner.classList.add('ff-look-button');
+                inner.textContent = text || ctrl.name;
+                break;
+            case 'Label':
+                inner.classList.add('ff-look-label');
+                inner.style.whiteSpace = 'nowrap';
+                inner.textContent = text;
+                break;
+            case 'TextBox':
+            case 'MaskedTextBox':
+                inner.classList.add('ff-look-input');
+                if (ctrl.props.Multiline?.trim() === 'true') { inner.classList.add('ff-look-textarea'); }
+                inner.textContent = text;
+                break;
+            case 'RichTextBox':
+                inner.classList.add('ff-look-input', 'ff-look-textarea');
+                inner.textContent = text;
+                break;
+            case 'CheckBox':
+                inner.classList.add('ff-look-label');
+                inner.innerHTML = `<span class="ff-glyph">${ctrl.props.Checked?.trim() === 'true' ? '☑' : '☐'}</span>`;
+                inner.append(text || ctrl.name);
+                break;
+            case 'RadioButton':
+                inner.classList.add('ff-look-label');
+                inner.innerHTML = `<span class="ff-glyph">${ctrl.props.Checked?.trim() === 'true' ? '◉' : '○'}</span>`;
+                inner.append(text || ctrl.name);
+                break;
+            case 'ComboBox':
+                inner.classList.add('ff-look-input');
+                inner.innerHTML = `${escapeHtml(text)}<span class="ff-combo-arrow">▾</span>`;
+                break;
+            case 'ListBox':
+            case 'ListView':
+            case 'TreeView':
+                inner.classList.add('ff-look-list');
+                break;
+            case 'PictureBox':
+                inner.classList.add('ff-look-image');
+                inner.textContent = '🖼';
+                break;
+            case 'ProgressBar':
+                inner.classList.add('ff-look-progress');
+                inner.innerHTML = '<div class="ff-progress-fill" style="width:40%"></div>';
+                break;
+            case 'TrackBar':
+                inner.classList.add('ff-look-slider');
+                inner.innerHTML = '<div class="ff-slider-track"></div><div class="ff-slider-thumb" style="left:30%"></div>';
+                break;
+            case 'NumericUpDown':
+                inner.classList.add('ff-look-input');
+                inner.innerHTML = `${escapeHtml(text || '0')}<span class="ff-combo-arrow">↕</span>`;
+                break;
+            case 'DateTimePicker':
+                inner.classList.add('ff-look-input');
+                inner.innerHTML = 'Select a date <span class="ff-combo-arrow">▾</span>';
+                break;
+            default:
+                inner.classList.add('ff-look-unknown');
+                inner.textContent = ctrl.type;
+        }
+        div.appendChild(inner);
+    }
+
+    // ------------------------------------------------------- wf value parsing
+
+    function wfPoint(v) {
+        const m = /Point\((-?\d+),\s*(-?\d+)\)/.exec(v ?? '');
+        return m ? { x: +m[1], y: +m[2] } : null;
+    }
+
+    function wfSizeVal(v) {
+        const m = /Size\((-?\d+),\s*(-?\d+)\)/.exec(v ?? '');
+        return m ? { w: +m[1], h: +m[2] } : null;
+    }
+
+    function wfString(v) {
+        const m = /^"([\s\S]*)"$/.exec((v ?? '').trim());
+        if (!m) { return null; }
+        const esc = { '"': '"', '\\': '\\', r: '', n: ' ', t: ' ', '0': '' };
+        return m[1].replace(/\\(.)/g, (_, c) => esc[c] ?? c);
+    }
+
+    const WF_SYSTEM_COLORS = {
+        Control: '#f0f0f0', ControlLight: '#e3e3e3', ControlLightLight: '#ffffff',
+        ControlDark: '#a0a0a0', ControlDarkDark: '#696969', ControlText: '#000000',
+        Window: '#ffffff', WindowText: '#000000', ButtonFace: '#f0f0f0',
+        Highlight: '#0078d7', HighlightText: '#ffffff', Info: '#ffffe1',
+        InfoText: '#000000', ActiveCaption: '#99b4d1', GrayText: '#6d6d6d'
+    };
+
+    function wfColor(v) {
+        if (!v) { return ''; }
+        let m = /SystemColors\.(\w+)/.exec(v);
+        if (m) { return WF_SYSTEM_COLORS[m[1]] ?? ''; }
+        m = /Color\.FromArgb\(([\s\S]*?)\)$/.exec(v.trim());
+        if (m) {
+            const nums = [...m[1].matchAll(/\d+/g)].map(x => +x[0]);
+            if (nums.length === 3) { return `rgb(${nums[0]},${nums[1]},${nums[2]})`; }
+            if (nums.length === 4) { return `rgba(${nums[1]},${nums[2]},${nums[3]},${(nums[0] / 255).toFixed(3)})`; }
+            return '';
+        }
+        m = /Color\.(\w+)/.exec(v);
+        if (m) { return m[1].toLowerCase(); }
+        return '';
+    }
+
+    function wfFont(v) {
+        const m = /new\s+System\.Drawing\.Font\("([^"]+)",\s*([\d.]+)F?/.exec(v ?? '');
+        if (!m) { return null; }
+        return {
+            family: m[1],
+            px: Math.round(parseFloat(m[2]) * 4 / 3), // points -> pixels
+            bold: /FontStyle\.Bold/.test(v),
+            italic: /FontStyle\.Italic/.test(v)
+        };
+    }
+
+    // ----------------------------------------------------- wf surgical edits
+
+    /** Line ending used by the document (keeps diffs clean on CRLF files). */
+    function wfEol() {
+        return xamlText.includes('\r\n') ? '\r\n' : '\n';
+    }
+
+    /** Push edited text to the document and re-render from it. */
+    function wfApply(newText) {
+        if (newText === xamlText) { return; }
+        xamlText = newText;
+        vscode.postMessage({ type: 'edit', text: newText });
+        wfParseAndRender();
+    }
+
+    /**
+     * Replace "this.<name>.<prop> = ...;" or insert it into the control's
+     * statement block. Returns the new text (does not apply it).
+     */
+    function wfSetLine(name, prop, code, text = xamlText) {
+        const line = `this.${name}.${prop} = ${code};`;
+        const re = new RegExp(`^([ \\t]*)this\\.${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
+        if (re.test(text)) {
+            return text.replace(re, `$1${line}`);
+        }
+        // Insert after the first existing statement of this control's block.
+        const anchor = new RegExp(`^([ \\t]*)this\\.${name}\\.[\\w\\.]+[^\\n]*$`, 'm');
+        const m = anchor.exec(text);
+        if (!m) { return text; }
+        const end = m.index + m[0].length;
+        return `${text.slice(0, end)}${wfEol()}${m[1]}${line}${text.slice(end)}`;
+    }
+
+    /** Same as wfSetLine but for the form's own "this.<prop> = ...;" lines. */
+    function wfSetFormLine(prop, code, text = xamlText) {
+        const line = `this.${prop} = ${code};`;
+        const re = new RegExp(`^([ \\t]*)this\\.${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
+        if (re.test(text)) {
+            return text.replace(re, `$1${line}`);
+        }
+        const m = /^([ \t]*)this\.ClientSize\s*=/m.exec(text);
+        if (!m) { return text; }
+        const end = text.indexOf('\n', m.index);
+        return `${text.slice(0, end)}${wfEol()}${m[1]}${line}${text.slice(end)}`;
+    }
+
+    /** Remove the "this.<name>.<prop> = ...;" line entirely (if present). */
+    function wfRemoveLine(name, prop, text = xamlText) {
+        const re = new RegExp(`^[ \\t]*this\\.${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
+        return text.replace(re, '');
+    }
+
+    /** Wire (or rewire) an event line and ask the host for the C# stub. */
+    function wfWireEvent(el, eventName, handler, openStub = true) {
+        const isForm = el === wfForm;
+        const finalName = handler || `${isForm ? wfForm.name : el.name}_${eventName}`;
+        const et = WF_EVENT_TYPES[eventName] ?? WF_DEFAULT_EVENT_TYPE;
+        const lhs = isForm ? `this.${eventName}` : `this.${el.name}.${eventName}`;
+        const line = `${lhs} += new ${et.handler}(this.${finalName});`;
+
+        let text = xamlText;
+        const re = new RegExp(`^([ \\t]*)${lhs.replace(/\./g, '\\.')}\\s*\\+=[^\\n]*$`, 'm');
+        if (re.test(text)) {
+            text = text.replace(re, `$1${line}`);
+        } else if (isForm) {
+            // Form events sit at the end of the form's block, before ResumeLayout.
+            const m = /^([ \t]*)(?:[\w\.]+\.)?ResumeLayout\(/m.exec(text)
+                ?? /^([ \t]*)this\.ResumeLayout\(/m.exec(text);
+            if (!m) { return; }
+            text = `${text.slice(0, m.index)}${m[1]}${line}${wfEol()}${text.slice(m.index)}`;
+        } else {
+            // Append after the last statement of the control's block.
+            const blockRe = new RegExp(`^([ \\t]*)this\\.${el.name}\\.[\\w\\.]+[^\\n]*$`, 'gm');
+            let last = null;
+            for (const m of text.matchAll(blockRe)) { last = m; }
+            if (!last) { return; }
+            const end = last.index + last[0].length;
+            text = `${text.slice(0, end)}${wfEol()}${last[1]}${line}${text.slice(end)}`;
+        }
+        wfApply(text);
+        if (openStub) {
+            vscode.postMessage({ type: 'addHandler', handler: finalName, event: eventName, argsType: et.args });
+        }
+    }
+
+    /** Remove an event wiring line ("this.x.Click += ...."). */
+    function wfUnwireEvent(el, eventName) {
+        const lhs = el === wfForm ? `this\\.${eventName}` : `this\\.${el.name}\\.${eventName}`;
+        const re = new RegExp(`^[ \\t]*${lhs}\\s*\\+=[^\\n]*\\r?\\n`, 'm');
+        wfApply(xamlText.replace(re, ''));
+    }
+
+    // -------------------------------------------------------- wf add / delete
+
+    function wfUniqueName(type) {
+        const base = type.charAt(0).toLowerCase() + type.slice(1);
+        for (let i = 1; ; i++) {
+            if (!wfControls.has(`${base}${i}`) && !new RegExp(`\\b${base}${i}\\b`).test(xamlText)) {
+                return `${base}${i}`;
+            }
+        }
+    }
+
+    function wfDrop(e, type) {
+        const def = WF_CONTROLS[type];
+        if (!def || !wfForm) { return; }
+
+        // Deepest WinForms container under the pointer, else the form itself.
+        let parent = null;
+        let parentDiv = surfaceEl;
+        let node = document.elementFromPoint(e.clientX, e.clientY);
+        while (node && node !== surfaceEl) {
+            const hit = visuals.find(v => v.div === node);
+            if (hit && hit.el.__wf && WF_CONTAINERS.includes(hit.el.type)) {
+                parent = hit.el;
+                parentDiv = hit.div;
+                break;
+            }
+            node = node.parentElement;
+        }
+
+        const r = parentDiv.getBoundingClientRect();
+        const x = snap(Math.max(0, (e.clientX - r.left) / zoom - def.w / 2));
+        const y = snap(Math.max(0, (e.clientY - r.top) / zoom - def.h / 2));
+        wfAddControl(type, x, y, parent ? parent.name : null);
+    }
+
+    /** Insert a brand-new control: field, instantiation, block, Controls.Add. */
+    function wfAddControl(type, x, y, parentName) {
+        const def = WF_CONTROLS[type];
+        const name = wfUniqueName(type);
+        const eol = wfEol();
+        let text = xamlText;
+
+        // Indentation of generated statements, taken from an existing line.
+        const indentMatch = /^([ \t]*)this\.SuspendLayout\(\);/m.exec(text);
+        const ind = indentMatch ? indentMatch[1] : '            ';
+
+        // 1) Instantiation — before the first Suspend/BeginInit line.
+        const suspend = /^[ \t]*(?:[\w\.]+\.SuspendLayout\(\);|\(\(System\.ComponentModel\.ISupportInitialize\))/m.exec(text);
+        if (!suspend) {
+            setStatus('UI Maker: could not find a place to insert the control.');
+            return;
+        }
+        text = `${text.slice(0, suspend.index)}${ind}this.${name} = new System.Windows.Forms.${type}();${eol}${text.slice(suspend.index)}`;
+
+        // 2) Property block — before the form's own section (AutoScaleDimensions).
+        const formAnchor = /^[ \t]*this\.AutoScaleDimensions\s*=/m.exec(text);
+        if (!formAnchor) {
+            setStatus('UI Maker: could not find the form section in InitializeComponent.');
+            return;
+        }
+        // Back up over the "// <formname> //" comment trio if it sits right above.
+        let insertAt = formAnchor.index;
+        const before = text.slice(0, insertAt);
+        const trio = /(^[ \t]*\/\/[ \t]*\r?\n[ \t]*\/\/[^\r\n]*\r?\n[ \t]*\/\/[ \t]*\r?\n)$/m.exec(before);
+        if (trio) { insertAt -= trio[1].length; }
+
+        const tabIndex = wfControls.size;
+        const blockLines = [
+            `${ind}// `,
+            `${ind}// ${name}`,
+            `${ind}// `,
+            `${ind}this.${name}.Location = new System.Drawing.Point(${x}, ${y});`,
+            `${ind}this.${name}.Name = "${name}";`,
+            `${ind}this.${name}.Size = new System.Drawing.Size(${def.w}, ${def.h});`,
+            `${ind}this.${name}.TabIndex = ${tabIndex};`
+        ];
+        if (def.text) { blockLines.push(`${ind}this.${name}.Text = "${name}";`); }
+        text = `${text.slice(0, insertAt)}${blockLines.join(eol)}${eol}${text.slice(insertAt)}`;
+
+        // 3) Controls.Add — into the parent container or the form.
+        const addLine = parentName
+            ? `${ind}this.${parentName}.Controls.Add(this.${name});`
+            : `${ind}this.Controls.Add(this.${name});`;
+        const firstAdd = parentName
+            ? new RegExp(`^[ \\t]*this\\.${parentName}\\.Controls\\.Add\\(`, 'm').exec(text)
+            : /^[ \t]*this\.Controls\.Add\(/m.exec(text);
+        if (firstAdd) {
+            text = `${text.slice(0, firstAdd.index)}${addLine}${eol}${text.slice(firstAdd.index)}`;
+        } else if (parentName) {
+            // Parent has no Controls.Add lines yet — append after its first statement.
+            const anchor = new RegExp(`^([ \\t]*)this\\.${parentName}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
+            if (anchor) {
+                const end = anchor.index + anchor[0].length;
+                text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
+            }
+        } else {
+            const cs = /^([ \t]*)this\.ClientSize\s*=[^\n]*$/m.exec(text);
+            if (cs) {
+                const end = cs.index + cs[0].length;
+                text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
+            }
+        }
+
+        // 4) Field declaration — after the last existing designer field.
+        const fieldLine = `        private System.Windows.Forms.${type} ${name};`;
+        let lastField = null;
+        for (const m of text.matchAll(/^[ \t]*private\s+[\w\.<>]+\s+\w+;\s*$/gm)) { lastField = m; }
+        if (lastField) {
+            const end = lastField.index + lastField[0].length;
+            text = `${text.slice(0, end)}${eol}${fieldLine}${text.slice(end)}`;
+        } else {
+            const endRegion = /^[ \t]*#endregion[^\n]*$/m.exec(text);
+            if (endRegion) {
+                const end = endRegion.index + endRegion[0].length;
+                text = `${text.slice(0, end)}${eol}${eol}${fieldLine}${text.slice(end)}`;
+            }
+        }
+
+        selected = { __wf: true, name, type, props: {}, events: {}, children: [] };
+        wfApply(text);
+    }
+
+    /** Delete a control: every statement referencing it, its comment trio, its field. */
+    function wfDeleteControl(ctrl) {
+        const name = ctrl.name;
+        const lines = xamlText.split('\n');
+        const keep = [];
+        // Any statement referencing "this.<name>" — property assignments, event
+        // wiring, Controls.Add, SuspendLayout, ISupportInitialize casts, ...
+        const ref = new RegExp(`\\bthis\\.${name}\\b`);
+        const field = new RegExp(`^\\s*private\\s+[\\w\\.<>]+\\s+${name};\\s*$`);
+        for (let i = 0; i < lines.length; i++) {
+            const t = lines[i].trim();
+            // "// name" comment trio above the control's block.
+            if (t === `// ${name}`
+                && lines[i - 1]?.trim() === '//'
+                && lines[i + 1]?.trim() === '//') {
+                keep.pop();
+                i += 1;
+                continue;
+            }
+            if (ref.test(lines[i]) || field.test(lines[i])) { continue; }
+            keep.push(lines[i]);
+        }
+        selected = null;
+        selectedPath = '';
+        wfApply(keep.join('\n'));
+    }
+
+    // ------------------------------------------------------- wf property panel
+
+    function wfRenderPanel() {
+        const el = selected && selected.__wf && selected !== wfForm ? selected : null;
+        const isForm = !el;
+        propsTarget.textContent = isForm
+            ? `${wfForm?.name ?? 'Form'} (${config.docName})`
+            : `${el.name} : ${el.type}`;
+        if (!wfForm) { return; }
+
+        if (activeTab === 'props') { wfPropsTab(el, isForm); }
+        else { wfEventsTab(el, isForm); }
+    }
+
+    function wfPropsTab(el, isForm) {
+        if (isForm) {
+            propsBody.appendChild(propRow('Text', wfString(wfForm.props.Text) ?? '', v => {
+                wfApply(wfSetFormLine('Text', wfQuote(v)));
+            }));
+            const cs = wfSizeVal(wfForm.props.ClientSize);
+            propsBody.appendChild(propRow('ClientSize', cs ? `${cs.w}, ${cs.h}` : '', v => {
+                const p = wfPair(v);
+                if (p) { wfApply(wfSetFormLine('ClientSize', `new System.Drawing.Size(${p.a}, ${p.b})`)); }
+            }));
+            return;
+        }
+
+        // Name renames ripple through the code-behind, so it stays read-only here.
+        const nameRow = propRow('Name', el.name, () => { });
+        nameRow.querySelector('input').disabled = true;
+        nameRow.querySelector('input').title = 'Rename in code (F2 in the editor) — a designer rename cannot update the code-behind safely yet.';
+        propsBody.appendChild(nameRow);
+
+        const loc = wfPoint(el.props.Location);
+        propsBody.appendChild(propRow('Location', loc ? `${loc.x}, ${loc.y}` : '', v => {
+            const p = wfPair(v);
+            if (p) { wfApply(wfSetLine(el.name, 'Location', `new System.Drawing.Point(${p.a}, ${p.b})`)); }
+        }));
+        const size = wfSizeVal(el.props.Size);
+        propsBody.appendChild(propRow('Size', size ? `${size.w}, ${size.h}` : '', v => {
+            const p = wfPair(v);
+            if (p) { wfApply(wfSetLine(el.name, 'Size', `new System.Drawing.Size(${p.a}, ${p.b})`)); }
+        }));
+
+        for (const prop of WF_CONTROLS[el.type]?.props ?? ['Text', 'Enabled', 'Visible']) {
+            let value;
+            if (prop === 'Text') { value = wfString(el.props.Text) ?? ''; }
+            else { value = (el.props[prop] ?? '').trim(); }
+            propsBody.appendChild(propRow(prop, value, v => {
+                if (v === '') {
+                    wfApply(wfRemoveLine(el.name, prop));
+                } else if (prop === 'Text') {
+                    wfApply(wfSetLine(el.name, 'Text', wfQuote(v)));
+                } else if (/^(true|false)$/i.test(v)) {
+                    wfApply(wfSetLine(el.name, prop, v.toLowerCase()));
+                } else if (/^-?\d+$/.test(v)) {
+                    wfApply(wfSetLine(el.name, prop, v));
+                } else {
+                    wfApply(wfSetLine(el.name, prop, wfQuote(v)));
+                }
+            }, /^(Enabled|Visible|Checked|ReadOnly|Multiline)$/.test(prop) ? ['true', 'false'] : undefined));
+        }
+    }
+
+    function wfEventsTab(el, isForm) {
+        const target = isForm ? wfForm : el;
+        const events = isForm ? WF_FORM_EVENTS : (WF_CONTROLS[el.type]?.events ?? ['Click']);
+
+        const hint = document.createElement('div');
+        hint.className = 'ff-events-hint';
+        hint.textContent = 'Type a handler name (or click ⚡ for the default) to wire the event and create the C# stub.';
+        propsBody.appendChild(hint);
+
+        for (const ev of events) {
+            const row = document.createElement('div');
+            row.className = 'ff-prop-row';
+            const lab = document.createElement('label');
+            lab.textContent = ev;
+            row.appendChild(lab);
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = target.events[ev] ?? '';
+            input.placeholder = `${isForm ? wfForm.name : el.name}_${ev}`;
+            input.spellcheck = false;
+            input.addEventListener('change', () => {
+                if (input.value.trim() === '') { wfUnwireEvent(target, ev); }
+                else { wfWireEvent(target, ev, input.value.trim(), false); }
+            });
+            input.addEventListener('keydown', e => e.stopPropagation());
+            row.appendChild(input);
+
+            const btn = document.createElement('button');
+            btn.className = 'ff-wire';
+            btn.title = 'Wire event and open the handler';
+            btn.textContent = '⚡';
+            btn.addEventListener('click', () => wfWireEvent(target, ev, input.value.trim()));
+            row.appendChild(btn);
+
+            propsBody.appendChild(row);
+        }
+    }
+
+    function wfQuote(s) {
+        return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+
+    /** Parse "12, 34" (or "12 34") into two integers. */
+    function wfPair(v) {
+        const m = /^\s*(-?\d+)\s*[,x ]\s*(-?\d+)\s*$/.exec(v);
+        return m ? { a: +m[1], b: +m[2] } : null;
     }
 
     // ================================================================ helpers

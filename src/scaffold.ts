@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
+import { touchRecentProject } from './sidebar';
 
 const execFile = promisify(cp.execFile);
 
@@ -70,6 +71,7 @@ export async function newProject(): Promise<void> {
     }
 
     // 5) Open ------------------------------------------------------------------
+    touchRecentProject(target);
     const here = 'Open';
     const newWindow = 'Open in New Window';
     const choice = await vscode.window.showInformationMessage(

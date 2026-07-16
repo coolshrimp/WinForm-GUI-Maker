@@ -2,7 +2,7 @@
     "name": "formforge",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer, side panel, build/run/debug/release buttons, and project scaffolding for .NET desktop apps (WPF & WinForms) inside VS Code.",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "publisher": "formforge",
     "license": "MIT",
     "engines": {
@@ -53,6 +53,9 @@
                 "selector": [
                     {
                         "filenamePattern": "*.xaml"
+                    },
+                    {
+                        "filenamePattern": "*.Designer.cs"
                     }
                 ],
                 "priority": "option"
@@ -112,6 +115,23 @@
                 "title": "Refresh",
                 "category": "UI Maker",
                 "icon": "$(refresh)"
+            },
+            {
+                "command": "formforge.recentOpen",
+                "title": "Open Project",
+                "category": "UI Maker"
+            },
+            {
+                "command": "formforge.recentOpenNewWindow",
+                "title": "Open in New Window",
+                "category": "UI Maker",
+                "icon": "$(multiple-windows)"
+            },
+            {
+                "command": "formforge.recentRemove",
+                "title": "Remove from Recent Projects",
+                "category": "UI Maker",
+                "icon": "$(close)"
             }
         ],
         "menus": {
@@ -130,7 +150,7 @@
             "editor/title": [
                 {
                     "command": "formforge.openDesigner",
-                    "when": "resourceExtname == .xaml && activeCustomEditorId != formforge.designer",
+                    "when": "(resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/) && activeCustomEditorId != formforge.designer",
                     "group": "navigation@1"
                 },
                 {
@@ -152,14 +172,26 @@
             "explorer/context": [
                 {
                     "command": "formforge.openDesigner",
-                    "when": "resourceExtname == .xaml",
+                    "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/",
                     "group": "navigation@10"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "formforge.recentOpenNewWindow",
+                    "when": "view == formforge.sidebar && viewItem == uimakerRecent",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "formforge.recentRemove",
+                    "when": "view == formforge.sidebar && viewItem == uimakerRecent",
+                    "group": "inline@2"
                 }
             ],
             "commandPalette": [
                 {
                     "command": "formforge.openDesigner",
-                    "when": "resourceExtname == .xaml"
+                    "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/"
                 },
                 {
                     "command": "formforge.openCodeBeside",
@@ -167,6 +199,18 @@
                 },
                 {
                     "command": "formforge.refreshSidebar",
+                    "when": "false"
+                },
+                {
+                    "command": "formforge.recentOpen",
+                    "when": "false"
+                },
+                {
+                    "command": "formforge.recentOpenNewWindow",
+                    "when": "false"
+                },
+                {
+                    "command": "formforge.recentRemove",
                     "when": "false"
                 }
             ]

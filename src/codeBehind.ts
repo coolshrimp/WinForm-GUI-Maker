@@ -28,11 +28,17 @@ const EVENT_ARGS: Record<string, string> = {
 };
 
 /**
- * Ensure `handler` exists in the code-behind of `xamlPath`, creating a stub
- * when missing, and open the file beside the designer with the method revealed.
+ * Ensure `handler` exists in the code-behind of `designerPath`, creating a
+ * stub when missing, and open the file beside the designer with the method
+ * revealed. Works for both designer flavors:
+ *   MainWindow.xaml     -> MainWindow.xaml.cs   (WPF)
+ *   Main.Designer.cs    -> Main.cs              (WinForms)
+ * `argsType` overrides the WPF event->args table (WinForms events send it).
  */
-export async function ensureEventHandler(xamlPath: string, handler: string, eventName: string): Promise<void> {
-    const csPath = `${xamlPath}.cs`;
+export async function ensureEventHandler(designerPath: string, handler: string, eventName: string, argsType?: string): Promise<void> {
+    const csPath = /\.designer\.cs$/i.test(designerPath)
+        ? designerPath.replace(/\.designer\.cs$/i, '.cs')
+        : `${designerPath}.cs`;
     if (!fs.existsSync(csPath)) {
         vscode.window.showWarningMessage(`UI Maker: no code-behind file found (${csPath}).`);
         return;
@@ -57,9 +63,9 @@ export async function ensureEventHandler(xamlPath: string, handler: string, even
         // Match the file's indentation style: members sit one level inside the class.
         const classIndent = lineIndentAt(text, insertAt);
         const indent = classIndent + '    ';
-        const argsType = EVENT_ARGS[eventName] ?? 'RoutedEventArgs';
+        const args = argsType ?? EVENT_ARGS[eventName] ?? 'RoutedEventArgs';
         const stub =
-            `\n${indent}private void ${handler}(object sender, ${argsType} e)\n` +
+            `\n${indent}private void ${handler}(object sender, ${args} e)\n` +
             `${indent}{\n` +
             `${indent}    // TODO: handle the ${eventName} event\n` +
             `${indent}}\n${classIndent}`;

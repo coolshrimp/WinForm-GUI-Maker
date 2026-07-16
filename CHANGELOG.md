@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0
+
+**Windows Forms designer** — `*.Designer.cs` files now open in the visual
+designer, closing the biggest gap with the Visual Studio workflow.
+
+- Parses `InitializeComponent` (the standard VS-generated format) and renders
+  the form: Button, Label, TextBox, CheckBox, RadioButton, ComboBox, ListBox,
+  ListView, TreeView, DataGridView (with real column headers), PictureBox,
+  ProgressBar, TrackBar, NumericUpDown, DateTimePicker, MaskedTextBox,
+  RichTextBox, GroupBox, Panel, TabControl/TabPage (clickable tabs), MenuStrip.
+- Colors (`SystemColors`, `Color.*`, `FromArgb`), fonts, Enabled/Visible states.
+- Full editing: drag to move, resize handles, keyboard nudge, property panel
+  (Text, Location, Size, Enabled, …), toolbox drag-and-drop (into the form,
+  GroupBoxes, Panels, and TabPages), delete.
+- Every change is a surgical statement edit — only the affected
+  `this.control.Prop = …;` lines change, the rest of the file stays untouched.
+- Events panel + double-click wiring writes the `+=` line and generates the
+  handler stub in the matching `Form.cs` with the correct `EventArgs` type.
+- WinForms designer files get their own **WinForms Forms** list in the side
+  panel (Settings/Resources codegen files are filtered out).
+
+Side panel: **Recent Projects** — .NET projects you open or scaffold are
+remembered; click to switch the window to that project, with hover actions to
+open in a new window or remove from the list.
+
+WPF toolbox: added Calendar, ListView, TreeView, RichTextBox, Expander,
+Separator, TabControl, and the layout panels (Grid, StackPanel, WrapPanel,
+DockPanel, Canvas, ScrollViewer).
+
 ## 0.3.0
 
 - Renamed the extension to **UI Maker** (formerly FormForge). Internal IDs
