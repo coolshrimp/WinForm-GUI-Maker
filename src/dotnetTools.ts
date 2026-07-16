@@ -300,6 +300,8 @@ export class DotnetTools implements vscode.Disposable {
      * `{ msbuild }` to route the build through Visual Studio's MSBuild.
      */
     private async preflight(project: string): Promise<{ msbuild?: string } | undefined> {
+        await this.stopLockedInstances(project);
+
         const info = readProjectInfo(project);
         if (!info) { return {}; }
 
@@ -340,6 +342,44 @@ export class DotnetTools implements vscode.Disposable {
             }
         }
         return {};
+    }
+
+    /**
+     * A still-running instance of the app locks the output .exe and makes the
+     * build fail after long MSB3026 retries. Detect instances by image name
+     * before building: stop our own launch outright, ask about foreign ones.
+     */
+    private async stopLockedInstances(project: string): Promise<void> {
+        if (process.platform !== 'win32') { return; }
+        const exeName = `${this.assemblyNameOf(project)}.exe`;
+        let pids = await listProcessIds(exeName);
+        if (!pids.length) { return; }
+
+        // If we launched the app, just stop it and re-check.
+        if (this._state !== 'idle' || this.runProcess || this.runExecution) {
+            this.stop();
+            await delay(1000);
+            pids = await listProcessIds(exeName);
+            if (!pids.length) { return; }
+        }
+
+        const stopIt = 'Stop It and Continue';
+        const anyway = 'Build Anyway';
+        const choice = await vscode.window.showWarningMessage(
+            `UI Maker: ${exeName} is still running (PID ${pids.join(', ')}) and locks the build output. Stop it before building?`,
+            stopIt, anyway
+        );
+        if (choice === stopIt) {
+            await killProcessIds(pids);
+            await delay(500);
+        }
+    }
+
+    /** The assembly name declared in the project, else the project file name. */
+    private assemblyNameOf(project: string): string {
+        const xml = this.tryRead(project) ?? '';
+        return /<AssemblyName>\s*([^<]+?)\s*<\/AssemblyName>/.exec(xml)?.[1]
+            ?? path.basename(project).replace(/\.(cs|vb)proj$/i, '');
     }
 
     // ------------------------------------------------------- project location
@@ -435,9 +475,7 @@ export class DotnetTools implements vscode.Disposable {
     private findOutputBinary(project: string, ext: '.dll' | '.exe'): string | undefined {
         const dir = path.dirname(project);
         const xml = this.tryRead(project) ?? '';
-        const assembly =
-            /<AssemblyName>\s*([^<]+?)\s*<\/AssemblyName>/.exec(xml)?.[1] ??
-            path.basename(project).replace(/\.(cs|vb)proj$/i, '');
+        const assembly = this.assemblyNameOf(project);
 
         // Prefer the declared target framework, otherwise scan bin/Debug.
         const tfm =
@@ -499,6 +537,34 @@ export class DotnetTools implements vscode.Disposable {
             return undefined;
         }
     }
+}
+
+/** PIDs of all running processes with the given image name (Windows). */
+function listProcessIds(imageName: string): Promise<number[]> {
+    return new Promise(resolve => {
+        cp.execFile('tasklist', ['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH'], (err, stdout) => {
+            if (err) { resolve([]); return; }
+            const pids: number[] = [];
+            for (const line of stdout.split(/\r?\n/)) {
+                const m = /^"[^"]+","(\d+)"/.exec(line.trim());
+                if (m) { pids.push(Number(m[1])); }
+            }
+            resolve(pids);
+        });
+    });
+}
+
+/** Force-kill the given process trees (Windows). */
+function killProcessIds(pids: number[]): Promise<void> {
+    return new Promise(resolve => {
+        const args = ['/F', '/T'];
+        for (const pid of pids) { args.push('/PID', String(pid)); }
+        cp.execFile('taskkill', args, () => resolve());
+    });
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Late import accessor to avoid a circular import at module load time:
