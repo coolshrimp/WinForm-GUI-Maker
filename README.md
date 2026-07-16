@@ -50,7 +50,12 @@ the far left) to open the side panel:
 - **Project Files** — everything else in the workspace, sorted into
   solution-explorer-style categories: **Code**, **Images & Icons**,
   **Resources**, **Data & Config**, **Project & Solution**, and **Other**,
-  with real file icons and click-to-open.
+  with real file icons and click-to-open. The categories have inline **＋**
+  buttons: *New C# Class File* (class stub, registered in the project),
+  *Add Image*, and *Add Resource* — files are imported into `Resources/`,
+  registered in `Properties/Resources.resx` with the right CLR type (Bitmap,
+  Icon, String, or byte[]), and exposed through a regenerated
+  `Resources.Designer.cs`, so `Properties.Resources.name` just works.
 
 ### 🎨 Visual Designer for XAML
 Open any `.xaml` window in the UI Maker Designer:
@@ -81,8 +86,24 @@ Open any `.xaml` window in the UI Maker Designer:
 - **Events panel** — type a handler name (or accept the default) and UI Maker sets
   the XAML attribute *and* generates the C# method stub in the `.xaml.cs` code-behind.
 - **Double-click a control** to wire its default event, exactly like classic designers.
+- **Multi-select and alignment tools** — Ctrl/Shift+click controls, drag the
+  group, then use the toolbar to align edges, match sizes, or distribute
+  evenly. **⇥ Tab Order** overlays TabIndex badges; click controls in
+  sequence to re-number them (WinForms).
+- **Rename controls safely** — edit `(Name)` in the grid and every reference
+  in the Designer.cs *and* the code-behind is updated (handler names are
+  kept, like VS).
+- **Component tray** — Timer, ToolTip, ContextMenuStrip, NotifyIcon,
+  BackgroundWorker, ImageList, ErrorProvider, and the file/color/font/folder
+  dialogs drop into a tray below the form, VS-style, with their own
+  properties and events (WinForms).
+- **Menus & status bars** — MenuStrip, ToolStrip, and StatusStrip with an
+  *Items* editor (one line per item) that generates the ToolStrip item
+  classes in the Designer.cs; docked strips push each other for space like
+  the real layout engine, and TabControl drops with two ready pages.
 - Keyboard support: arrow keys nudge, `Shift`+arrows move by grid, `Delete` removes,
-  `Ctrl+D` duplicates.
+  `Ctrl+D` duplicates, `Ctrl+C`/`Ctrl+V` copy & paste — including onto a
+  *different* form.
 
 ### ↔️ Split Design / Code view
 The **View Code** button opens the raw XAML beside the designer. Edits flow both ways:
@@ -224,6 +245,10 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
   (`resources.GetObject(...)` with base64 in the form's `.resx`) render on the
   canvas when they are plain image bytes; BinaryFormatter-serialized ones
   cannot be previewed. Newly assigned images always use project resources.
+- Strip *Items* editing covers one level — nested sub-menus and per-item
+  icons/events still need the code view (roadmapped).
+- Control rename is textual (word-boundary) in the Designer.cs and code-behind
+  pair — references from *other* files are not updated.
 - Saving from the designer normalizes the XAML formatting (like most visual designers).
 - The visual preview is an approximation — always confirm with **Run**.
 - Windows-only targets (WPF/WinForms are Windows frameworks).
@@ -234,13 +259,29 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 - [x] Nested layout rendering (StackPanel / DockPanel / Grid rows & columns / TabControl)
 - [x] Visual Studio-style categorized property grid (Anchor/Dock, colors, fonts, full form properties)
 - [x] Images & icons imported as project resources, with VS placement/scaling options
-- [ ] Control renaming that safely updates the code-behind
-- [ ] MenuStrip / ToolStrip / StatusStrip designers and a component tray (Timer, ToolTip, ContextMenuStrip)
-- [ ] Multi-select, alignment & distribution tools, tab-order view
+- [x] Control renaming that safely updates the code-behind
+- [x] MenuStrip / ToolStrip / StatusStrip designers and a component tray (Timer, ToolTip, ContextMenuStrip, dialogs)
+- [x] Multi-select, alignment & distribution tools, tab-order view, copy/paste across forms
+- [x] Docked controls that push each other for space; TabControl and tab-page drops
+- [ ] Sub-menu (nested menu item) designing and item icons
 - [ ] Drag-reordering inside StackPanel / DockPanel children
 - [ ] "Create an Installer" for multi-file releases (Inno Setup script generation)
 - [ ] Style/resource editing and live theme preview
 - [ ] Marketplace publishing and prebuilt VSIX releases
+
+### Beyond 1.0 — premium ideas (v2.0)
+
+The long-term vision is a complete build-and-release studio, with a premium
+tier on top of the free core:
+
+- **Third-party UI library packs** — design-time support for modern control
+  suites like **Guna UI**, **Telerik UI for WinForms**, Krypton, and
+  MaterialSkin: their controls in the toolbox, rendered previews, and the
+  right NuGet references added automatically.
+- **Themed chrome presets** — one-click looks such as Office-2007-style
+  ribbons and menus, dark mode, and rounded "modern app" styling.
+- **One-click releasing** — installer builds (Inno Setup), code signing,
+  version bumping, and update feeds, from the same Release button.
 
 ## Contributing
 

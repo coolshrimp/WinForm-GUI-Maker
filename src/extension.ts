@@ -15,6 +15,7 @@ import { DotnetTools } from './dotnetTools';
 import { newProject } from './scaffold';
 import { registerSidebar } from './sidebar';
 import { addXamlWindow, addWinForm, duplicateDesignFile } from './formFiles';
+import { addCsFile, addResourceFiles } from './resources';
 import { openGuide } from './guide';
 import { openAppSettings } from './appSettings';
 
@@ -86,6 +87,11 @@ export function activate(context: vscode.ExtensionContext): void {
         // Window/form creation and duplication (sidebar buttons + context menus).
         vscode.commands.registerCommand('uimaker.addWindow', () => addXamlWindow(dotnet)),
         vscode.commands.registerCommand('uimaker.addForm', () => addWinForm(dotnet)),
+
+        // Project Files category buttons: new class, import images/resources.
+        vscode.commands.registerCommand('uimaker.addCsFile', () => addCsFile()),
+        vscode.commands.registerCommand('uimaker.addImage', () => addResourceFiles(true)),
+        vscode.commands.registerCommand('uimaker.addResource', () => addResourceFiles(false)),
         vscode.commands.registerCommand('uimaker.duplicateDesignFile', (item?: { designUri?: vscode.Uri } | vscode.Uri) => {
             const uri = item instanceof vscode.Uri ? item : item?.designUri;
             if (!uri) { return; }

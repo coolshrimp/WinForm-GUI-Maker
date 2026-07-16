@@ -88,12 +88,19 @@ export async function pickAndImportImage(docPath: string, iconOnly: boolean): Pr
         filters: iconOnly ? ICON_FILTERS : IMAGE_FILTERS
     });
     if (!picked?.length) { return undefined; }
-    const src = picked[0].fsPath;
+    return importResourceFile(docPath, picked[0].fsPath);
+}
 
-    const projDir = findProjectDir(docPath);
+/**
+ * Import one file as a project resource (copy to Resources/, resx entry,
+ * regenerated accessor class, csproj bookkeeping). Shared by the designer's
+ * image picker and the side panel's Add Image / Add Resource buttons.
+ */
+export function importResourceFile(startPath: string, src: string): ImportedImage | undefined {
+    const projDir = findProjectDir(startPath);
     const csproj = projDir ? csprojPath(projDir) : null;
     if (!projDir || !csproj) {
-        vscode.window.showWarningMessage('UI Maker: no .csproj found above this form — images need a project to import into.');
+        vscode.window.showWarningMessage('UI Maker: no .csproj found — resources need a project to import into.');
         return undefined;
     }
 
@@ -118,9 +125,8 @@ export async function pickAndImportImage(docPath: string, iconOnly: boolean): Pr
             fs.copyFileSync(src, dest);
         }
 
-        // 2) Register in Properties/Resources.resx.
-        const isIcon = /\.ico$/i.test(dest);
-        const key = addResxFileRef(projDir, dest, isIcon);
+        // 2) Register in Properties/Resources.resx with the right CLR type.
+        const key = addResxFileRef(projDir, dest, resourceTypeFor(dest));
 
         // 3) Regenerate the typed accessor class.
         const ns = rootNamespace(csproj);
@@ -131,7 +137,7 @@ export async function pickAndImportImage(docPath: string, iconOnly: boolean): Pr
 
         return { key, code: `global::${ns}.Properties.Resources.${key}`, fsPath: dest };
     } catch (err) {
-        vscode.window.showErrorMessage(`UI Maker: could not import the image — ${err}`);
+        vscode.window.showErrorMessage(`UI Maker: could not import the resource — ${err}`);
         return undefined;
     }
 }
@@ -158,6 +164,17 @@ const RESX_HEADER = `<?xml version="1.0" encoding="utf-8"?>
 
 const BITMAP_TYPE = 'System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a4a';
 const ICON_TYPE = 'System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a4a';
+const STRING_TYPE = 'System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;utf-8';
+const BYTES_TYPE = 'System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089';
+
+/** ResXFileRef type spec for a file, by extension (VS picks the same way). */
+function resourceTypeFor(file: string): string {
+    const ext = path.extname(file).toLowerCase();
+    if (ext === '.ico') { return ICON_TYPE; }
+    if (['.png', '.jpg', '.jpeg', '.gif', '.bmp'].includes(ext)) { return BITMAP_TYPE; }
+    if (['.txt', '.json', '.xml', '.csv', '.md'].includes(ext)) { return STRING_TYPE; }
+    return BYTES_TYPE;
+}
 
 function resxPath(projDir: string): string {
     return path.join(projDir, 'Properties', 'Resources.resx');
@@ -180,17 +197,16 @@ function parseResxEntries(xml: string): Array<{ name: string; fileRef: string | 
 }
 
 /**
- * Add (or reuse) a fileref entry for the image; returns the resource name.
+ * Add (or reuse) a fileref entry for the file; returns the resource name.
  * Creates Properties/Resources.resx when the project has none.
  */
-function addResxFileRef(projDir: string, imageAbs: string, isIcon: boolean): string {
+function addResxFileRef(projDir: string, fileAbs: string, type: string): string {
     const file = resxPath(projDir);
     if (!fs.existsSync(path.dirname(file))) { fs.mkdirSync(path.dirname(file), { recursive: true }); }
     let xml = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : RESX_HEADER;
 
     // The fileref path is relative to the resx (Properties/) directory.
-    const rel = path.relative(path.dirname(file), imageAbs).split('/').join('\\');
-    const type = isIcon ? ICON_TYPE : BITMAP_TYPE;
+    const rel = path.relative(path.dirname(file), fileAbs).split('/').join('\\');
     const value = `${rel};${type}`;
 
     const entries = parseResxEntries(xml);
@@ -199,9 +215,9 @@ function addResxFileRef(projDir: string, imageAbs: string, isIcon: boolean): str
     if (existing) { return existing.name; }
 
     // Unique name derived from the file name.
-    let key = resourceKey(imageAbs);
+    let key = resourceKey(fileAbs);
     const names = new Set(entries.map(e => e.name));
-    for (let i = 1; names.has(key); i++) { key = `${resourceKey(imageAbs)}${i}`; }
+    for (let i = 1; names.has(key); i++) { key = `${resourceKey(fileAbs)}${i}`; }
 
     // VS declares the alias once; older/minimal resx files may lack it.
     if (!/assembly alias="System.Windows.Forms"/.test(xml)) {
@@ -224,15 +240,17 @@ function writeResourcesDesigner(projDir: string, rootNs: string): void {
     const ns = `${rootNs}.Properties`;
 
     const props = entries.map(e => {
-        if (e.isString) {
+        // Text resources (inline strings and .txt filerefs) use GetString.
+        if (e.isString || (e.fileRef && /System\.String,/.test(e.fileRef))) {
             return `        internal static string ${e.name} {\r\n` +
                 `            get {\r\n` +
                 `                return ResourceManager.GetString("${e.name}", resourceCulture);\r\n` +
                 `            }\r\n` +
                 `        }`;
         }
-        const type = e.fileRef && /System\.Drawing\.Icon/.test(e.fileRef)
-            ? 'System.Drawing.Icon' : 'System.Drawing.Bitmap';
+        const type = e.fileRef && /System\.Drawing\.Icon/.test(e.fileRef) ? 'System.Drawing.Icon'
+            : e.fileRef && /System\.Byte\[\]/.test(e.fileRef) ? 'byte[]'
+            : 'System.Drawing.Bitmap';
         return `        internal static ${type} ${e.name} {\r\n` +
             `            get {\r\n` +
             `                object obj = ResourceManager.GetObject("${e.name}", resourceCulture);\r\n` +
@@ -336,6 +354,89 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
         fs.writeFileSync(csproj, xml, 'utf8');
     } catch {
         vscode.window.showWarningMessage('UI Maker: could not register the resource files in the project — add them manually.');
+    }
+}
+
+// -------------------------------------------------------- sidebar commands
+
+/** The workspace's project directory (first .csproj found), or null. */
+async function workspaceProjectDir(): Promise<string | null> {
+    const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules}/**', 1);
+    return found.length ? path.dirname(found[0].fsPath) : null;
+}
+
+/** Side panel "Add Class" on the Code category: create Name.cs with a stub. */
+export async function addCsFile(): Promise<void> {
+    const projDir = await workspaceProjectDir();
+    if (!projDir) {
+        vscode.window.showWarningMessage('UI Maker: open a folder with a .csproj first.');
+        return;
+    }
+    const name = await vscode.window.showInputBox({
+        prompt: 'Class name for the new .cs file',
+        placeHolder: 'FileProcessor',
+        validateInput: v => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim())
+            ? undefined
+            : 'Use a valid C# class name (letters, digits, underscore; not starting with a digit).'
+    });
+    if (!name) { return; }
+    const cls = name.trim();
+    const file = path.join(projDir, `${cls}.cs`);
+    if (fs.existsSync(file)) {
+        vscode.window.showWarningMessage(`UI Maker: ${cls}.cs already exists.`);
+        return;
+    }
+
+    const csproj = csprojPath(projDir);
+    const ns = csproj ? rootNamespace(csproj) : 'App';
+    fs.writeFileSync(file,
+        `using System;\r\n` +
+        `\r\n` +
+        `namespace ${ns}\r\n` +
+        `{\r\n` +
+        `    public class ${cls}\r\n` +
+        `    {\r\n` +
+        `    }\r\n` +
+        `}\r\n`, 'utf8');
+
+    // Classic projects list every file; SDK projects glob *.cs automatically.
+    if (csproj) {
+        try {
+            let xml = fs.readFileSync(csproj, 'utf8');
+            if (!/<Project\s[^>]*\bSdk\s*=/.test(xml) && /<\/Project>/.test(xml)) {
+                const eol = xml.includes('\r\n') ? '\r\n' : '\n';
+                xml = xml.replace(/<\/Project>/,
+                    `  <ItemGroup>${eol}    <Compile Include="${cls}.cs" />${eol}  </ItemGroup>${eol}</Project>`);
+                fs.writeFileSync(csproj, xml, 'utf8');
+            }
+        } catch { /* non-fatal — the file still exists */ }
+    }
+    await vscode.window.showTextDocument(vscode.Uri.file(file));
+}
+
+/** Side panel "Add Image" / "Add Resource": import files as project resources. */
+export async function addResourceFiles(imagesOnly: boolean): Promise<void> {
+    const projDir = await workspaceProjectDir();
+    if (!projDir) {
+        vscode.window.showWarningMessage('UI Maker: open a folder with a .csproj first.');
+        return;
+    }
+    const picked = await vscode.window.showOpenDialog({
+        canSelectMany: true,
+        openLabel: imagesOnly ? 'Add Image(s)' : 'Add Resource(s)',
+        filters: imagesOnly ? IMAGE_FILTERS : { 'All files': ['*'] }
+    });
+    if (!picked?.length) { return; }
+
+    const keys: string[] = [];
+    for (const uri of picked) {
+        const res = importResourceFile(path.join(projDir, 'placeholder'), uri.fsPath);
+        if (res) { keys.push(res.key); }
+    }
+    if (keys.length) {
+        vscode.window.showInformationMessage(
+            `UI Maker: added ${keys.length} resource${keys.length === 1 ? '' : 's'} — ` +
+            `use Properties.Resources.${keys[0]} in your code.`);
     }
 }
 

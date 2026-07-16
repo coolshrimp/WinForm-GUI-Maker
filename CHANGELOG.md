@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.9.0
+
+The "full-fledged app builder" release — every item from the pre-release gap
+list, plus project-file management from the side panel.
+
+**Control rename that's actually safe.** `(Name)` in the property grid is now
+editable: every reference in the Designer.cs (field, instantiation, property
+block, comment banner, `Name = "..."` string, event wiring) is renamed, and
+the code-behind `.cs` file is updated too. Event handler names are left
+untouched, exactly like Visual Studio. Collisions and invalid identifiers are
+rejected.
+
+**Multi-select, alignment tools, and tab order.**
+- Ctrl/Shift+click builds a multi-selection (dashed outlines); dragging any
+  member moves the whole group; arrows nudge the group; Delete removes it.
+- New alignment toolbar (appears with 2+ selected): align lefts/tops/rights/
+  bottoms to the primary selection, same width/height/size, distribute
+  horizontally/vertically.
+- **⇥ Tab Order** button — VS's View → Tab Order: badges show each control's
+  TabIndex; click controls in sequence to assign 0, 1, 2, …; Esc to finish.
+
+**Copy & paste.** Ctrl+C / Ctrl+V for controls — including cross-form: the
+designer clipboard lives in the extension host, so you can copy a button on
+one form and paste it onto another. Works for XAML elements too.
+
+**Component tray, like VS.** A new *Components* toolbox section: Timer,
+ToolTip, ContextMenuStrip, NotifyIcon, BackgroundWorker, ImageList,
+ErrorProvider, OpenFileDialog, SaveFileDialog, FolderBrowserDialog,
+ColorDialog, FontDialog. Dropped components appear in a tray below the form
+(chips: click to edit properties, double-click to wire the default event —
+Timer.Tick, BackgroundWorker.DoWork, FileOk, …). The generated code uses the
+`components` IContainer exactly like VS. Controls also gain a
+`ContextMenuStrip` property listing the trays' menus.
+
+**Menus, toolbars, status bars.** MenuStrip / ToolStrip / StatusStrip in the
+toolbox (they dock themselves; MenuStrip also sets `MainMenuStrip`), plus an
+**Items** editor in the property grid — one line per item; adding, renaming,
+reordering, or deleting lines creates/updates/removes the ToolStripMenuItem /
+ToolStripStatusLabel / ToolStripButton declarations in the Designer.cs.
+Strips render on the canvas; deleting a strip cleans up its items too.
+
+**Real container behavior.** TabControl is back in the WinForms toolbox
+(inserted with two pages, VS-style) and controls can be dropped onto tab
+pages. Docked siblings now **push each other** for space — the canvas runs
+the same reverse-order dock layout as WinForms, so MenuStrip + ToolStrip +
+StatusStrip + Fill panels lay out correctly. Deleting a container now removes
+everything inside it from the code.
+
+**Side panel: category actions.** The Project Files categories grew inline
+buttons: **＋ New C# Class File** (stubbed class, registered in classic
+csproj), **＋ Add Image**, and **＋ Add Resource** (any file type — images,
+icons, text, or binary, each imported into `Resources/` + `Resources.resx`
+with the right CLR type and a regenerated `Resources.Designer.cs`).
+
 ## 0.8.1
 
 Documentation — README rewritten for the Visual Studio-style property grid,

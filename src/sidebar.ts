@@ -149,10 +149,11 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         const files = await vscode.workspace.findFiles(
             '**/*', '**/{bin,obj,node_modules,.git,.vs,packages}/**', 800);
 
-        const cats: Record<string, { icon: string; files: vscode.Uri[] }> = {
-            'Code':               { icon: 'file-code', files: [] },
-            'Images & Icons':     { icon: 'file-media', files: [] },
-            'Resources':          { icon: 'library', files: [] },
+        // contextValue drives the inline add buttons (package.json menus).
+        const cats: Record<string, { icon: string; context?: string; files: vscode.Uri[] }> = {
+            'Code':               { icon: 'file-code', context: 'uimakerCatCode', files: [] },
+            'Images & Icons':     { icon: 'file-media', context: 'uimakerCatImages', files: [] },
+            'Resources':          { icon: 'library', context: 'uimakerCatResources', files: [] },
             'Data & Config':      { icon: 'gear', files: [] },
             'Project & Solution': { icon: 'project', files: [] },
             'Other':              { icon: 'file', files: [] }
@@ -192,9 +193,22 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
             groups.push(new SidebarItem(name, {
                 icon: cat.icon,
                 description: String(cat.files.length),
+                contextValue: cat.context,
                 collapsed: true,
                 children
             }));
+        }
+        // Categories with add buttons always show, even while empty.
+        for (const [name, cat] of Object.entries(cats)) {
+            if (cat.context && !cat.files.length) {
+                groups.push(new SidebarItem(name, {
+                    icon: cat.icon,
+                    description: '0',
+                    contextValue: cat.context,
+                    collapsed: true,
+                    children: [new SidebarItem('Empty — use the + button to add', { icon: 'info' })]
+                }));
+            }
         }
         return groups.length ? groups : [new SidebarItem('No other files in this workspace', { icon: 'info' })];
     }

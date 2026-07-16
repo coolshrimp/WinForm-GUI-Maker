@@ -58,6 +58,26 @@ html, body {
     background: var(--vscode-button-secondaryHoverBackground, #45494e);
 }
 
+#ff-toolbar button.active {
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+}
+
+/* Alignment tools appear when two or more controls are selected. */
+#ff-align-tools {
+    display: inline-flex;
+    gap: 2px;
+    padding: 0 4px;
+    border-left: 1px solid var(--vscode-panel-border, #444);
+    border-right: 1px solid var(--vscode-panel-border, #444);
+}
+
+#ff-align-tools button {
+    padding: 3px 7px;
+    font-size: 13px;
+    line-height: 1;
+}
+
 .ff-check, .ff-field {
     display: inline-flex;
     align-items: center;
@@ -120,6 +140,18 @@ html, body {
     width: 18px;
     text-align: center;
     opacity: 0.85;
+}
+
+/* Section header separating controls from non-visual components. */
+.ff-tool-section {
+    margin-top: 8px;
+    padding: 4px 10px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.6;
+    border-top: 1px solid var(--vscode-panel-border, #444);
 }
 
 /* ------------------------------------------------------------------- canvas */
@@ -541,6 +573,77 @@ html, body {
     padding: 2px 8px;
 }
 
+.ff-wf-statusstrip {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: #f0f0f0;
+    border-top: 1px solid #d5d5d5;
+    padding: 0 8px;
+    font-size: 11px;
+    color: #333;
+}
+
+.ff-wf-toolstrip {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    background: #f5f5f5;
+    border-bottom: 1px solid #ddd;
+    padding: 0 4px;
+    font-size: 12px;
+}
+
+.ff-ts-btn {
+    padding: 2px 7px;
+    border: 1px solid transparent;
+    border-radius: 2px;
+}
+
+.ff-ts-btn:hover {
+    border-color: #bbb;
+    background: #e8e8e8;
+}
+
+/* Component tray below the form (Timer, ToolTip, dialogs, ...). */
+#ff-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 6px 8px;
+    max-width: 900px;
+    border: 1px dashed var(--vscode-panel-border, #555);
+    border-radius: 4px;
+    background: var(--vscode-sideBar-background);
+}
+
+.ff-tray-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    font-size: 12px;
+    border: 1px solid var(--vscode-panel-border, #555);
+    border-radius: 3px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.ff-tray-chip:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.ff-tray-chip.active {
+    border-color: var(--vscode-focusBorder, #007acc);
+    background: var(--vscode-list-activeSelectionBackground, #094771);
+    color: var(--vscode-list-activeSelectionForeground, #fff);
+}
+
+.ff-tray-chip i {
+    font-style: normal;
+}
+
 /* Calendar preview */
 .ff-look-calendar {
     flex-direction: column;
@@ -578,6 +681,27 @@ html, body {
     border: 1px solid #007acc;
     pointer-events: none;
     z-index: 10;
+}
+
+/* Secondary members of a multi-selection: outline only, no handles. */
+.ff-sel-secondary {
+    border: 1px dashed #007acc;
+}
+
+/* Tab-order badges (View -> Tab Order in VS). */
+.ff-tab-badge {
+    position: absolute;
+    z-index: 20;
+    min-width: 18px;
+    padding: 1px 4px;
+    background: #1a5fb4;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    border: 1px solid #fff;
+    border-radius: 2px;
+    pointer-events: none;
 }
 
 .ff-selection-tag {
@@ -786,6 +910,24 @@ html, body {
     color: var(--vscode-button-foreground, #fff);
     border-color: var(--vscode-button-background, #0e639c);
     opacity: 1;
+}
+
+/* Strip Items editor: one item per line. */
+.ff-prop-row.ff-row-tall {
+    align-items: flex-start;
+}
+
+.ff-items-edit {
+    flex: 1 1 auto;
+    min-width: 0;
+    resize: vertical;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 2px;
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: 12px;
 }
 
 /* Image property editor: readonly value + "…" import + "✕" clear buttons. */

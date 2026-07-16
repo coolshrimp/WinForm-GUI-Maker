@@ -16,6 +16,9 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
     /** Document shown in the most recently focused designer (for commands). */
     public static activeDocumentUri: vscode.Uri | undefined;
 
+    /** Designer clipboard shared across forms (webviews are isolated). */
+    private static clipboard: unknown;
+
     public static register(context: vscode.ExtensionContext): vscode.Disposable {
         return vscode.window.registerCustomEditorProvider(
             DesignerProvider.viewType,
@@ -92,7 +95,39 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 case 'ready':
                     postConfig();
                     postUpdate();
+                    if (DesignerProvider.clipboard) {
+                        void panel.webview.postMessage({ type: 'clipboard', data: DesignerProvider.clipboard });
+                    }
                     break;
+
+                // Designer clipboard (copy on one form, paste on another).
+                case 'setClipboard':
+                    DesignerProvider.clipboard = msg.data;
+                    break;
+
+                // Control rename: the webview already rewrote the Designer.cs;
+                // mirror the identifier rename into the code-behind .cs file.
+                case 'renameControl': {
+                    const { oldName, newName } = msg as { oldName: string; newName: string };
+                    if (!/^[A-Za-z_]\w*$/.test(oldName ?? '') || !/^[A-Za-z_]\w*$/.test(newName ?? '')) { break; }
+                    const codePath = document.uri.fsPath.replace(/\.designer\.cs$/i, '.cs');
+                    if (codePath.toLowerCase() === document.uri.fsPath.toLowerCase()) { break; }
+                    try {
+                        const codeUri = vscode.Uri.file(codePath);
+                        const codeDoc = await vscode.workspace.openTextDocument(codeUri);
+                        const before = codeDoc.getText();
+                        const after = before.replace(new RegExp(`\\b${oldName}\\b`, 'g'), newName);
+                        if (after !== before) {
+                            const edit = new vscode.WorkspaceEdit();
+                            edit.replace(codeUri, new vscode.Range(0, 0, codeDoc.lineCount, 0), after);
+                            await vscode.workspace.applyEdit(edit);
+                            await codeDoc.save();
+                        }
+                    } catch {
+                        // No code-behind next to this designer file — nothing to update.
+                    }
+                    break;
+                }
 
                 // Designer produced new XAML — replace the whole document.
                 case 'edit': {
@@ -194,6 +229,18 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     <option value="1.5">150%</option>
                 </select>
             </label>
+            <button id="ff-btn-taborder" title="Tab order: click controls in the order Tab should visit them (Esc to finish)">⇥ Tab Order</button>
+            <span id="ff-align-tools" hidden>
+                <button id="ff-al-left" title="Align lefts (to the primary selection)">⫞</button>
+                <button id="ff-al-top" title="Align tops">⫠</button>
+                <button id="ff-al-right" title="Align rights">⫟</button>
+                <button id="ff-al-bottom" title="Align bottoms">⫡</button>
+                <button id="ff-al-samew" title="Same width as the primary selection">⇔</button>
+                <button id="ff-al-sameh" title="Same height">⇕</button>
+                <button id="ff-al-samesize" title="Same size">▣</button>
+                <button id="ff-al-disth" title="Distribute horizontally">⇹</button>
+                <button id="ff-al-distv" title="Distribute vertically">⇳</button>
+            </span>
             <button id="ff-btn-delete" title="Delete selected control (Del)">🗑 Delete</button>
         </div>
 
@@ -214,6 +261,8 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     </div>
                     <div id="ff-surface"></div>
                 </div>
+                <!-- Non-visual components (Timer, ToolTip, dialogs, ...) -->
+                <div id="ff-tray" hidden></div>
             </div>
 
             <!-- Properties / Events -->
