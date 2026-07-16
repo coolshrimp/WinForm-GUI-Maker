@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.2
+
+**Marketplace identity.** Added the final UI Maker app icon to the extension
+manifest: a compact Visual Studio Code extension badge, `.NET` identity, and
+visual form-designer mark optimized for Marketplace thumbnail sizes. The
+packaged icon is a crisp 256×256 PNG without shipping the oversized source.
+
 ## 0.11.1
 
 Reliability and VS-parity hardening after the 0.11 project-tools release.

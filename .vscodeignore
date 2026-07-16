@@ -8,4 +8,5 @@ tsconfig.json
 **/*.map
 node_modules/**
 *.vsix
+media/icon-HD.png
 readme.txt
