@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { ensureEventHandler } from './codeBehind';
+import { pickAndImportImage, resolveImages, findProjectDir, ImageKey } from './resources';
 
 export class DesignerProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'uimaker.designer';
@@ -34,9 +35,17 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         panel: vscode.WebviewPanel,
         _token: vscode.CancellationToken
     ): Promise<void> {
+        // The canvas renders project images (Button.Image, PictureBox, form
+        // icons), so the workspace and the form's project folder must be
+        // readable by the webview alongside the extension's own media.
+        const resourceRoots = [vscode.Uri.joinPath(this.context.extensionUri, 'media')];
+        for (const f of vscode.workspace.workspaceFolders ?? []) { resourceRoots.push(f.uri); }
+        const projDir = findProjectDir(document.uri.fsPath);
+        resourceRoots.push(vscode.Uri.file(projDir ?? path.dirname(document.uri.fsPath)));
+
         panel.webview.options = {
             enableScripts: true,
-            localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
+            localResourceRoots: resourceRoots
         };
         panel.webview.html = this.buildHtml(panel.webview);
 
@@ -109,6 +118,36 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 case 'addHandler':
                     await ensureEventHandler(document.uri.fsPath, msg.handler, msg.event, msg.argsType);
                     break;
+
+                // Property grid "…" on an Image/Icon property: import the
+                // picked file as a project resource and hand back the C#
+                // expression plus a URI the canvas can render.
+                case 'pickImage': {
+                    const res = await pickAndImportImage(document.uri.fsPath, !!msg.iconOnly);
+                    if (res) {
+                        void panel.webview.postMessage({
+                            type: 'imageSet',
+                            ctrl: msg.ctrl ?? null,
+                            prop: msg.prop,
+                            isForm: !!msg.isForm,
+                            code: res.code,
+                            key: res.key,
+                            uri: String(panel.webview.asWebviewUri(vscode.Uri.file(res.fsPath)))
+                        });
+                    }
+                    break;
+                }
+
+                // Canvas asks for the images the document references.
+                case 'resolveImages': {
+                    const resolved = resolveImages(document.uri.fsPath, (msg.keys ?? []) as ImageKey[]);
+                    const images: Record<string, string> = {};
+                    for (const [k, v] of resolved) {
+                        images[k] = v.startsWith('data:') ? v : String(panel.webview.asWebviewUri(vscode.Uri.file(v)));
+                    }
+                    void panel.webview.postMessage({ type: 'images', images });
+                    break;
+                }
             }
         }));
 
@@ -184,7 +223,12 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     <button id="ff-tab-events">Events</button>
                 </div>
                 <div id="ff-props-target" class="ff-panel-title"></div>
+                <div id="ff-props-tools">
+                    <button id="ff-sort-cat" class="active" title="Categorized">▤ Categorized</button>
+                    <button id="ff-sort-az" title="Alphabetical">A–Z</button>
+                </div>
                 <div id="ff-props-body"></div>
+                <div id="ff-prop-desc"></div>
             </div>
         </div>
 

@@ -115,6 +115,40 @@
     /** Panels that accept toolbox drops. */
     const DROP_PANELS = ['Grid', 'Canvas', 'StackPanel', 'WrapPanel', 'DockPanel'];
 
+    /** Property-grid categories for XAML attributes (default: Common). */
+    const XAML_CATS = {
+        Width: 'Layout', Height: 'Layout', Margin: 'Layout', Padding: 'Layout',
+        HorizontalAlignment: 'Layout', VerticalAlignment: 'Layout',
+        'Grid.Row': 'Layout', 'Grid.Column': 'Layout',
+        Background: 'Appearance', Foreground: 'Appearance', FontSize: 'Appearance',
+        FontWeight: 'Appearance', BorderBrush: 'Appearance', BorderThickness: 'Appearance',
+        CornerRadius: 'Appearance', Title: 'Appearance',
+        IsEnabled: 'Behavior', Visibility: 'Behavior', ToolTip: 'Behavior',
+        ResizeMode: 'Window Style', WindowStartupLocation: 'Layout'
+    };
+
+    /** Grid help-pane text for common XAML attributes. */
+    const XAML_DESCS = {
+        Name: 'The x:Name used to reference the element from code-behind.',
+        Width: 'The explicit width of the element in device-independent pixels.',
+        Height: 'The explicit height of the element in device-independent pixels.',
+        Margin: 'The outer spacing around the element: left,top,right,bottom.',
+        HorizontalAlignment: 'How the element aligns horizontally inside its layout slot.',
+        VerticalAlignment: 'How the element aligns vertically inside its layout slot.',
+        'Grid.Row': 'The Grid row this element occupies.',
+        'Grid.Column': 'The Grid column this element occupies.',
+        Background: 'The brush painted behind the content.',
+        Foreground: 'The brush used to draw text and glyphs.',
+        FontSize: 'The size of the text in device-independent pixels.',
+        FontWeight: 'The weight (thickness) of the text.',
+        IsEnabled: 'Whether the element responds to user interaction.',
+        Visibility: 'Visible, Hidden (keeps space), or Collapsed (no space).',
+        ToolTip: 'The tooltip shown when the pointer hovers over the element.',
+        Title: 'The text shown in the window title bar.',
+        ResizeMode: 'Whether and how the user can resize the window.',
+        WindowStartupLocation: 'Where the window first appears on screen.'
+    };
+
     // ------------------------------------------------------------------ state
 
     let docMode = 'xaml';       // 'xaml' (WPF markup) | 'winforms' (*.Designer.cs)
@@ -161,6 +195,18 @@
             $('ff-grid').value = String(config.gridSize);
             $('ff-snap').checked = config.snap;
             render();
+        } else if (msg.type === 'imageSet') {
+            // Host imported an image for a property — write the assignment.
+            imageCache.set(`p:${msg.key}`, msg.uri);
+            if (docMode === 'winforms') {
+                wfApply(msg.isForm
+                    ? wfSetFormLine(msg.prop, msg.code)
+                    : wfSetLine(msg.ctrl, msg.prop, msg.code));
+            }
+        } else if (msg.type === 'images') {
+            // Host resolved referenced images — cache and redraw.
+            for (const [k, v] of Object.entries(msg.images ?? {})) { imageCache.set(k, v); }
+            if (docMode === 'winforms') { wfRender(); }
         }
     });
 
@@ -336,6 +382,7 @@
         surfaceEl.innerHTML = '';
         visuals = [];
         titleText.textContent = config.docName;
+        windowBox.classList.add('ff-noresize');
         renderPanel();
     }
 
@@ -343,6 +390,9 @@
         if (docMode === 'winforms') { wfRender(); return; }
         if (!windowEl || !xamlDoc) { renderEmpty(); return; }
         surfaceEl.style.display = 'grid';
+        windowBox.classList.remove('ff-noresize');
+        const titleIco = document.getElementById('ff-title-icon');
+        if (titleIco) { titleIco.style.display = 'none'; } // WinForms-only
 
         // Window frame: size, title, background.
         const winW = num(windowEl.getAttribute('Width'), 800);
@@ -1065,6 +1115,60 @@
         sel.style.height = `${b.h}px`;
     }
 
+    // ------------------------------------------------------------ form resize
+    // Grips on the mock window's right/bottom edges, like resizing the form in
+    // the Visual Studio designer. WinForms writes ClientSize; XAML writes the
+    // Window's Width/Height attributes.
+
+    function initFormGrips() {
+        for (const dir of ['e', 's', 'se']) {
+            const g = document.createElement('div');
+            g.className = `ff-formgrip ff-fg-${dir}`;
+            g.title = 'Resize the form';
+            g.addEventListener('mousedown', e => startFormResize(e, dir));
+            windowBox.appendChild(g);
+        }
+    }
+
+    function startFormResize(e, dir) {
+        if (e.button !== 0) { return; }
+        const isWf = docMode === 'winforms';
+        if (isWf ? !wfForm : !windowEl) { return; }
+        e.preventDefault();
+        e.stopPropagation();
+
+        const r = surfaceEl.getBoundingClientRect();
+        const start = { w: r.width / zoom, h: r.height / zoom };
+        const sx = e.clientX, sy = e.clientY;
+
+        const compute = ev => ({
+            w: dir.includes('e') ? Math.max(120, snap(start.w + (ev.clientX - sx) / zoom)) : Math.round(start.w),
+            h: dir.includes('s') ? Math.max(60, snap(start.h + (ev.clientY - sy) / zoom)) : Math.round(start.h)
+        });
+
+        const onMove = ev => {
+            const b = compute(ev);
+            windowBox.style.width = `${b.w}px`;
+            surfaceEl.style.height = `${b.h}px`;
+            drawSelection();
+            setStatus(`${isWf ? wfForm.name : 'Window'} — ${b.w} × ${b.h}`);
+        };
+        const onUp = ev => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            const b = compute(ev);
+            if (isWf) {
+                wfApply(wfSetFormLine('ClientSize', `new System.Drawing.Size(${b.w}, ${b.h})`));
+            } else {
+                windowEl.setAttribute('Width', String(b.w));
+                windowEl.setAttribute('Height', String(b.h + 32)); // + mock title bar
+                commit();
+            }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }
+
     function parseMargin(str) {
         if (!str) { return { l: 0, t: 0, r: 0, b: 0 }; }
         const parts = str.split(',').map(s => parseFloat(s.trim()) || 0);
@@ -1213,8 +1317,79 @@
 
     // ========================================================== property panel
 
+    // ------------------------------------------------------ VS-style prop grid
+    // Shared by the XAML and WinForms panels: rows are grouped under
+    // collapsible category headers (or flat A-Z), values set explicitly in the
+    // document render bold, and the pane at the bottom describes the property
+    // under the cursor — mirroring the Visual Studio Properties window.
+
+    let propSort = 'cat';              // 'cat' (categorized) | 'az' (alphabetical)
+    const collapsedCats = new Set();   // category names the user collapsed
+    const propDescEl = $('ff-prop-desc');
+
+    /** Append rows [{label, cat, node}] grouped/sorted per the active mode. */
+    function renderGrid(rows) {
+        const frag = document.createDocumentFragment();
+        if (propSort === 'az') {
+            rows.sort((a, b) => a.label.localeCompare(b.label));
+            for (const r of rows) { frag.appendChild(r.node); }
+        } else {
+            const cats = new Map();
+            for (const r of rows) {
+                const c = r.cat || 'Misc';
+                if (!cats.has(c)) { cats.set(c, []); }
+                cats.get(c).push(r);
+            }
+            for (const cat of [...cats.keys()].sort()) {
+                const collapsed = collapsedCats.has(cat);
+                const head = document.createElement('div');
+                head.className = 'ff-cat-header';
+                head.innerHTML = `<span class="ff-cat-arrow">${collapsed ? '▸' : '▾'}</span>${escapeHtml(cat)}`;
+                head.addEventListener('mousedown', e => e.preventDefault());
+                head.addEventListener('click', () => {
+                    if (collapsed) { collapsedCats.delete(cat); } else { collapsedCats.add(cat); }
+                    renderPanel();
+                });
+                frag.appendChild(head);
+                if (collapsed) { continue; }
+                for (const r of cats.get(cat).sort((a, b) => a.label.localeCompare(b.label))) {
+                    frag.appendChild(r.node);
+                }
+            }
+        }
+        propsBody.appendChild(frag);
+    }
+
+    /** Update the description pane when a row is focused or clicked. */
+    function attachDesc(row, name, desc) {
+        const show = () => showPropDesc(name, desc);
+        row.addEventListener('focusin', show);
+        row.addEventListener('mousedown', show);
+    }
+
+    function showPropDesc(name, desc) {
+        if (!propDescEl) { return; }
+        propDescEl.innerHTML = `<b>${escapeHtml(name)}</b>${escapeHtml(desc || '')}`;
+    }
+
+    /** Get-or-create a shared <datalist>, returns its id. */
+    function ensureDatalist(id, values) {
+        if (!document.getElementById(id)) {
+            const dl = document.createElement('datalist');
+            dl.id = id;
+            dl.append(...values.map(v => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                return opt;
+            }));
+            document.body.appendChild(dl);
+        }
+        return id;
+    }
+
     function renderPanel() {
         propsBody.innerHTML = '';
+        if (propDescEl) { propDescEl.innerHTML = ''; }
 
         if (docMode === 'winforms') { wfRenderPanel(); return; }
 
@@ -1235,23 +1410,31 @@
     }
 
     function renderPropsTab(el, isWindow) {
+        const rows = [];
         if (!isWindow) {
             // Name is special: stored as x:Name.
-            propsBody.appendChild(propRow('Name', getName(el), v => {
+            const nameRow = propRow('Name', getName(el), v => {
                 setName(el, v.trim());
                 commit();
-            }));
+            });
+            if (getName(el)) { nameRow.classList.add('ff-set'); }
+            attachDesc(nameRow, 'Name', XAML_DESCS.Name);
+            rows.push({ label: 'Name', cat: 'Design', node: nameRow });
         }
         const names = isWindow
             ? WINDOW_PROPS
             : [...(CONTROLS[el.localName]?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS];
 
         for (const prop of names) {
-            propsBody.appendChild(propRow(prop, el.getAttribute(prop) ?? '', v => {
+            const node = propRow(prop, el.getAttribute(prop) ?? '', v => {
                 if (v === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, v); }
                 commit();
-            }, ENUM_VALUES[prop]));
+            }, ENUM_VALUES[prop]);
+            if (el.getAttribute(prop) !== null) { node.classList.add('ff-set'); }
+            attachDesc(node, prop, XAML_DESCS[prop] ?? '');
+            rows.push({ label: prop, cat: XAML_CATS[prop] ?? 'Common', node });
         }
+        renderGrid(rows);
     }
 
     /** One labelled input row; commits on change (blur/Enter). */
@@ -1427,8 +1610,9 @@
     // ============================================================== keyboard
 
     document.addEventListener('keydown', e => {
-        // Ignore shortcuts while typing in a panel input.
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) { return; }
+        // Ignore shortcuts while interacting with panel inputs/selects/buttons.
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
+            || e.target instanceof HTMLButtonElement) { return; }
         if (!selected) { return; }
 
         if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1529,6 +1713,24 @@
         renderPanel();
     });
 
+    // Property grid sort mode: categorized (like VS) or flat alphabetical.
+    const sortCatBtn = $('ff-sort-cat');
+    const sortAzBtn = $('ff-sort-az');
+    if (sortCatBtn && sortAzBtn) {
+        sortCatBtn.addEventListener('click', () => {
+            propSort = 'cat';
+            sortCatBtn.classList.add('active');
+            sortAzBtn.classList.remove('active');
+            renderPanel();
+        });
+        sortAzBtn.addEventListener('click', () => {
+            propSort = 'az';
+            sortAzBtn.classList.add('active');
+            sortCatBtn.classList.remove('active');
+            renderPanel();
+        });
+    }
+
     // ================================================================= banner
 
     function showBanner(text, actionLabel, action) {
@@ -1567,28 +1769,30 @@
     // line-oriented patterns and edited surgically: every change replaces or
     // inserts individual statements, leaving the rest of the file untouched.
 
-    /** WinForms toolbox: default sizes match the Visual Studio toolbox. */
+    /** WinForms toolbox: default sizes match the Visual Studio toolbox.
+     *  `props` lists only the type-SPECIFIC grid entries — every control also
+     *  gets WF_COMMON_PROPS (layout, colors, behavior, accessibility). */
     const WF_CONTROLS = {
-        Button:         { icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'Enabled', 'Visible', 'TabIndex'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
-        Label:          { icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'Enabled', 'Visible'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
-        LinkLabel:      { icon: '🔗', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'Enabled', 'Visible'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
-        TextBox:        { icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'Enabled', 'Visible'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
-        CheckBox:       { icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'Enabled', 'Visible'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
-        RadioButton:    { icon: '◉', w: 95,  h: 19,  text: 'radioButton', props: ['Text', 'Checked', 'Enabled', 'Visible'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
-        ComboBox:       { icon: '▾', w: 121, h: 23,  text: '',            props: ['Text', 'Enabled', 'Visible'], events: ['SelectedIndexChanged', 'TextChanged'], defaultEvent: 'SelectedIndexChanged' },
-        ListBox:        { icon: '≡', w: 120, h: 94,  text: '',            props: ['Enabled', 'Visible'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
-        ListView:       { icon: '☰', w: 160, h: 97,  text: '',            props: ['Enabled', 'Visible'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
-        TreeView:       { icon: '🌲', w: 160, h: 97,  text: '',            props: ['Enabled', 'Visible'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
-        DataGridView:   { icon: '▦', w: 240, h: 150, text: '',            props: ['ReadOnly', 'Enabled', 'Visible'], events: ['CellClick', 'CellValueChanged', 'SelectionChanged'], defaultEvent: 'CellClick' },
-        PictureBox:     { icon: '🖼', w: 100, h: 50,  text: '',            props: ['Enabled', 'Visible'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
-        ProgressBar:    { icon: '▱', w: 100, h: 23,  text: '',            props: ['Enabled', 'Visible'], events: ['Click'], defaultEvent: 'Click' },
-        TrackBar:       { icon: '⬌', w: 104, h: 45,  text: '',            props: ['Enabled', 'Visible'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
-        NumericUpDown:  { icon: '↕', w: 120, h: 23,  text: '',            props: ['Enabled', 'Visible'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        DateTimePicker: { icon: '📅', w: 200, h: 23,  text: '',            props: ['Enabled', 'Visible'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        MaskedTextBox:  { icon: '#',  w: 100, h: 23,  text: '',            props: ['Text', 'Enabled', 'Visible'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
-        RichTextBox:    { icon: '¶',  w: 150, h: 96,  text: '',            props: ['Text', 'ReadOnly', 'Enabled', 'Visible'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
-        GroupBox:       { icon: '⬒', w: 200, h: 100, text: 'groupBox',    props: ['Text', 'Enabled', 'Visible'], events: ['Enter'], defaultEvent: 'Enter' },
-        Panel:          { icon: '▢', w: 200, h: 100, text: '',            props: ['Enabled', 'Visible'], events: ['Click', 'Paint'], defaultEvent: 'Click' }
+        Button:         { icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'TextImageRelation', 'BackgroundImage', 'BackgroundImageLayout', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic', 'AutoEllipsis', 'DialogResult'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
+        Label:          { icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        LinkLabel:      { icon: '🔗', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'TextAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis', 'LinkColor'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
+        TextBox:        { icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'PlaceholderText', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'PasswordChar', 'CharacterCasing', 'ScrollBars', 'TextAlign'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
+        CheckBox:       { icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'ThreeState', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
+        RadioButton:    { icon: '◉', w: 95,  h: 19,  text: 'radioButton', props: ['Text', 'Checked', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
+        ComboBox:       { icon: '▾', w: 121, h: 23,  text: '',            props: ['Text', 'DropDownStyle', 'MaxDropDownItems', 'Sorted'], events: ['SelectedIndexChanged', 'TextChanged'], defaultEvent: 'SelectedIndexChanged' },
+        ListBox:        { icon: '≡', w: 120, h: 94,  text: '',            props: ['SelectionMode', 'Sorted', 'MultiColumn'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
+        ListView:       { icon: '☰', w: 160, h: 97,  text: '',            props: ['View', 'FullRowSelect', 'GridLines', 'MultiSelect', 'CheckBoxes'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
+        TreeView:       { icon: '🌲', w: 160, h: 97,  text: '',            props: ['CheckBoxes', 'ShowLines', 'ShowRootLines'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
+        DataGridView:   { icon: '▦', w: 240, h: 150, text: '',            props: ['ReadOnly', 'AllowUserToAddRows', 'AllowUserToDeleteRows', 'MultiSelect', 'RowHeadersVisible'], events: ['CellClick', 'CellValueChanged', 'SelectionChanged'], defaultEvent: 'CellClick' },
+        PictureBox:     { icon: '🖼', w: 100, h: 50,  text: '',            props: ['Image', 'SizeMode', 'BorderStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        ProgressBar:    { icon: '▱', w: 100, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Style'], events: ['Click'], defaultEvent: 'Click' },
+        TrackBar:       { icon: '⬌', w: 104, h: 45,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'TickFrequency', 'SmallChange', 'LargeChange', 'Orientation'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
+        NumericUpDown:  { icon: '↕', w: 120, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Increment', 'DecimalPlaces', 'ThousandsSeparator', 'ReadOnly', 'TextAlign'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        DateTimePicker: { icon: '📅', w: 200, h: 23,  text: '',            props: ['Format', 'CustomFormat', 'ShowUpDown'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        MaskedTextBox:  { icon: '#',  w: 100, h: 23,  text: '',            props: ['Text', 'Mask', 'ReadOnly', 'TextAlign'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        RichTextBox:    { icon: '¶',  w: 150, h: 96,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'ScrollBars'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        GroupBox:       { icon: '⬒', w: 200, h: 100, text: 'groupBox',    props: ['Text', 'FlatStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Enter'], defaultEvent: 'Enter' },
+        Panel:          { icon: '▢', w: 200, h: 100, text: '',            props: ['BorderStyle', 'AutoScroll', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'Paint'], defaultEvent: 'Click' }
     };
 
     /** Delegate + args types for WinForms events that are not plain EventHandler. */
@@ -1610,6 +1814,221 @@
 
     const WF_FORM_EVENTS = ['Load', 'Shown', 'FormClosing', 'Resize', 'KeyDown'];
     const WF_CONTAINERS = ['GroupBox', 'Panel', 'TabPage'];
+
+    // ---------------------------------------------------- wf property catalog
+    //
+    // Visual Studio-style property grid metadata. Every property the grid can
+    // edit is described once: category, editor kind, enum values, default
+    // (shown greyed when the Designer.cs does not set the property), and the
+    // description shown in the help pane at the bottom of the panel.
+
+    /** Enum member lists, keyed by .NET enum type name. */
+    const WF_ENUM_VALUES = {
+        DockStyle: ['None', 'Top', 'Bottom', 'Left', 'Right', 'Fill'],
+        FlatStyle: ['Flat', 'Popup', 'Standard', 'System'],
+        ContentAlignment: ['TopLeft', 'TopCenter', 'TopRight', 'MiddleLeft', 'MiddleCenter', 'MiddleRight', 'BottomLeft', 'BottomCenter', 'BottomRight'],
+        HorizontalAlignment: ['Left', 'Right', 'Center'],
+        BorderStyle: ['None', 'FixedSingle', 'Fixed3D'],
+        RightToLeft: ['No', 'Yes', 'Inherit'],
+        DialogResult: ['None', 'OK', 'Cancel', 'Abort', 'Retry', 'Ignore', 'Yes', 'No'],
+        AutoSizeMode: ['GrowOnly', 'GrowAndShrink'],
+        ComboBoxStyle: ['Simple', 'DropDown', 'DropDownList'],
+        PictureBoxSizeMode: ['Normal', 'StretchImage', 'AutoSize', 'CenterImage', 'Zoom'],
+        ProgressBarStyle: ['Blocks', 'Continuous', 'Marquee'],
+        Orientation: ['Horizontal', 'Vertical'],
+        ScrollBars: ['None', 'Horizontal', 'Vertical', 'Both'],
+        RichTextBoxScrollBars: ['None', 'Horizontal', 'Vertical', 'Both', 'ForcedHorizontal', 'ForcedVertical', 'ForcedBoth'],
+        CharacterCasing: ['Normal', 'Upper', 'Lower'],
+        SelectionMode: ['None', 'One', 'MultiSimple', 'MultiExtended'],
+        View: ['LargeIcon', 'Details', 'SmallIcon', 'List', 'Tile'],
+        DateTimePickerFormat: ['Long', 'Short', 'Time', 'Custom'],
+        TextImageRelation: ['Overlay', 'ImageAboveText', 'TextAboveImage', 'ImageBeforeText', 'TextBeforeImage'],
+        ImageLayout: ['None', 'Tile', 'Center', 'Stretch', 'Zoom'],
+        FormBorderStyle: ['None', 'FixedSingle', 'Fixed3D', 'FixedDialog', 'Sizable', 'FixedToolWindow', 'SizableToolWindow'],
+        FormStartPosition: ['Manual', 'CenterScreen', 'WindowsDefaultLocation', 'WindowsDefaultBounds', 'CenterParent'],
+        FormWindowState: ['Normal', 'Minimized', 'Maximized'],
+        Cursors: ['Default', 'AppStarting', 'Arrow', 'Cross', 'Hand', 'Help', 'HSplit', 'IBeam', 'No', 'SizeAll', 'SizeNESW', 'SizeNS', 'SizeNWSE', 'SizeWE', 'UpArrow', 'VSplit', 'WaitCursor'],
+        AccessibleRole: ['Default', 'None', 'TitleBar', 'MenuBar', 'ScrollBar', 'Grip', 'Sound', 'Cursor', 'Caret', 'Alert', 'Window', 'Client', 'MenuPopup', 'MenuItem', 'ToolTip', 'Application', 'Document', 'Pane', 'Chart', 'Dialog', 'Border', 'Grouping', 'Separator', 'ToolBar', 'StatusBar', 'Table', 'ColumnHeader', 'RowHeader', 'Column', 'Row', 'Cell', 'Link', 'HelpBalloon', 'Character', 'List', 'ListItem', 'Outline', 'OutlineItem', 'PageTab', 'PropertyPage', 'Indicator', 'Graphic', 'StaticText', 'Text', 'PushButton', 'CheckButton', 'RadioButton', 'ComboBox', 'DropList', 'ProgressBar', 'Dial', 'HotkeyField', 'Slider', 'SpinButton', 'Diagram', 'Animation', 'Equation', 'ButtonDropDown', 'ButtonMenu', 'ButtonDropDownGrid', 'WhiteSpace', 'PageTabList', 'Clock', 'SplitButton', 'IpAddress', 'OutlineButton']
+    };
+
+    /** System.Drawing.SystemColors member names (canonical casing). */
+    const WF_SYSTEM_COLOR_NAMES = ['ActiveBorder', 'ActiveCaption', 'ActiveCaptionText', 'AppWorkspace',
+        'ButtonFace', 'ButtonHighlight', 'ButtonShadow', 'Control', 'ControlDark', 'ControlDarkDark',
+        'ControlLight', 'ControlLightLight', 'ControlText', 'Desktop', 'GradientActiveCaption',
+        'GradientInactiveCaption', 'GrayText', 'Highlight', 'HighlightText', 'HotTrack', 'InactiveBorder',
+        'InactiveCaption', 'InactiveCaptionText', 'Info', 'InfoText', 'Menu', 'MenuBar', 'MenuHighlight',
+        'MenuText', 'ScrollBar', 'Window', 'WindowFrame', 'WindowText'];
+
+    /** System.Drawing.Color named members offered in the color datalist. */
+    const WF_NAMED_COLORS = ['Transparent', 'AliceBlue', 'AntiqueWhite', 'Aqua', 'Aquamarine', 'Azure', 'Beige',
+        'Bisque', 'Black', 'BlanchedAlmond', 'Blue', 'BlueViolet', 'Brown', 'BurlyWood', 'CadetBlue',
+        'Chartreuse', 'Chocolate', 'Coral', 'CornflowerBlue', 'Cornsilk', 'Crimson', 'Cyan', 'DarkBlue',
+        'DarkCyan', 'DarkGoldenrod', 'DarkGray', 'DarkGreen', 'DarkKhaki', 'DarkMagenta', 'DarkOliveGreen',
+        'DarkOrange', 'DarkOrchid', 'DarkRed', 'DarkSalmon', 'DarkSeaGreen', 'DarkSlateBlue', 'DarkSlateGray',
+        'DarkTurquoise', 'DarkViolet', 'DeepPink', 'DeepSkyBlue', 'DimGray', 'DodgerBlue', 'Firebrick',
+        'FloralWhite', 'ForestGreen', 'Fuchsia', 'Gainsboro', 'GhostWhite', 'Gold', 'Goldenrod', 'Gray',
+        'Green', 'GreenYellow', 'Honeydew', 'HotPink', 'IndianRed', 'Indigo', 'Ivory', 'Khaki', 'Lavender',
+        'LavenderBlush', 'LawnGreen', 'LemonChiffon', 'LightBlue', 'LightCoral', 'LightCyan',
+        'LightGoldenrodYellow', 'LightGray', 'LightGreen', 'LightPink', 'LightSalmon', 'LightSeaGreen',
+        'LightSkyBlue', 'LightSlateGray', 'LightSteelBlue', 'LightYellow', 'Lime', 'LimeGreen', 'Linen',
+        'Magenta', 'Maroon', 'MediumAquamarine', 'MediumBlue', 'MediumOrchid', 'MediumPurple',
+        'MediumSeaGreen', 'MediumSlateBlue', 'MediumSpringGreen', 'MediumTurquoise', 'MediumVioletRed',
+        'MidnightBlue', 'MintCream', 'MistyRose', 'Moccasin', 'NavajoWhite', 'Navy', 'OldLace', 'Olive',
+        'OliveDrab', 'Orange', 'OrangeRed', 'Orchid', 'PaleGoldenrod', 'PaleGreen', 'PaleTurquoise',
+        'PaleVioletRed', 'PapayaWhip', 'PeachPuff', 'Peru', 'Pink', 'Plum', 'PowderBlue', 'Purple', 'Red',
+        'RosyBrown', 'RoyalBlue', 'SaddleBrown', 'Salmon', 'SandyBrown', 'SeaGreen', 'SeaShell', 'Sienna',
+        'Silver', 'SkyBlue', 'SlateBlue', 'SlateGray', 'Snow', 'SpringGreen', 'SteelBlue', 'Tan', 'Teal',
+        'Thistle', 'Tomato', 'Turquoise', 'Violet', 'Wheat', 'White', 'WhiteSmoke', 'Yellow', 'YellowGreen'];
+
+    /**
+     * Property descriptors: { cat, kind, enum?, def?, desc }.
+     * kind: string | bool | int | float | decimal | char | enum | ref |
+     *       anchor | color | font | padding | size | point | name
+     */
+    const WF_PROP_DEFS = {
+        // Design
+        Name:                  { cat: 'Design', kind: 'name', desc: 'Indicates the name used in code to identify the object.' },
+        // Layout
+        Anchor:                { cat: 'Layout', kind: 'anchor', def: 'Top, Left', desc: 'Defines the edges of the container to which the control is bound. Anchored edges keep their distance when the parent resizes.' },
+        Dock:                  { cat: 'Layout', kind: 'enum', enum: 'DockStyle', def: 'None', desc: 'Defines which borders of the control are bound to the container.' },
+        Location:              { cat: 'Layout', kind: 'point', desc: 'The coordinates of the upper-left corner of the control relative to its container.' },
+        Size:                  { cat: 'Layout', kind: 'size', desc: 'The size of the control in pixels.' },
+        ClientSize:            { cat: 'Layout', kind: 'size', desc: 'The size of the client area of the form (excluding title bar and borders).' },
+        MinimumSize:           { cat: 'Layout', kind: 'size', def: '0, 0', desc: 'The minimum size the control can be resized to.' },
+        MaximumSize:           { cat: 'Layout', kind: 'size', def: '0, 0', desc: 'The maximum size the control can be resized to (0, 0 means unlimited).' },
+        Margin:                { cat: 'Layout', kind: 'padding', def: '3, 3, 3, 3', desc: 'The space between this control and neighbouring controls (left, top, right, bottom).' },
+        Padding:               { cat: 'Layout', kind: 'padding', def: '0, 0, 0, 0', desc: 'The interior spacing between the control edge and its content (left, top, right, bottom).' },
+        AutoSize:              { cat: 'Layout', kind: 'bool', def: 'False', desc: 'Enables automatic resizing based on the control contents.' },
+        AutoSizeMode:          { cat: 'Layout', kind: 'enum', enum: 'AutoSizeMode', def: 'GrowOnly', desc: 'Whether the control can only grow, or grow and shrink, when AutoSize is enabled.' },
+        AutoScroll:            { cat: 'Layout', kind: 'bool', def: 'False', desc: 'Shows scroll bars when the content is larger than the visible area.' },
+        StartPosition:         { cat: 'Layout', kind: 'enum', enum: 'FormStartPosition', def: 'WindowsDefaultLocation', desc: 'The starting position of the form at run time.' },
+        WindowState:           { cat: 'Layout', kind: 'enum', enum: 'FormWindowState', def: 'Normal', desc: 'Whether the form starts minimized, maximized, or normal.' },
+        // Appearance
+        Text:                  { cat: 'Appearance', kind: 'string', desc: 'The text associated with the control.' },
+        PlaceholderText:       { cat: 'Appearance', kind: 'string', desc: 'The hint text shown while the text box is empty (.NET 5+).' },
+        TextAlign:             { cat: 'Appearance', kind: 'enum', enum: 'ContentAlignment', desc: 'The alignment of the text within the control.' },
+        CheckAlign:            { cat: 'Appearance', kind: 'enum', enum: 'ContentAlignment', def: 'MiddleLeft', desc: 'The position of the check box within the control.' },
+        BackColor:             { cat: 'Appearance', kind: 'color', desc: 'The background color of the control.' },
+        ForeColor:             { cat: 'Appearance', kind: 'color', desc: 'The foreground color used to display text.' },
+        LinkColor:             { cat: 'Appearance', kind: 'color', desc: 'The color of the link text.' },
+        Font:                  { cat: 'Appearance', kind: 'font', def: 'Segoe UI, 9pt', desc: 'The font used to display text in the control. Format: Family, 9pt, style=Bold, Italic.' },
+        Cursor:                { cat: 'Appearance', kind: 'enum', enum: 'Cursors', prefix: 'System.Windows.Forms.Cursors', def: 'Default', desc: 'The cursor shown when the mouse pointer is over the control.' },
+        Image:                 { cat: 'Appearance', kind: 'image', desc: 'The image displayed on the control. Importing copies the file into the project Resources folder and registers it in Properties/Resources.resx — .png, .jpg, .gif, .bmp, .ico.' },
+        ImageAlign:            { cat: 'Appearance', kind: 'enum', enum: 'ContentAlignment', def: 'MiddleCenter', desc: 'The alignment of the image within the control.' },
+        TextImageRelation:     { cat: 'Appearance', kind: 'enum', enum: 'TextImageRelation', def: 'Overlay', desc: 'The relative placement of the text and the image: overlaid, image above/below the text, or image before/after it.' },
+        BackgroundImage:       { cat: 'Appearance', kind: 'image', desc: 'The background image drawn behind the control content. Imported into the project Resources folder.' },
+        BackgroundImageLayout: { cat: 'Appearance', kind: 'enum', enum: 'ImageLayout', def: 'Tile', desc: 'How the background image is drawn: None (top-left), Tile, Center, Stretch, or Zoom.' },
+        Icon:                  { cat: 'Window Style', kind: 'icon', desc: 'The window icon (.ico) shown in the title bar and the taskbar. Imported into the project Resources folder.' },
+        FlatStyle:             { cat: 'Appearance', kind: 'enum', enum: 'FlatStyle', def: 'Standard', desc: 'The flat style appearance of the control.' },
+        BorderStyle:           { cat: 'Appearance', kind: 'enum', enum: 'BorderStyle', def: 'None', desc: 'The border style of the control.' },
+        FormBorderStyle:       { cat: 'Appearance', kind: 'enum', enum: 'FormBorderStyle', def: 'Sizable', desc: 'The border style of the form: sizable, fixed, tool window, or none.' },
+        RightToLeft:           { cat: 'Appearance', kind: 'enum', enum: 'RightToLeft', def: 'No', desc: 'Renders text right-to-left for RTL languages.' },
+        UseMnemonic:           { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Treats "&" in Text as an access-key prefix character.' },
+        UseVisualStyleBackColor: { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Uses the current visual style for the background instead of BackColor.' },
+        UseWaitCursor:         { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Shows the wait cursor for the control and its children.' },
+        Checked:               { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Whether the control is checked.' },
+        ThreeState:            { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Allows the check box to show an indeterminate third state.' },
+        GridLines:             { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Draws grid lines between items and subitems.' },
+        ShowLines:             { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Draws lines between sibling and parent/child nodes.' },
+        ShowRootLines:         { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Draws lines between root nodes.' },
+        SizeMode:              { cat: 'Behavior', kind: 'enum', enum: 'PictureBoxSizeMode', def: 'Normal', desc: 'Controls how the image is positioned and scaled within the control.' },
+        View:                  { cat: 'Appearance', kind: 'enum', enum: 'View', def: 'LargeIcon', desc: 'How items are displayed: large icons, details, small icons, list, or tiles.' },
+        Style:                 { cat: 'Appearance', kind: 'enum', enum: 'ProgressBarStyle', def: 'Blocks', desc: 'Whether the bar shows blocks, a continuous fill, or a marquee animation.' },
+        // Behavior
+        Enabled:               { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Whether the control can respond to user interaction.' },
+        Visible:               { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Whether the control is displayed at run time.' },
+        TabIndex:              { cat: 'Behavior', kind: 'int', desc: 'The position of the control in the tab order of its container.' },
+        TabStop:               { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Whether the user can focus the control with the Tab key.' },
+        AllowDrop:             { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Whether the control accepts data the user drags onto it.' },
+        AutoEllipsis:          { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Shows "…" when the text does not fit, with the full text as a tooltip.' },
+        UseCompatibleTextRendering: { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Uses GDI+ (legacy) text rendering instead of GDI.' },
+        DialogResult:          { cat: 'Behavior', kind: 'enum', enum: 'DialogResult', def: 'None', desc: 'The value returned to the parent form when the button is clicked.' },
+        ReadOnly:              { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Whether the text can be changed by the user.' },
+        Multiline:             { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Whether the text can span more than one line.' },
+        WordWrap:              { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Wraps lines at the control edge in multiline mode.' },
+        MaxLength:             { cat: 'Behavior', kind: 'int', def: '32767', desc: 'The maximum number of characters the user can type.' },
+        PasswordChar:          { cat: 'Behavior', kind: 'char', desc: 'The character shown in place of typed characters (password masking).' },
+        CharacterCasing:       { cat: 'Behavior', kind: 'enum', enum: 'CharacterCasing', def: 'Normal', desc: 'Forces typed characters to upper or lower case.' },
+        ScrollBars:            { cat: 'Appearance', kind: 'enum', enum: 'ScrollBars', def: 'None', desc: 'Which scroll bars appear in multiline mode.' },
+        Mask:                  { cat: 'Behavior', kind: 'string', desc: 'The input mask (e.g. 000-0000 or (999) 000-0000).' },
+        DropDownStyle:         { cat: 'Appearance', kind: 'enum', enum: 'ComboBoxStyle', def: 'DropDown', desc: 'Whether the text is editable and whether the list drops down.' },
+        MaxDropDownItems:      { cat: 'Behavior', kind: 'int', def: '8', desc: 'The maximum number of items shown in the drop-down list.' },
+        Sorted:                { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Sorts the list items alphabetically.' },
+        SelectionMode:         { cat: 'Behavior', kind: 'enum', enum: 'SelectionMode', def: 'One', desc: 'How many items can be selected, and how.' },
+        MultiColumn:           { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Lays the items out in multiple columns.' },
+        FullRowSelect:         { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Selecting an item selects its entire row.' },
+        MultiSelect:           { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Whether multiple items can be selected at once.' },
+        CheckBoxes:            { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Shows a check box next to each item.' },
+        AllowUserToAddRows:    { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Shows the new-row placeholder so the user can add rows.' },
+        AllowUserToDeleteRows: { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Whether the user can delete rows.' },
+        RowHeadersVisible:     { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Shows the row header column.' },
+        Minimum:               { cat: 'Behavior', kind: 'int', def: '0', desc: 'The minimum value of the range.' },
+        Maximum:               { cat: 'Behavior', kind: 'int', def: '100', desc: 'The maximum value of the range.' },
+        Value:                 { cat: 'Behavior', kind: 'int', def: '0', desc: 'The current value.' },
+        TickFrequency:         { cat: 'Appearance', kind: 'int', def: '1', desc: 'The interval between tick marks.' },
+        SmallChange:           { cat: 'Behavior', kind: 'int', def: '1', desc: 'The change applied by the arrow keys.' },
+        LargeChange:           { cat: 'Behavior', kind: 'int', def: '5', desc: 'The change applied by Page Up / Page Down or clicking the track.' },
+        Orientation:           { cat: 'Appearance', kind: 'enum', enum: 'Orientation', def: 'Horizontal', desc: 'Horizontal or vertical orientation.' },
+        Increment:             { cat: 'Data', kind: 'decimal', def: '1', desc: 'The amount to add or subtract on each up/down click.' },
+        DecimalPlaces:         { cat: 'Data', kind: 'int', def: '0', desc: 'The number of decimal places to display.' },
+        ThousandsSeparator:    { cat: 'Data', kind: 'bool', def: 'False', desc: 'Shows a thousands separator when appropriate.' },
+        Format:                { cat: 'Appearance', kind: 'enum', enum: 'DateTimePickerFormat', def: 'Long', desc: 'The date/time format: long, short, time, or custom.' },
+        CustomFormat:          { cat: 'Behavior', kind: 'string', desc: 'The custom format string used when Format is Custom.' },
+        ShowUpDown:            { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Uses a spin control instead of a drop-down calendar.' },
+        // Form behavior / window style
+        KeyPreview:            { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'The form receives key events before they reach the focused control.' },
+        DoubleBuffered:        { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Redraws via a buffer to reduce flicker.' },
+        ControlBox:            { cat: 'Window Style', kind: 'bool', def: 'True', desc: 'Shows the system menu box in the caption bar.' },
+        MaximizeBox:           { cat: 'Window Style', kind: 'bool', def: 'True', desc: 'Shows the maximize button in the caption bar.' },
+        MinimizeBox:           { cat: 'Window Style', kind: 'bool', def: 'True', desc: 'Shows the minimize button in the caption bar.' },
+        HelpButton:            { cat: 'Window Style', kind: 'bool', def: 'False', desc: 'Shows a Help button in the caption bar (needs Min/MaximizeBox off).' },
+        ShowIcon:              { cat: 'Window Style', kind: 'bool', def: 'True', desc: 'Shows the form icon in the caption bar.' },
+        ShowInTaskbar:         { cat: 'Window Style', kind: 'bool', def: 'True', desc: 'Shows the form in the Windows taskbar.' },
+        TopMost:               { cat: 'Window Style', kind: 'bool', def: 'False', desc: 'Keeps the form above all other windows.' },
+        Opacity:               { cat: 'Window Style', kind: 'float', def: '1', desc: 'The opacity of the form from 0 (transparent) to 1 (opaque).' },
+        AcceptButton:          { cat: 'Misc', kind: 'ref', def: '(none)', desc: 'The button clicked when the user presses Enter.' },
+        CancelButton:          { cat: 'Misc', kind: 'ref', def: '(none)', desc: 'The button clicked when the user presses Esc.' },
+        // Data / Focus / Accessibility
+        Tag:                   { cat: 'Data', kind: 'string', desc: 'User-defined data associated with the object.' },
+        CausesValidation:      { cat: 'Focus', kind: 'bool', def: 'True', desc: 'Whether the control triggers validation on controls losing focus to it.' },
+        AccessibleName:        { cat: 'Accessibility', kind: 'string', desc: 'The name reported to accessibility client applications.' },
+        AccessibleDescription: { cat: 'Accessibility', kind: 'string', desc: 'The description reported to accessibility client applications.' },
+        AccessibleRole:        { cat: 'Accessibility', kind: 'enum', enum: 'AccessibleRole', def: 'Default', desc: 'The role reported to accessibility client applications.' }
+    };
+
+    /** Per-type descriptor overrides (same property name, different type). */
+    const WF_PROP_OVERRIDES = {
+        TextBox:        { TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'HorizontalAlignment', def: 'Left', desc: 'The horizontal alignment of the text.' } },
+        MaskedTextBox:  { TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'HorizontalAlignment', def: 'Left', desc: 'The horizontal alignment of the text.' } },
+        NumericUpDown:  {
+            TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'HorizontalAlignment', def: 'Left', desc: 'The horizontal alignment of the value.' },
+            Minimum:   { cat: 'Data', kind: 'decimal', def: '0', desc: 'The minimum allowed value.' },
+            Maximum:   { cat: 'Data', kind: 'decimal', def: '100', desc: 'The maximum allowed value.' },
+            Value:     { cat: 'Appearance', kind: 'decimal', def: '0', desc: 'The current value.' }
+        },
+        RichTextBox:    { ScrollBars: { cat: 'Appearance', kind: 'enum', enum: 'RichTextBoxScrollBars', def: 'Both', desc: 'Which scroll bars appear when text does not fit.' } },
+        Label:          { TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'ContentAlignment', def: 'TopLeft', desc: 'The alignment of the text within the control.' } },
+        Button:         { TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'ContentAlignment', def: 'MiddleCenter', desc: 'The alignment of the text within the control.' } },
+        Form:           { AutoSize: { cat: 'Layout', kind: 'bool', def: 'False', desc: 'The form grows to fit its contents.' } }
+    };
+
+    /** Properties every control shows in addition to its type-specific list. */
+    const WF_COMMON_PROPS = ['Anchor', 'Dock', 'Location', 'Size', 'MinimumSize', 'MaximumSize', 'Margin',
+        'Padding', 'AutoSize', 'BackColor', 'ForeColor', 'Font', 'Cursor', 'RightToLeft', 'Enabled',
+        'Visible', 'TabIndex', 'TabStop', 'AllowDrop', 'UseWaitCursor', 'Tag', 'CausesValidation',
+        'AccessibleName', 'AccessibleDescription', 'AccessibleRole'];
+
+    /** Properties shown for the form itself. */
+    const WF_FORM_PROPS = ['Text', 'ClientSize', 'StartPosition', 'FormBorderStyle', 'WindowState',
+        'MinimumSize', 'MaximumSize', 'AutoSize', 'Padding', 'BackColor', 'ForeColor', 'Font', 'Cursor',
+        'RightToLeft', 'Icon', 'BackgroundImage', 'BackgroundImageLayout', 'ControlBox', 'MaximizeBox',
+        'MinimizeBox', 'HelpButton', 'ShowIcon', 'ShowInTaskbar', 'TopMost', 'Opacity', 'KeyPreview',
+        'DoubleBuffered', 'Enabled', 'AllowDrop', 'UseWaitCursor', 'AcceptButton', 'CancelButton', 'Tag',
+        'AccessibleName', 'AccessibleDescription', 'AccessibleRole'];
+
+    function wfPropDef(type, prop) {
+        return WF_PROP_OVERRIDES[type]?.[prop] ?? WF_PROP_DEFS[prop] ?? { cat: 'Misc', kind: 'string' };
+    }
 
     // ------------------------------------------------------------- wf parsing
 
@@ -1711,6 +2130,7 @@
         }
 
         bannerEl.hidden = true;
+        wfRequestImages();
         wfRender();
     }
 
@@ -1718,6 +2138,7 @@
 
     function wfRender() {
         if (!wfForm) { renderEmpty(); return; }
+        windowBox.classList.remove('ff-noresize');
 
         const cs = wfSizeVal(wfForm.props.ClientSize) ?? { w: 600, h: 400 };
         titleText.textContent = wfString(wfForm.props.Text) ?? config.docName;
@@ -1726,9 +2147,38 @@
         surfaceEl.style.display = 'block';
         surfaceEl.style.height = `${cs.h}px`;
         surfaceEl.style.background = wfColor(wfForm.props.BackColor) || '#f0f0f0';
-        surfaceEl.style.backgroundImage = config.snap
-            ? 'radial-gradient(circle, rgba(0,0,0,0.18) 1px, transparent 1px)' : 'none';
-        surfaceEl.style.backgroundSize = `${config.gridSize}px ${config.gridSize}px`;
+
+        // Background layers: snap dots on top of the form's BackgroundImage.
+        const layers = [], sizes = [], repeats = [], positions = [];
+        if (config.snap) {
+            layers.push('radial-gradient(circle, rgba(0,0,0,0.18) 1px, transparent 1px)');
+            sizes.push(`${config.gridSize}px ${config.gridSize}px`);
+            repeats.push('repeat');
+            positions.push('0 0');
+        }
+        const formBg = wfImageUri(wfForm.props.BackgroundImage);
+        if (formBg) {
+            const layout = /ImageLayout\.(\w+)/.exec(wfForm.props.BackgroundImageLayout ?? '')?.[1] ?? 'Tile';
+            layers.push(`url("${formBg}")`);
+            sizes.push(layout === 'Stretch' ? '100% 100%' : layout === 'Zoom' ? 'contain' : 'auto');
+            repeats.push(layout === 'Tile' ? 'repeat' : 'no-repeat');
+            positions.push((layout === 'Center' || layout === 'Zoom') ? 'center' : '0 0');
+        }
+        surfaceEl.style.backgroundImage = layers.join(', ') || 'none';
+        surfaceEl.style.backgroundSize = sizes.join(', ');
+        surfaceEl.style.backgroundRepeat = repeats.join(', ');
+        surfaceEl.style.backgroundPosition = positions.join(', ');
+
+        // The form Icon shows in the mock title bar, like the real caption.
+        let icoEl = document.getElementById('ff-title-icon');
+        if (!icoEl) {
+            icoEl = document.createElement('img');
+            icoEl.id = 'ff-title-icon';
+            titleText.parentNode.insertBefore(icoEl, titleText);
+        }
+        const icoUri = wfImageUri(wfForm.props.Icon);
+        if (icoUri) { icoEl.src = icoUri; }
+        icoEl.style.display = icoUri ? 'inline-block' : 'none';
 
         surfaceEl.innerHTML = '';
         visuals = [];
@@ -1783,6 +2233,7 @@
         // designer always shows every control so hidden panels stay editable.
 
         wfBuildContent(div, ctrl);
+        wfApplyExtras(div, ctrl);
 
         div.addEventListener('mousedown', e => {
             if (e.button !== 0) { return; }
@@ -1955,6 +2406,83 @@
         div.appendChild(inner);
     }
 
+    /** Preview a few appearance properties the grid can now edit. */
+    function wfApplyExtras(div, ctrl) {
+        const inner = div.querySelector(':scope > .ff-inner');
+
+        const ta = /(?:ContentAlignment|HorizontalAlignment)\.(\w+)/.exec(ctrl.props.TextAlign ?? '')?.[1];
+        if (ta && inner) {
+            if (/^(Left|Center|Right)$/.test(ta)) {
+                // HorizontalAlignment (TextBox and friends): horizontal only.
+                inner.style.justifyContent = ta === 'Left' ? 'flex-start' : ta === 'Right' ? 'flex-end' : 'center';
+            } else {
+                inner.style.justifyContent = /Left$/.test(ta) ? 'flex-start' : /Right$/.test(ta) ? 'flex-end' : 'center';
+                inner.style.alignItems = /^Top/.test(ta) ? 'flex-start' : /^Bottom/.test(ta) ? 'flex-end' : 'center';
+            }
+        }
+
+        const bs = /BorderStyle\.(\w+)/.exec(ctrl.props.BorderStyle ?? '')?.[1];
+        if (bs === 'FixedSingle') { div.style.border = '1px solid #828790'; }
+        else if (bs === 'Fixed3D') { div.style.border = '2px inset #f0f0f0'; }
+
+        const fs = /FlatStyle\.(\w+)/.exec(ctrl.props.FlatStyle ?? '')?.[1];
+        if (fs === 'Flat' && inner && ctrl.type === 'Button') {
+            inner.style.border = '1px solid #000';
+            inner.style.background = wfColor(ctrl.props.BackColor) || '#e1e1e1';
+        }
+
+        // BackgroundImage + BackgroundImageLayout (None/Tile/Center/Stretch/Zoom).
+        const bgUri = wfImageUri(ctrl.props.BackgroundImage);
+        if (bgUri) { applyBackgroundImage(div, bgUri, ctrl.props.BackgroundImageLayout); }
+
+        // PictureBox Image with SizeMode.
+        const imgUri = wfImageUri(ctrl.props.Image);
+        if (imgUri && ctrl.type === 'PictureBox' && inner) {
+            inner.textContent = '';
+            const img = document.createElement('img');
+            img.className = 'ff-pic-img';
+            img.src = imgUri;
+            const mode = /PictureBoxSizeMode\.(\w+)/.exec(ctrl.props.SizeMode ?? '')?.[1] ?? 'Normal';
+            img.style.objectFit = mode === 'StretchImage' ? 'fill' : mode === 'Zoom' ? 'contain' : 'none';
+            img.style.objectPosition = (mode === 'CenterImage' || mode === 'Zoom') ? 'center' : 'left top';
+            inner.appendChild(img);
+        }
+
+        // Image on Buttons/Labels/CheckBoxes/RadioButtons, placed per
+        // TextImageRelation and ImageAlign like the real control.
+        if (imgUri && ctrl.type !== 'PictureBox' && inner) {
+            const img = document.createElement('img');
+            img.className = 'ff-ctl-img';
+            img.src = imgUri;
+            const rel = /TextImageRelation\.(\w+)/.exec(ctrl.props.TextImageRelation ?? '')?.[1] ?? 'Overlay';
+            if (rel === 'Overlay') {
+                const ia = /ContentAlignment\.(\w+)/.exec(ctrl.props.ImageAlign ?? '')?.[1] ?? 'MiddleCenter';
+                img.classList.add('ff-img-overlay');
+                const h = /Left$/.test(ia) ? '0%' : /Right$/.test(ia) ? '100%' : '50%';
+                const v = /^Top/.test(ia) ? '0%' : /^Bottom/.test(ia) ? '100%' : '50%';
+                img.style.left = h;
+                img.style.top = v;
+                img.style.transform = `translate(-${h === '0%' ? '0' : h === '100%' ? '100%' : '50%'}, -${v === '0%' ? '0' : v === '100%' ? '100%' : '50%'})`;
+                div.appendChild(img);
+            } else {
+                inner.style.flexDirection =
+                    rel === 'ImageAboveText' ? 'column'
+                    : rel === 'TextAboveImage' ? 'column-reverse'
+                    : rel === 'TextBeforeImage' ? 'row-reverse' : 'row';
+                inner.insertBefore(img, inner.firstChild);
+            }
+        }
+    }
+
+    /** Shared BackgroundImage/BackgroundImageLayout -> CSS mapping. */
+    function applyBackgroundImage(el, uri, layoutProp) {
+        const layout = /ImageLayout\.(\w+)/.exec(layoutProp ?? '')?.[1] ?? 'Tile';
+        el.style.backgroundImage = `url("${uri}")`;
+        el.style.backgroundRepeat = layout === 'Tile' ? 'repeat' : 'no-repeat';
+        el.style.backgroundPosition = (layout === 'Center' || layout === 'Zoom') ? 'center' : '0 0';
+        el.style.backgroundSize = layout === 'Stretch' ? '100% 100%' : layout === 'Zoom' ? 'contain' : 'auto';
+    }
+
     // ------------------------------------------------------- wf value parsing
 
     function wfPoint(v) {
@@ -2007,6 +2535,218 @@
             bold: /FontStyle\.Bold/.test(v),
             italic: /FontStyle\.Italic/.test(v)
         };
+    }
+
+    // ----------------------------------------------------------- wf images
+    // Image/BackgroundImage/Icon values reference either a project resource
+    // ("global::Ns.Properties.Resources.name") or a legacy local form
+    // resource ("resources.GetObject(\"btn.Image\")"). The extension host
+    // resolves both to URIs the canvas can draw; results are cached here.
+
+    const imageCache = new Map(); // 'p:name' | 'l:name' -> uri, or null while pending
+
+    /** Parse a C# image expression into { scope: 'p'|'l', key } (or null). */
+    function wfImageRef(raw) {
+        if (!raw) { return null; }
+        let m = /Properties\.Resources\.(\w+)/.exec(raw);
+        if (m) { return { scope: 'p', key: m[1] }; }
+        m = /resources\.GetObject\("([^"]+)"/.exec(raw);
+        if (m) { return { scope: 'l', key: m[1] }; }
+        return null;
+    }
+
+    /** Renderable URI for an image property value, when resolved. */
+    function wfImageUri(raw) {
+        const ref = wfImageRef(raw);
+        return ref ? (imageCache.get(`${ref.scope}:${ref.key}`) || null) : null;
+    }
+
+    /** Ask the host for any referenced images we have not resolved yet. */
+    function wfRequestImages() {
+        if (!wfForm) { return; }
+        const wanted = [];
+        const collect = props => {
+            for (const p of ['Image', 'BackgroundImage', 'Icon']) {
+                const ref = wfImageRef(props[p]);
+                if (!ref) { continue; }
+                const ck = `${ref.scope}:${ref.key}`;
+                if (!imageCache.has(ck)) {
+                    imageCache.set(ck, null); // pending — avoids re-request loops
+                    wanted.push(ref);
+                }
+            }
+        };
+        collect(wfForm.props);
+        for (const c of wfControls.values()) { collect(c.props); }
+        if (wanted.length) { vscode.postMessage({ type: 'resolveImages', keys: wanted }); }
+    }
+
+    // -------------------------------------- wf property grid value conversion
+    // Each grid editor shows a friendly value ("Fill", "Top, Left", "255, 128,
+    // 0", "Segoe UI, 9pt, style=Bold") parsed from the C# expression in the
+    // Designer.cs, and serializes user input back to compilable C#.
+
+    function wfPaddingVal(v) {
+        const m = /Padding\((-?\d+)(?:,\s*(-?\d+),\s*(-?\d+),\s*(-?\d+))?\)/.exec(v ?? '');
+        if (!m) { return null; }
+        if (m[2] === undefined) { const a = +m[1]; return { l: a, t: a, r: a, b: a }; }
+        return { l: +m[1], t: +m[2], r: +m[3], b: +m[4] };
+    }
+
+    /** AnchorStyles flags present in a C# expression, in canonical order. */
+    function wfAnchorFlags(v) {
+        return ['Top', 'Bottom', 'Left', 'Right'].filter(f => new RegExp(`AnchorStyles\\.${f}\\b`).test(v ?? ''));
+    }
+
+    function wfAnchorCode(flags) {
+        if (!flags.length) { return 'System.Windows.Forms.AnchorStyles.None'; }
+        if (flags.length === 1) { return `System.Windows.Forms.AnchorStyles.${flags[0]}`; }
+        // Multi-flag combinations use the cast form Visual Studio generates.
+        return `((System.Windows.Forms.AnchorStyles)(${flags.map(f => `System.Windows.Forms.AnchorStyles.${f}`).join(' | ')}))`;
+    }
+
+    /** "Control", "Red", or "255, 128, 0" from a C# color expression. */
+    function wfColorDisplay(v) {
+        let m = /SystemColors\.(\w+)/.exec(v);
+        if (m) { return m[1]; }
+        m = /Color\.FromArgb\(([\s\S]*?)\)\s*$/.exec(v.trim());
+        if (m) {
+            const nums = [...m[1].matchAll(/-?\d+/g)].map(x => +x[0] & 0xff);
+            return nums.join(', ');
+        }
+        m = /Color\.(\w+)/.exec(v);
+        if (m) { return m[1]; }
+        return v;
+    }
+
+    /** Friendly color text -> C# color expression (null when unrecognized). */
+    function wfColorCode(input) {
+        const v = input.trim();
+        let m = /^#([0-9a-fA-F]{6})$/.exec(v);
+        if (m) {
+            const n = parseInt(m[1], 16);
+            return `System.Drawing.Color.FromArgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+        }
+        const nums = v.split(',').map(s => s.trim());
+        if (nums.length >= 3 && nums.every(s => /^\d+$/.test(s))) {
+            return `System.Drawing.Color.FromArgb(${nums.slice(0, 4).map(s => Math.min(255, +s)).join(', ')})`;
+        }
+        if (!/^[A-Za-z]+$/.test(v)) { return null; }
+        const sys = WF_SYSTEM_COLOR_NAMES.find(n => n.toLowerCase() === v.toLowerCase());
+        if (sys) { return `System.Drawing.SystemColors.${sys}`; }
+        const named = WF_NAMED_COLORS.find(n => n.toLowerCase() === v.toLowerCase());
+        return `System.Drawing.Color.${named ?? v.charAt(0).toUpperCase() + v.slice(1)}`;
+    }
+
+    /** Any CSS color -> "#rrggbb" for the swatch input (via computed style). */
+    function cssColorToHex(css) {
+        if (!css) { return '#000000'; }
+        const probe = document.createElement('span');
+        probe.style.color = css;
+        document.body.appendChild(probe);
+        const rgb = getComputedStyle(probe).color;
+        probe.remove();
+        const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
+        if (!m) { return '#000000'; }
+        return '#' + [m[1], m[2], m[3]].map(n => (+n).toString(16).padStart(2, '0')).join('');
+    }
+
+    function wfFontDisplay(v) {
+        const m = /new\s+(?:System\.Drawing\.)?Font\("([^"]+)",\s*([\d.]+)F?/.exec(v ?? '');
+        if (!m) { return v; }
+        const styles = ['Bold', 'Italic', 'Underline', 'Strikeout']
+            .filter(s => new RegExp(`FontStyle\\.${s}\\b`).test(v));
+        return `${m[1]}, ${m[2]}pt${styles.length ? `, style=${styles.join(', ')}` : ''}`;
+    }
+
+    /** "Segoe UI, 9pt, style=Bold, Italic" -> new Font(...) code (or null). */
+    function wfFontCode(input) {
+        const m = /^([^,]+?)\s*,\s*([\d.]+)\s*(?:pt)?\s*(?:,\s*style\s*=\s*(.+))?$/i.exec(input.trim());
+        if (!m) { return null; }
+        const styles = (m[3] ?? '').split(/[,|\s]+/)
+            .map(s => ['Bold', 'Italic', 'Underline', 'Strikeout'].find(k => k.toLowerCase() === s.toLowerCase()))
+            .filter(Boolean);
+        const size = `${parseFloat(m[2])}F`;
+        const base = `new System.Drawing.Font("${m[1].trim()}", ${size}`;
+        if (!styles.length) { return `${base})`; }
+        if (styles.length === 1) { return `${base}, System.Drawing.FontStyle.${styles[0]})`; }
+        return `${base}, (${styles.map(s => `System.Drawing.FontStyle.${s}`).join(' | ')}))`;
+    }
+
+    /** Numeric value of "new decimal(new int[] { lo, mid, hi, flags })". */
+    function wfDecimalVal(v) {
+        const m = /new\s+decimal\(new\s+int\[\]\s*\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}\)/.exec(v ?? '');
+        if (!m) {
+            const n = parseFloat(v);
+            return Number.isFinite(n) ? n : null;
+        }
+        const lo = (+m[1]) >>> 0;
+        const flags = +m[4];
+        const scale = (flags >> 16) & 0xff;
+        return (flags < 0 ? -1 : 1) * lo / Math.pow(10, scale);
+    }
+
+    function wfDecimalCode(input) {
+        const v = input.trim();
+        if (!/^-?\d+(\.\d+)?$/.test(v)) { return null; }
+        const neg = v.startsWith('-');
+        const scale = (v.split('.')[1] ?? '').length;
+        const lo = Math.round(Math.abs(parseFloat(v)) * Math.pow(10, scale));
+        if (!Number.isSafeInteger(lo) || lo > 0x7fffffff) { return null; }
+        const flags = (neg ? -2147483648 : 0) + (scale << 16);
+        return `new decimal(new int[] { ${lo}, 0, 0, ${flags} })`;
+    }
+
+    /** Friendly display text for a raw C# property value, per editor kind. */
+    function wfDisplay(def, raw) {
+        if (raw === undefined || raw === null) { return null; }
+        const v = String(raw).trim();
+        switch (def.kind) {
+            case 'string': return wfString(v) ?? v;
+            case 'bool': return /^true$/i.test(v) ? 'True' : /^false$/i.test(v) ? 'False' : v;
+            case 'int': case 'float': { const m = /-?[\d.]+/.exec(v); return m ? m[0] : v; }
+            case 'decimal': { const d = wfDecimalVal(v); return d !== null ? String(d) : v; }
+            case 'char': { const m = /^'\\?(.)'$/.exec(v); return m ? m[1] : v; }
+            case 'enum': case 'ref': { const m = /(\w+)\s*\)*\s*$/.exec(v); return m ? m[1] : v; }
+            case 'anchor': { const f = wfAnchorFlags(v); return f.length ? f.join(', ') : 'None'; }
+            case 'point': { const p = wfPoint(v); return p ? `${p.x}, ${p.y}` : v; }
+            case 'size': { const s = wfSizeVal(v); return s ? `${s.w}, ${s.h}` : v; }
+            case 'padding': { const p = wfPaddingVal(v); return p ? `${p.l}, ${p.t}, ${p.r}, ${p.b}` : v; }
+            case 'color': return wfColorDisplay(v);
+            case 'font': return wfFontDisplay(v);
+            case 'image': case 'icon': { const r = wfImageRef(v); return r ? r.key : v; }
+            default: return v;
+        }
+    }
+
+    /** User input -> C# code for the property, or null when invalid. */
+    function wfSerialize(def, input) {
+        const v = input.trim();
+        switch (def.kind) {
+            case 'string': return wfQuote(v);
+            case 'bool': return /^t/i.test(v) ? 'true' : 'false';
+            case 'int': { const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : null; }
+            case 'float': { const n = parseFloat(v); return Number.isFinite(n) ? `${n}D` : null; }
+            case 'decimal': return wfDecimalCode(v);
+            case 'char': { if (!v) { return null; } const c = v[0]; return c === "'" ? "'\\''" : c === '\\' ? "'\\\\'" : `'${c}'`; }
+            case 'enum': {
+                const ns = def.enum === 'ContentAlignment' ? 'System.Drawing' : 'System.Windows.Forms';
+                return `${def.prefix ?? `${ns}.${def.enum}`}.${v}`;
+            }
+            case 'ref': return wfRef(v);
+            case 'point': { const p = wfPair(v); return p ? `new System.Drawing.Point(${p.a}, ${p.b})` : null; }
+            case 'size': { const p = wfPair(v); return p ? `new System.Drawing.Size(${p.a}, ${p.b})` : null; }
+            case 'padding': {
+                const nums = v.split(',').map(s => parseInt(s.trim(), 10));
+                if (nums.some(n => !Number.isFinite(n))) { return null; }
+                if (nums.length === 1) { return `new System.Windows.Forms.Padding(${nums[0]})`; }
+                if (nums.length === 4) { return `new System.Windows.Forms.Padding(${nums.join(', ')})`; }
+                return null;
+            }
+            case 'color': return wfColorCode(v);
+            case 'font': return wfFontCode(v);
+            default: return v;
+        }
     }
 
     // ----------------------------------------------------- wf surgical edits
@@ -2068,6 +2808,12 @@
     /** Remove the "[this.]<name>.<prop> = ...;" line entirely (if present). */
     function wfRemoveLine(name, prop, text = xamlText) {
         const re = new RegExp(`^[ \\t]*(?:this\\.)?${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
+        return text.replace(re, '');
+    }
+
+    /** Remove a form-level "[this.]<prop> = ...;" line (if present). */
+    function wfRemoveFormLine(prop, text = xamlText) {
+        const re = new RegExp(`^[ \\t]*(?:this\\.)?${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
         return text.replace(re, '');
     }
 
@@ -2320,53 +3066,180 @@
     }
 
     function wfPropsTab(el, isForm) {
-        if (isForm) {
-            propsBody.appendChild(propRow('Text', wfString(wfForm.props.Text) ?? '', v => {
-                wfApply(wfSetFormLine('Text', wfQuote(v)));
-            }));
-            const cs = wfSizeVal(wfForm.props.ClientSize);
-            propsBody.appendChild(propRow('ClientSize', cs ? `${cs.w}, ${cs.h}` : '', v => {
-                const p = wfPair(v);
-                if (p) { wfApply(wfSetFormLine('ClientSize', `new System.Drawing.Size(${p.a}, ${p.b})`)); }
-            }));
-            return;
+        const target = isForm ? wfForm : el;
+        const type = isForm ? 'Form' : el.type;
+        const names = isForm
+            ? ['Name', ...WF_FORM_PROPS]
+            : [...new Set(['Name', ...(WF_CONTROLS[el.type]?.props ?? ['Text']), ...WF_COMMON_PROPS])];
+        renderGrid(names.map(prop => wfGridRow(target, prop, isForm, type)));
+    }
+
+    /** One VS-style grid row for a WinForms property. */
+    function wfGridRow(target, prop, isForm, type) {
+        const def = wfPropDef(type, prop);
+        const raw = target.props[prop];
+        const isSet = raw !== undefined && prop !== 'Name';
+
+        const row = document.createElement('div');
+        row.className = 'ff-prop-row' + (isSet ? ' ff-set' : '');
+        const lab = document.createElement('label');
+        lab.textContent = prop === 'Name' ? '(Name)' : prop;
+        row.appendChild(lab);
+        attachDesc(row, prop === 'Name' ? '(Name)' : prop, def.desc ?? '');
+
+        const write = code => wfApply(isForm ? wfSetFormLine(prop, code) : wfSetLine(target.name, prop, code));
+        const remove = () => {
+            if (!isSet || prop === 'ClientSize') { renderPanel(); return; }
+            wfApply(isForm ? wfRemoveFormLine(prop) : wfRemoveLine(target.name, prop));
+        };
+        const display = wfDisplay(def, raw);
+
+        // (Name): read-only — a designer rename cannot update the code-behind safely.
+        if (def.kind === 'name') {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = target.name;
+            input.disabled = true;
+            input.title = 'Rename in code (F2 in the editor) — a designer rename cannot update the code-behind safely yet.';
+            row.appendChild(input);
+            return { label: '(Name)', cat: def.cat, node: row };
         }
 
-        // Name renames ripple through the code-behind, so it stays read-only here.
-        const nameRow = propRow('Name', el.name, () => { });
-        nameRow.querySelector('input').disabled = true;
-        nameRow.querySelector('input').title = 'Rename in code (F2 in the editor) — a designer rename cannot update the code-behind safely yet.';
-        propsBody.appendChild(nameRow);
-
-        const loc = wfPoint(el.props.Location);
-        propsBody.appendChild(propRow('Location', loc ? `${loc.x}, ${loc.y}` : '', v => {
-            const p = wfPair(v);
-            if (p) { wfApply(wfSetLine(el.name, 'Location', `new System.Drawing.Point(${p.a}, ${p.b})`)); }
-        }));
-        const size = wfSizeVal(el.props.Size);
-        propsBody.appendChild(propRow('Size', size ? `${size.w}, ${size.h}` : '', v => {
-            const p = wfPair(v);
-            if (p) { wfApply(wfSetLine(el.name, 'Size', `new System.Drawing.Size(${p.a}, ${p.b})`)); }
-        }));
-
-        for (const prop of WF_CONTROLS[el.type]?.props ?? ['Text', 'Enabled', 'Visible']) {
-            let value;
-            if (prop === 'Text') { value = wfString(el.props.Text) ?? ''; }
-            else { value = (el.props[prop] ?? '').trim(); }
-            propsBody.appendChild(propRow(prop, value, v => {
-                if (v === '') {
-                    wfApply(wfRemoveLine(el.name, prop));
-                } else if (prop === 'Text') {
-                    wfApply(wfSetLine(el.name, 'Text', wfQuote(v)));
-                } else if (/^(true|false)$/i.test(v)) {
-                    wfApply(wfSetLine(el.name, prop, v.toLowerCase()));
-                } else if (/^-?\d+$/.test(v)) {
-                    wfApply(wfSetLine(el.name, prop, v));
-                } else {
-                    wfApply(wfSetLine(el.name, prop, wfQuote(v)));
-                }
-            }, /^(Enabled|Visible|Checked|ReadOnly|Multiline)$/.test(prop) ? ['true', 'false'] : undefined));
+        if (def.kind === 'bool' || def.kind === 'enum' || def.kind === 'ref') {
+            const values = def.kind === 'bool' ? ['True', 'False']
+                : def.kind === 'ref' ? [...wfControls.values()].filter(c => c.type === 'Button').map(c => c.name)
+                : (WF_ENUM_VALUES[def.enum] ?? []);
+            const sel = document.createElement('select');
+            const reset = document.createElement('option');
+            reset.value = '';
+            reset.textContent = isSet ? '(reset)' : (def.def !== undefined ? `(default: ${def.def})` : '(default)');
+            sel.appendChild(reset);
+            for (const v of values) {
+                const opt = document.createElement('option');
+                opt.value = opt.textContent = v;
+                sel.appendChild(opt);
+            }
+            sel.value = isSet && values.includes(display) ? display : '';
+            sel.addEventListener('change', () => {
+                if (sel.value === '') { remove(); return; }
+                const code = def.kind === 'bool' ? sel.value.toLowerCase() : wfSerialize(def, sel.value);
+                if (code !== null) { write(code); }
+            });
+            sel.addEventListener('keydown', e => e.stopPropagation());
+            row.appendChild(sel);
+            return { label: prop, cat: def.cat, node: row };
         }
+
+        if (def.kind === 'anchor') {
+            const flags = new Set(isSet ? wfAnchorFlags(String(raw)) : ['Top', 'Left']);
+            const box = document.createElement('div');
+            box.className = 'ff-anchor-box';
+            for (const f of ['Top', 'Bottom', 'Left', 'Right']) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = f;
+                btn.title = `Anchor to the ${f.toLowerCase()} edge`;
+                if (flags.has(f)) { btn.classList.add('active'); }
+                btn.addEventListener('click', () => {
+                    if (flags.has(f)) { flags.delete(f); } else { flags.add(f); }
+                    write(wfAnchorCode(['Top', 'Bottom', 'Left', 'Right'].filter(x => flags.has(x))));
+                });
+                box.appendChild(btn);
+            }
+            row.appendChild(box);
+            return { label: prop, cat: def.cat, node: row };
+        }
+
+        if (def.kind === 'image' || def.kind === 'icon') {
+            const ref = wfImageRef(raw);
+            const val = document.createElement('input');
+            val.type = 'text';
+            val.readOnly = true;
+            val.value = ref ? ref.key : '';
+            val.placeholder = '(none)';
+            val.title = ref ? String(raw) : 'No image set';
+            row.appendChild(val);
+
+            const pick = document.createElement('button');
+            pick.type = 'button';
+            pick.className = 'ff-img-btn';
+            pick.textContent = '…';
+            pick.title = def.kind === 'icon'
+                ? 'Import a .ico file into the project Resources'
+                : 'Import an image (.png, .jpg, .gif, .bmp, .ico) into the project Resources';
+            pick.addEventListener('click', () => {
+                vscode.postMessage({
+                    type: 'pickImage',
+                    ctrl: isForm ? null : target.name,
+                    prop,
+                    isForm,
+                    iconOnly: def.kind === 'icon'
+                });
+            });
+            row.appendChild(pick);
+
+            if (isSet) {
+                const clear = document.createElement('button');
+                clear.type = 'button';
+                clear.className = 'ff-img-btn';
+                clear.textContent = '✕';
+                clear.title = 'Remove the image from this property';
+                clear.addEventListener('click', remove);
+                row.appendChild(clear);
+            }
+            return { label: prop, cat: def.cat, node: row };
+        }
+
+        if (def.kind === 'color') {
+            const swatch = document.createElement('input');
+            swatch.type = 'color';
+            swatch.className = 'ff-color-swatch';
+            swatch.value = cssColorToHex(isSet ? wfColor(String(raw)) : '');
+            swatch.title = 'Pick a color';
+            swatch.addEventListener('change', () => {
+                const code = wfColorCode(swatch.value);
+                if (code) { write(code); }
+            });
+            row.appendChild(swatch);
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = display ?? '';
+            input.placeholder = def.def ?? '';
+            input.spellcheck = false;
+            input.setAttribute('list', ensureDatalist('ff-dl-colors', [...WF_SYSTEM_COLOR_NAMES, ...WF_NAMED_COLORS]));
+            input.addEventListener('change', () => {
+                const v = input.value.trim();
+                if (v === '') { remove(); return; }
+                const code = wfColorCode(v);
+                if (code) { write(code); } else { renderPanel(); }
+            });
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { input.blur(); }
+                e.stopPropagation();
+            });
+            row.appendChild(input);
+            return { label: prop, cat: def.cat, node: row };
+        }
+
+        // Everything else: plain text editor with kind-aware parsing.
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = display ?? '';
+        input.placeholder = def.def ?? '';
+        input.spellcheck = false;
+        input.addEventListener('change', () => {
+            const v = input.value.trim();
+            if (v === '') { remove(); return; }
+            const code = wfSerialize(def, v);
+            if (code !== null) { write(code); } else { renderPanel(); }
+        });
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { input.blur(); }
+            e.stopPropagation();
+        });
+        row.appendChild(input);
+        return { label: prop, cat: def.cat, node: row };
     }
 
     function wfEventsTab(el, isForm) {
@@ -2467,5 +3340,6 @@
     // ==================================================================== boot
 
     buildToolbox();
+    initFormGrips();
     vscode.postMessage({ type: 'ready' });
 })();

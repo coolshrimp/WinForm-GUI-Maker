@@ -20,7 +20,8 @@ UI Maker closes that gap:
 | Pain point | UI Maker answer |
 |---|---|
 | Hand-writing XAML layout | Drag-and-drop visual designer with snap-to-grid canvas |
-| Guessing property names | Properties panel with the common properties per control |
+| Guessing property names | A real Properties window — categorized like Visual Studio's, with dropdowns, color pickers, Anchor toggles, and a description pane |
+| Adding images and icons | Pick a file → it's imported into `Resources/`, registered in `Resources.resx`, and referenced from the Designer.cs — exactly like VS |
 | Wiring events by hand | Events panel — one click writes the handler stub into the code-behind |
 | Switching between design and markup | Split view: designer on one side, live XAML source on the other |
 | CLI-only build workflow | Build / Run / Debug / Release buttons in the status bar and editor title |
@@ -46,6 +47,10 @@ the far left) to open the side panel:
   **+** button on a group to add a new window/form, or a row's **Duplicate**
   action to copy an existing one (new class name, registered in the project,
   opened in the designer). The lists update automatically as files change.
+- **Project Files** — everything else in the workspace, sorted into
+  solution-explorer-style categories: **Code**, **Images & Icons**,
+  **Resources**, **Data & Config**, **Project & Solution**, and **Other**,
+  with real file icons and click-to-open.
 
 ### 🎨 Visual Designer for XAML
 Open any `.xaml` window in the UI Maker Designer:
@@ -54,8 +59,25 @@ Open any `.xaml` window in the UI Maker Designer:
   RadioButton, ComboBox, ListBox, DataGrid, Image, ProgressBar, Slider, Border,
   GroupBox, DatePicker.
 - **Design canvas** that mimics a real window (title bar, client area) with
-  snap-to-grid placement, drag to move, and 8-point resize handles.
-- **Properties panel** — edit Name, size, margins, content, colors, fonts, and more.
+  snap-to-grid placement, drag to move, 8-point resize handles — and grips on
+  the window's own edges to resize the form/window itself.
+- **Properties window, Visual Studio style** — properties grouped under
+  collapsible categories (Accessibility, Appearance, Behavior, Data, Design,
+  Focus, Layout, Window Style) with a Categorized / A–Z toggle and a
+  description pane at the bottom. Enums and booleans are dropdowns with their
+  defaults shown, colors get a picker + named/system color autocomplete,
+  fonts use the familiar `Segoe UI, 9pt, style=Bold` format, and WinForms
+  `Anchor` is edited with Top/Bottom/Left/Right toggle buttons.
+  Explicitly-set values render **bold**, and clearing a value removes it from
+  the file — exactly like VS.
+- **Images and icons** — `Image`, `BackgroundImage`, and the form `Icon`
+  (.png/.jpg/.gif/.bmp/.ico) are picked with a file dialog and imported the
+  way Visual Studio does it: copied into `Resources/`, registered in
+  `Properties/Resources.resx`, exposed through a regenerated
+  `Resources.Designer.cs`, and referenced as
+  `Properties.Resources.name` in the form code. Placement and scaling are
+  full VS: `ImageAlign`, `TextImageRelation`, `BackgroundImageLayout`, and
+  PictureBox `SizeMode` — all previewed live on the canvas.
 - **Events panel** — type a handler name (or accept the default) and UI Maker sets
   the XAML attribute *and* generates the C# method stub in the `.xaml.cs` code-behind.
 - **Double-click a control** to wire its default event, exactly like classic designers.
@@ -198,6 +220,10 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
   alignment), because moving a stacked/docked child would rewrite its layout.
 - Styles are resolved for `{StaticResource}` setters; templates, triggers, and
   bindings are ignored in the preview.
+- Images assigned in old projects as *local* form resources
+  (`resources.GetObject(...)` with base64 in the form's `.resx`) render on the
+  canvas when they are plain image bytes; BinaryFormatter-serialized ones
+  cannot be previewed. Newly assigned images always use project resources.
 - Saving from the designer normalizes the XAML formatting (like most visual designers).
 - The visual preview is an approximation — always confirm with **Run**.
 - Windows-only targets (WPF/WinForms are Windows frameworks).
@@ -206,9 +232,13 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 
 - [x] Windows Forms visual designer (`*.Designer.cs` round-tripping)
 - [x] Nested layout rendering (StackPanel / DockPanel / Grid rows & columns / TabControl)
-- [ ] WinForms Anchor-aware preview (Dock is previewed) and control renaming
+- [x] Visual Studio-style categorized property grid (Anchor/Dock, colors, fonts, full form properties)
+- [x] Images & icons imported as project resources, with VS placement/scaling options
+- [ ] Control renaming that safely updates the code-behind
+- [ ] MenuStrip / ToolStrip / StatusStrip designers and a component tray (Timer, ToolTip, ContextMenuStrip)
+- [ ] Multi-select, alignment & distribution tools, tab-order view
 - [ ] Drag-reordering inside StackPanel / DockPanel children
-- [ ] Alignment & distribution tools, multi-select
+- [ ] "Create an Installer" for multi-file releases (Inno Setup script generation)
 - [ ] Style/resource editing and live theme preview
 - [ ] Marketplace publishing and prebuilt VSIX releases
 

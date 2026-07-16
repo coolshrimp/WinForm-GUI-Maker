@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.8.1
+
+Documentation — README rewritten for the Visual Studio-style property grid,
+image/icon importing, the resizable form, and the categorized Project Files
+panel; roadmap refreshed.
+
+## 0.8.0
+
+**Images and icons, imported like Visual Studio.** `Image`, `BackgroundImage`,
+and the form `Icon` are now editable in the property grid (all common formats:
+.png, .jpg, .jpeg, .gif, .bmp, .ico):
+
+- The **… button** opens a file picker; the chosen file is **copied into the
+  project's `Resources/` folder**, registered in `Properties/Resources.resx`
+  (as a ResXFileRef, exactly like VS), and `Properties/Resources.Designer.cs`
+  is regenerated ResXFileCodeGenerator-style — so the project still round-trips
+  with full Visual Studio. Classic (non-SDK) csproj files get the entries VS
+  would add. The Designer.cs references the image as
+  `global::YourApp.Properties.Resources.name`.
+- **Sizing and placement options like VS**: `ImageAlign` (ContentAlignment),
+  `TextImageRelation` (overlay / image above / below / before / after the
+  text), `BackgroundImageLayout` (None, Tile, Center, Stretch, Zoom), and
+  PictureBox `SizeMode` (Normal, StretchImage, AutoSize, CenterImage, Zoom).
+- **The canvas draws the real images** — button glyphs, PictureBox content
+  (with SizeMode), tiled/stretched background images, and the form icon in the
+  mock title bar. Legacy images embedded base64 in the form's own `.resx`
+  (`resources.GetObject(...)`) render too.
+- **✕** on the row removes the image assignment from the Designer.cs.
+
+**Project Files in the side panel.** The UI Maker sidebar now has a *Project
+Files* group that sorts everything that is not a designable file into
+categories, solution-explorer style: **Code**, **Images & Icons**,
+**Resources**, **Data & Config**, **Project & Solution**, and **Other** — with
+real file-theme icons and click-to-open.
+
+## 0.7.0
+
+**Visual Studio-style Properties window.** The properties panel is now a real
+property grid, modeled on the VS Properties window:
+
+- **Categories** — properties are grouped under collapsible headers
+  (Accessibility, Appearance, Behavior, Data, Design, Focus, Layout,
+  Window Style), with a **Categorized / A–Z** toggle like the VS toolbar.
+- **Full WinForms property catalog** — every control now exposes the VS set:
+  `Anchor` (Top/Bottom/Left/Right toggle buttons), `Dock`, `AutoSize`,
+  `Margin`, `Padding`, `MinimumSize`/`MaximumSize`, `BackColor`/`ForeColor`
+  (color picker + named/system colors), `Font`, `Cursor`, `TextAlign`,
+  `FlatStyle`, `BorderStyle`, `TabIndex`/`TabStop`, `Tag`, accessibility
+  properties, and per-type extras (`Multiline`, `PasswordChar`, `SizeMode`,
+  `DropDownStyle`, `View`, numeric ranges, …).
+- **Form properties** — `StartPosition`, `FormBorderStyle`, `WindowState`,
+  `ControlBox`/`MaximizeBox`/`MinimizeBox`, `ShowIcon`, `ShowInTaskbar`,
+  `TopMost`, `Opacity`, `KeyPreview`, `AcceptButton`/`CancelButton`, and more.
+- **Proper editors** — enums and booleans use dropdowns (with a
+  *(default: …)* reset entry), colors get a swatch picker, Anchor gets edge
+  toggles. Explicitly-set values render **bold**, exactly like VS, and
+  clearing a value removes the line from the Designer.cs.
+- **Description pane** — the bar at the bottom of the panel explains the
+  focused property, like the VS help area.
+- Everything is written back as compilable C# in the file's own dialect
+  (classic `this.` + qualified names, or modern .NET style), including
+  `AnchorStyles` cast expressions, `Color.FromArgb`, `new Font(...)`,
+  `Padding(...)`, and `decimal` values for NumericUpDown.
+
+**Resizable form.** Drag the grips on the mock window's right/bottom edges to
+resize the form on the canvas — writes `ClientSize` for WinForms and
+`Width`/`Height` for XAML windows, with grid snapping.
+
+**Designer previews for the new properties** — `TextAlign`, `BorderStyle`,
+and flat buttons now render on the canvas.
+
+The XAML properties panel uses the same categorized grid.
+
 ## 0.6.0
 
 **App Settings editor** — the Visual Studio *Project Properties → Settings*

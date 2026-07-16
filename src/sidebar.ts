@@ -1,6 +1,6 @@
 // UI Maker — activity-bar side panel.
 //
-// A single tree view with four groups:
+// A single tree view with five groups:
 //   * Actions          — the project commands. Run and Debug are play/stop
 //                        toggles: a green play button while idle that turns
 //                        into a red stop button while the app is running.
@@ -8,9 +8,13 @@
 //                        (WinForms/WPF + framework); click to switch over.
 //   * XAML Windows     — every .xaml file in the workspace (+ add/duplicate)
 //   * WinForms Forms   — every Form's *.Designer.cs (+ add/duplicate)
+//   * Project Files    — everything else, sorted into type categories
+//                        (Code, Images & Icons, Resources, Data & Config,
+//                        Project & Solution, Other) like a solution explorer.
 //
-// Clicking a file opens it straight in the visual designer. The lists refresh
-// automatically when matching files are created, deleted, or renamed.
+// Clicking a designable file opens it straight in the visual designer; other
+// files open in their default editor. The lists refresh automatically when
+// files are created, deleted, or renamed.
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
@@ -69,10 +73,14 @@ export class SidebarItem extends vscode.TreeItem {
             description?: string;
             contextValue?: string;
             children?: SidebarItem[];
+            /** Start category groups collapsed to keep the panel tidy. */
+            collapsed?: boolean;
         } = {}
     ) {
         super(label, options.children
-            ? vscode.TreeItemCollapsibleState.Expanded
+            ? (options.collapsed
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.Expanded)
             : vscode.TreeItemCollapsibleState.None);
         if (options.icon) {
             this.iconPath = new vscode.ThemeIcon(
@@ -125,8 +133,70 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
                 icon: 'window',
                 contextValue: 'uimakerFormGroup',
                 children: await this.winFormsItems()
+            }),
+            new SidebarItem('Project Files', {
+                icon: 'files',
+                children: await this.projectFileItems()
             })
         ];
+    }
+
+    /** Everything that is not a designable file, grouped by type category. */
+    private async projectFileItems(): Promise<SidebarItem[]> {
+        if (!vscode.workspace.workspaceFolders?.length) {
+            return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
+        }
+        const files = await vscode.workspace.findFiles(
+            '**/*', '**/{bin,obj,node_modules,.git,.vs,packages}/**', 800);
+
+        const cats: Record<string, { icon: string; files: vscode.Uri[] }> = {
+            'Code':               { icon: 'file-code', files: [] },
+            'Images & Icons':     { icon: 'file-media', files: [] },
+            'Resources':          { icon: 'library', files: [] },
+            'Data & Config':      { icon: 'gear', files: [] },
+            'Project & Solution': { icon: 'project', files: [] },
+            'Other':              { icon: 'file', files: [] }
+        };
+
+        for (const uri of files) {
+            const base = path.basename(uri.fsPath).toLowerCase();
+            const ext = path.extname(base);
+            // Designable files already have their own groups above.
+            if (ext === '.xaml' || /\.designer\.cs$/.test(base)) { continue; }
+            if (ext === '.cs' || ext === '.vb') { cats['Code'].files.push(uri); }
+            else if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg', '.cur'].includes(ext)) { cats['Images & Icons'].files.push(uri); }
+            else if (['.resx', '.settings'].includes(ext)) { cats['Resources'].files.push(uri); }
+            else if (['.csproj', '.vbproj', '.sln', '.slnx', '.props', '.targets'].includes(ext)) { cats['Project & Solution'].files.push(uri); }
+            else if (['.json', '.xml', '.config', '.manifest', '.ini', '.csv', '.txt', '.md', '.yml', '.yaml'].includes(ext)) { cats['Data & Config'].files.push(uri); }
+            else { cats['Other'].files.push(uri); }
+        }
+
+        const groups: SidebarItem[] = [];
+        for (const [name, cat] of Object.entries(cats)) {
+            if (!cat.files.length) { continue; }
+            cat.files.sort((a, b) => path.basename(a.fsPath).localeCompare(path.basename(b.fsPath)));
+            const children = cat.files.map(uri => {
+                const rel = vscode.workspace.asRelativePath(uri);
+                const dir = path.dirname(rel);
+                const item = new SidebarItem(path.basename(uri.fsPath), {
+                    command: 'vscode.open',
+                    args: [uri],
+                    description: dir === '.' ? undefined : dir,
+                    tooltip: rel
+                });
+                // Real file-theme icon (same as the Explorer shows).
+                item.resourceUri = uri;
+                item.iconPath = vscode.ThemeIcon.File;
+                return item;
+            });
+            groups.push(new SidebarItem(name, {
+                icon: cat.icon,
+                description: String(cat.files.length),
+                collapsed: true,
+                children
+            }));
+        }
+        return groups.length ? groups : [new SidebarItem('No other files in this workspace', { icon: 'info' })];
     }
 
     /** The command rows; Run and Debug reflect the current run state. */
@@ -282,7 +352,8 @@ export function registerSidebar(context: vscode.ExtensionContext, dotnet: Dotnet
     );
 
     // Keep the file lists in sync with the workspace.
-    for (const glob of ['**/*.xaml', '**/*.Designer.cs', '**/*.{csproj,vbproj}']) {
+    for (const glob of ['**/*.xaml', '**/*.Designer.cs', '**/*.{csproj,vbproj}',
+        '**/*.{cs,vb,png,jpg,jpeg,gif,bmp,ico,svg,resx,settings,json,xml,config,manifest,txt,md,sln}']) {
         const watcher = vscode.workspace.createFileSystemWatcher(glob);
         watcher.onDidCreate(() => sidebar.refresh());
         watcher.onDidDelete(() => sidebar.refresh());
