@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.6.0
+
+**App Settings editor** — the Visual Studio *Project Properties → Settings*
+page, inside VS Code. Define the settings your built app remembers — name,
+type (string/int/bool/double/long/DateTime), **User** or **Application**
+scope, and a default value — in a grid. Saving writes the same
+`Properties/Settings.settings` + `Settings.Designer.cs` pair Visual Studio
+generates, so the project stays fully VS-compatible; the app reads them via
+`Properties.Settings.Default.Name` and persists User-scoped values with
+`.Save()`.
+
+**Built-in guide** — *Guide: How to Build an App* (the book icon in the side
+panel, the Actions list, or the Command Palette) opens a walkthrough of the
+whole journey: the workflow from empty folder to shipped `.exe`, the full
+file tree of a WPF and a WinForms project, which files are required /
+optional / generated, and what every single file is for.
+
+**Quicker folder access** — recent projects now have an **Open Folder in
+File Explorer** hover button next to *Open in New Window*, and the Actions
+list gains **Open Working Folder** for the current project.
+
+**Apps that need administrator rights now Run** — when the app's manifest
+requests elevation (`requireAdministrator`/`highestAvailable`),
+`dotnet run` and plain launches fail with "The requested operation requires
+elevation". UI Maker now detects the manifest, builds, and launches the
+built `.exe` through a UAC prompt instead; the play/stop toggle still
+follows the app. Debugging such apps requires an elevated VS Code, and a
+warning now says so.
+
+**WinForms designer parity fixes** — found by rendering the same
+Designer.cs in UI Maker and Visual Studio side by side:
+
+- Modern-dialect form properties (`ClientSize = new Size(954, 1028);`,
+  `MinimumSize`, `AutoScaleDimensions`) were mistaken for control
+  declarations, so the form fell back to 600×400 and clipped every control
+  beyond that. Forms now render at their real size.
+- Controls with `Visible = false` are now drawn normally, exactly like the
+  Visual Studio designer, so hidden panels stay fully designable
+  (previously they were faded and easy to mistake for missing).
+- **LinkLabel** is now a real control: toolbox entry, blue underlined
+  rendering, and `LinkClicked` event wiring.
+- Image-only buttons show a placeholder glyph instead of their clipped
+  variable name.
+
+**Internal identifiers renamed** — commands, settings keys, and the
+extension ID now use `uimaker.*` throughout. Because this changes the
+extension ID: uninstall the previously installed version once, re-apply any
+customized UI Maker settings (`uimaker.gridSize`, `uimaker.publish.*`, …),
+and expect the Recent Projects list to start fresh.
+
 ## 0.5.1
 
 **Locked-output protection (MSB3026).** Building while a previous instance
@@ -90,9 +140,7 @@ DockPanel, Canvas, ScrollViewer).
 
 ## 0.3.0
 
-- Renamed the extension to **UI Maker** (formerly FormForge). Internal IDs
-  (`formforge.*` commands and settings, the extension ID) are unchanged, so
-  existing installs and settings carry over.
+- Renamed the extension to **UI Maker**.
 - New **activity-bar side panel** with its own icon:
   - **Actions** — New Project / Build / Run / Debug / Release / Stop
   - **XAML Windows** — all `.xaml` files in the workspace; click to open in

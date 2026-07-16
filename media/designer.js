@@ -1089,7 +1089,7 @@
             item.draggable = true;
             item.innerHTML = `<span class="ff-tool-icon">${def.icon}</span>${type}`;
             item.addEventListener('dragstart', e => {
-                e.dataTransfer.setData('text/formforge-control', type);
+                e.dataTransfer.setData('text/uimaker-control', type);
                 e.dataTransfer.effectAllowed = 'copy';
             });
             host.appendChild(item);
@@ -1097,14 +1097,14 @@
     }
 
     surfaceEl.addEventListener('dragover', e => {
-        if (e.dataTransfer.types.includes('text/formforge-control')) {
+        if (e.dataTransfer.types.includes('text/uimaker-control')) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
         }
     });
 
     surfaceEl.addEventListener('drop', e => {
-        const type = e.dataTransfer.getData('text/formforge-control');
+        const type = e.dataTransfer.getData('text/uimaker-control');
         if (!type) { return; }
         if (docMode === 'winforms') {
             e.preventDefault();
@@ -1571,6 +1571,7 @@
     const WF_CONTROLS = {
         Button:         { icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'Enabled', 'Visible', 'TabIndex'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
         Label:          { icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'Enabled', 'Visible'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        LinkLabel:      { icon: '🔗', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'Enabled', 'Visible'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
         TextBox:        { icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'Enabled', 'Visible'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
         CheckBox:       { icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'Enabled', 'Visible'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
         RadioButton:    { icon: '◉', w: 95,  h: 19,  text: 'radioButton', props: ['Text', 'Checked', 'Enabled', 'Visible'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
@@ -1602,6 +1603,7 @@
         CellValueChanged: { handler: 'System.Windows.Forms.DataGridViewCellEventHandler', args: 'DataGridViewCellEventArgs' },
         FormClosing:      { handler: 'System.Windows.Forms.FormClosingEventHandler', args: 'FormClosingEventArgs' },
         AfterSelect:      { handler: 'System.Windows.Forms.TreeViewEventHandler', args: 'TreeViewEventArgs' },
+        LinkClicked:      { handler: 'System.Windows.Forms.LinkLabelLinkClickedEventHandler', args: 'LinkLabelLinkClickedEventArgs' },
         Paint:            { handler: 'System.Windows.Forms.PaintEventHandler', args: 'PaintEventArgs' }
     };
     const WF_DEFAULT_EVENT_TYPE = { handler: 'System.EventHandler', args: 'EventArgs' };
@@ -1635,8 +1637,15 @@
         };
 
         // Control instantiations: [this.]name = new [System.Windows.Forms.]Type(...);
+        // In the modern dialect, form-level value assignments look identical
+        // ("ClientSize = new Size(954, 1028);"), so known value types must be
+        // excluded here or they shadow the real form properties.
+        const valueTypes = new Set([
+            'Container', 'ComponentResourceManager', 'Size', 'SizeF', 'Point', 'PointF',
+            'Font', 'Padding', 'Rectangle', 'RectangleF', 'Color', 'Icon', 'Bitmap'
+        ]);
         for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*=\s*new\s+(?:System\.Windows\.Forms\.)?(\w+)\s*\(/gm)) {
-            if (m[1] === 'components' || m[2] === 'Container' || m[2] === 'ComponentResourceManager') { continue; }
+            if (m[1] === 'components' || valueTypes.has(m[2])) { continue; }
             wfControls.set(m[1], {
                 __wf: true, name: m[1], type: m[2],
                 props: {}, events: {}, children: [], columns: [], items: [], parent: null
@@ -1770,7 +1779,8 @@
             if (font.italic) { div.style.fontStyle = 'italic'; }
         }
         if (ctrl.props.Enabled?.trim() === 'false') { div.classList.add('ff-disabled-control'); }
-        if (ctrl.props.Visible?.trim() === 'false') { div.classList.add('ff-hidden-control'); }
+        // Visible=false is deliberately ignored: like Visual Studio, the
+        // designer always shows every control so hidden panels stay editable.
 
         wfBuildContent(div, ctrl);
 
@@ -1873,12 +1883,21 @@
             }
             case 'Button':
                 inner.classList.add('ff-look-button');
-                inner.textContent = text || ctrl.name;
+                // Image-only buttons (Text empty, Image from resources) show a
+                // placeholder glyph instead of their variable name.
+                inner.textContent = text || (ctrl.props.Image ? '🖼' : ctrl.name);
                 break;
             case 'Label':
                 inner.classList.add('ff-look-label');
                 inner.style.whiteSpace = 'nowrap';
                 inner.textContent = text;
+                break;
+            case 'LinkLabel':
+                inner.classList.add('ff-look-label');
+                inner.style.whiteSpace = 'nowrap';
+                inner.style.color = '#0066cc';
+                inner.style.textDecoration = 'underline';
+                inner.textContent = text || ctrl.name;
                 break;
             case 'TextBox':
             case 'MaskedTextBox':

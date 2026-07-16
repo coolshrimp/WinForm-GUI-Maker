@@ -59,8 +59,8 @@ export async function addXamlWindow(dotnet: DotnetTools): Promise<void> {
         { tag: 'Compile', include: relTo(project, csPath), dependentUpon: `${name}.xaml`, subType: 'Code' }
     ]);
 
-    await vscode.commands.executeCommand('formforge.openDesigner', vscode.Uri.file(xamlPath));
-    void vscode.commands.executeCommand('formforge.refreshSidebar');
+    await vscode.commands.executeCommand('uimaker.openDesigner', vscode.Uri.file(xamlPath));
+    void vscode.commands.executeCommand('uimaker.refreshSidebar');
 }
 
 /** Create a new WinForms Form (<Name>.cs + <Name>.Designer.cs). */
@@ -138,8 +138,8 @@ export async function addWinForm(dotnet: DotnetTools): Promise<void> {
         { tag: 'Compile', include: relTo(project, designerPath), dependentUpon: `${name}.cs` }
     ]);
 
-    await vscode.commands.executeCommand('formforge.openDesigner', vscode.Uri.file(designerPath));
-    void vscode.commands.executeCommand('formforge.refreshSidebar');
+    await vscode.commands.executeCommand('uimaker.openDesigner', vscode.Uri.file(designerPath));
+    void vscode.commands.executeCommand('uimaker.refreshSidebar');
 }
 
 /**
@@ -204,8 +204,8 @@ export async function duplicateDesignFile(uri: vscode.Uri): Promise<void> {
     }
 
     const openTarget = isXaml ? written[0] : written.find(f => /\.Designer\.cs$/i.test(f)) ?? written[0];
-    await vscode.commands.executeCommand('formforge.openDesigner', vscode.Uri.file(openTarget));
-    void vscode.commands.executeCommand('formforge.refreshSidebar');
+    await vscode.commands.executeCommand('uimaker.openDesigner', vscode.Uri.file(openTarget));
+    void vscode.commands.executeCommand('uimaker.refreshSidebar');
     vscode.window.showInformationMessage(`UI Maker: duplicated ${oldName} as ${name}.`);
 }
 

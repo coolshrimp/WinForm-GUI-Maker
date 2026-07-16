@@ -33,11 +33,14 @@ UI Maker closes that gap:
 Click the **UI Maker icon in the activity bar** (the window-with-controls glyph on
 the far left) to open the side panel:
 
-- **Actions** — New Project, Build, Run, Debug, and Release, one click away.
-  Run and Debug are toggles: a green play button while idle that becomes a red
-  stop button while your app is running.
+- **Actions** — New Project, Build, Run, Debug, Release, App Settings, Open
+  Working Folder, and the built-in Guide, one click away. Run and Debug are
+  toggles: a green play button while idle that becomes a red stop button while
+  your app is running.
 - **Recent Projects** — every .NET project you open or create, tagged with its
   type (`WinForms · .NET 8`, `WPF · .NET Framework 4.7.2`, …); click to switch.
+  Hover a project for one-click **Open in New Window**, **Open Folder in File
+  Explorer**, and **Remove**.
 - **XAML Windows** and **WinForms Forms** — every designable file in the
   workspace; click one to open it straight in the visual designer. Use the
   **+** button on a group to add a new window/form, or a row's **Duplicate**
@@ -83,12 +86,35 @@ Builds are protected so they work on any dev machine: projects targeting
 .NET Framework without the reference assemblies installed (error MSB3644) get
 an offer to add the `Microsoft.NETFramework.ReferenceAssemblies` build helper,
 and classic non-SDK projects are built with Visual Studio's MSBuild (found via
-vswhere) since the `dotnet` CLI cannot load them.
+vswhere) since the `dotnet` CLI cannot load them. Apps whose manifest requests
+administrator rights are detected too — Run builds them and launches the exe
+through a UAC prompt instead of failing with "requires elevation".
 
 ### 🚀 Project scaffolding
 `UI Maker: New .NET Desktop Project` asks for a template (WPF, Windows Forms,
 or Console), a language (C# or Visual Basic), a target framework, a name, and
 a folder — then generates a ready-to-run app and offers to open it.
+
+### ⚙️ App Settings editor
+**App Settings** (side panel → Actions) is the Visual Studio *Project
+Properties → Settings* page, inside VS Code: a grid of settings your built app
+remembers — name, type (string/int/bool/double/long/DateTime), **User** or
+**Application** scope, and a default value. Saving writes the same
+`Properties/Settings.settings` + `Settings.Designer.cs` pair Visual Studio
+generates, so the project stays fully compatible with VS. In your app:
+
+```csharp
+var name = Properties.Settings.Default.PlayerName;   // read
+Properties.Settings.Default.PlayerName = "Ada";      // change (User scope)
+Properties.Settings.Default.Save();                  // persist per user
+```
+
+### 📖 Built-in guide
+New to .NET desktop apps? **Guide — How to Build an App** (side panel, the book
+icon, or the Command Palette) opens an illustrated walkthrough: the workflow
+from empty folder to shipped `.exe`, the full file tree of a WPF and a WinForms
+project, which files are required / optional / generated, and what every single
+file is for.
 
 ## Getting started
 
@@ -106,7 +132,7 @@ a folder — then generates a ready-to-run app and offers to open it.
 
 ```bash
 git clone <this repo>
-cd formforge
+cd uimaker
 npm install
 npm run compile
 ```
@@ -128,17 +154,19 @@ launches with UI Maker loaded.
 | `UI Maker: Debug / Stop Debugging` | Build and debug the app, or stop the session |
 | `UI Maker: Build Release (Publish)` | Publish a Release build (honors the single-exe settings) |
 | `UI Maker: Stop Running App` | Terminate the app started by Run |
+| `UI Maker: App Settings` | Grid editor for the settings your app remembers (`Properties.Settings`) |
+| `UI Maker: Open Working Folder` | Show the current project folder in File Explorer |
+| `UI Maker: Guide: How to Build an App` | Open the built-in guide (project anatomy, required vs. optional files) |
 
 ## Settings
 
 | Setting | Default | Description |
 |---|---|---|
-| `formforge.gridSize` | `8` | Snap grid size in pixels on the design canvas |
-| `formforge.snapToGrid` | `true` | Snap control positions/sizes to the grid |
-
-> UI Maker started life as "FormForge", and the internal identifiers
-> (settings keys, command IDs, the extension ID) keep that name so existing
-> installs and settings continue to work.
+| `uimaker.gridSize` | `8` | Snap grid size in pixels on the design canvas |
+| `uimaker.snapToGrid` | `true` | Snap control positions/sizes to the grid |
+| `uimaker.publish.singleFile` | `false` | Build Release (Publish) produces one portable `.exe` |
+| `uimaker.publish.selfContained` | `false` | Bundle the .NET runtime so the target PC needs nothing installed |
+| `uimaker.publish.runtime` | `win-x64` | Target runtime for single-file / self-contained publishing |
 
 ## How it works
 
@@ -161,7 +189,7 @@ or a `Form.Designer.cs` file in the designer and get the same drag-and-drop
 canvas, properties panel, and event wiring. WinForms edits are surgical — only
 the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 
-## Known limitations (v0.3)
+## Known limitations
 
 - Nested layouts (Grid rows/columns, StackPanel, DockPanel, TabControl,
   ScrollViewer, …) **render** faithfully, and any element can be selected,

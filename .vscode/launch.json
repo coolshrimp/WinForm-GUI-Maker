@@ -1,5 +1,5 @@
 {
-    // Press F5 to launch an Extension Development Host with FormForge loaded.
+    // Press F5 to launch an Extension Development Host with UI Maker loaded.
     "version": "0.2.0",
     "configurations": [
         {

@@ -1,7 +1,0 @@
-remake a VS code extention just like https://tmssoftware.com/site/blog.asp?post=, https://www.youtube.com/watch?v=2CTqIG5DeJ0
-
-so we have an open source tool anyone can can edit build windows foirms UIs for thies aplication geting away form CLI only for non experianced used.
-
-edit files like: MainWindow.xaml
-
-can we build this extention enable git first and start comment all code no ai mentions. its for files like MainWindow.xaml. so we can stay in native vscode and never fo to plain VS, can we add a build debug, relase buttons, launch /debug app after combiulle ubttons etc. and all in one winfoe UIand app creation maker.give a better name if we need.

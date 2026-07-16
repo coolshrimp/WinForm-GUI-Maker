@@ -15,6 +15,8 @@ import { DotnetTools } from './dotnetTools';
 import { newProject } from './scaffold';
 import { registerSidebar } from './sidebar';
 import { addXamlWindow, addWinForm, duplicateDesignFile } from './formFiles';
+import { openGuide } from './guide';
+import { openAppSettings } from './appSettings';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
 const statusItems: vscode.StatusBarItem[] = [];
@@ -33,10 +35,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // --- Commands -----------------------------------------------------------
     context.subscriptions.push(
-        vscode.commands.registerCommand('formforge.newProject', () => newProject()),
+        vscode.commands.registerCommand('uimaker.newProject', () => newProject()),
 
         // Re-open the given (or active) designable file in the designer editor.
-        vscode.commands.registerCommand('formforge.openDesigner', (uri?: vscode.Uri) => {
+        vscode.commands.registerCommand('uimaker.openDesigner', (uri?: vscode.Uri) => {
             const target = uri ?? vscode.window.activeTextEditor?.document.uri;
             const p = target?.fsPath.toLowerCase() ?? '';
             if (!target || !(p.endsWith('.xaml') || p.endsWith('.designer.cs'))) {
@@ -47,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
 
         // Open the raw source text editor next to the designer (split view).
-        vscode.commands.registerCommand('formforge.openCodeBeside', (uri?: vscode.Uri) => {
+        vscode.commands.registerCommand('uimaker.openCodeBeside', (uri?: vscode.Uri) => {
             const target = uri ?? DesignerProvider.activeDocumentUri;
             if (!target) {
                 return;
@@ -57,18 +59,34 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Build / run / debug / release all resolve the project nearest to the
         // active editor so multi-project workspaces behave sensibly.
-        vscode.commands.registerCommand('formforge.build', () => dotnet.build()),
-        vscode.commands.registerCommand('formforge.run', () => dotnet.run()),
-        vscode.commands.registerCommand('formforge.debug', () => dotnet.debug()),
-        vscode.commands.registerCommand('formforge.release', () => dotnet.release()),
-        vscode.commands.registerCommand('formforge.stop', () => dotnet.stop()),
-        vscode.commands.registerCommand('formforge.runToggle', () => dotnet.runToggle()),
-        vscode.commands.registerCommand('formforge.debugToggle', () => dotnet.debugToggle()),
+        vscode.commands.registerCommand('uimaker.build', () => dotnet.build()),
+        vscode.commands.registerCommand('uimaker.run', () => dotnet.run()),
+        vscode.commands.registerCommand('uimaker.debug', () => dotnet.debug()),
+        vscode.commands.registerCommand('uimaker.release', () => dotnet.release()),
+        vscode.commands.registerCommand('uimaker.stop', () => dotnet.stop()),
+        vscode.commands.registerCommand('uimaker.runToggle', () => dotnet.runToggle()),
+        vscode.commands.registerCommand('uimaker.debugToggle', () => dotnet.debugToggle()),
+
+        // The built-in "How to Build an App" guide (side panel + palette).
+        vscode.commands.registerCommand('uimaker.openGuide', () => openGuide()),
+
+        // Settings editor for the app being built (Properties.Settings grid).
+        vscode.commands.registerCommand('uimaker.appSettings', () => openAppSettings(dotnet)),
+
+        // Show the current project folder in the OS file manager.
+        vscode.commands.registerCommand('uimaker.openWorkingFolder', () => {
+            const ws = vscode.workspace.workspaceFolders?.[0]?.uri;
+            if (!ws) {
+                vscode.window.showWarningMessage('UI Maker: open a folder first.');
+                return;
+            }
+            return vscode.env.openExternal(ws);
+        }),
 
         // Window/form creation and duplication (sidebar buttons + context menus).
-        vscode.commands.registerCommand('formforge.addWindow', () => addXamlWindow(dotnet)),
-        vscode.commands.registerCommand('formforge.addForm', () => addWinForm(dotnet)),
-        vscode.commands.registerCommand('formforge.duplicateDesignFile', (item?: { designUri?: vscode.Uri } | vscode.Uri) => {
+        vscode.commands.registerCommand('uimaker.addWindow', () => addXamlWindow(dotnet)),
+        vscode.commands.registerCommand('uimaker.addForm', () => addWinForm(dotnet)),
+        vscode.commands.registerCommand('uimaker.duplicateDesignFile', (item?: { designUri?: vscode.Uri } | vscode.Uri) => {
             const uri = item instanceof vscode.Uri ? item : item?.designUri;
             if (!uri) { return; }
             return duplicateDesignFile(uri);
@@ -96,10 +114,10 @@ export function deactivate(): void {
 /** Build the row of status-bar buttons (right-to-left priority ordering). */
 function createStatusItems(context: vscode.ExtensionContext): void {
     const defs: Array<[string, string, string]> = [
-        ['formforge.build',       '$(tools) Build',     'UI Maker: build the project'],
-        ['formforge.runToggle',   '$(play) Run',        'UI Maker: build and launch the app'],
-        ['formforge.debugToggle', '$(debug-alt) Debug', 'UI Maker: build and debug the app'],
-        ['formforge.release',     '$(package) Release', 'UI Maker: publish a Release build']
+        ['uimaker.build',       '$(tools) Build',     'UI Maker: build the project'],
+        ['uimaker.runToggle',   '$(play) Run',        'UI Maker: build and launch the app'],
+        ['uimaker.debugToggle', '$(debug-alt) Debug', 'UI Maker: build and debug the app'],
+        ['uimaker.release',     '$(package) Release', 'UI Maker: publish a Release build']
     ];
     let priority = 100;
     for (const [command, text, tooltip] of defs) {
@@ -109,8 +127,8 @@ function createStatusItems(context: vscode.ExtensionContext): void {
         item.tooltip = tooltip;
         statusItems.push(item);
         context.subscriptions.push(item);
-        if (command === 'formforge.runToggle') { runStatusItem = item; }
-        if (command === 'formforge.debugToggle') { debugStatusItem = item; }
+        if (command === 'uimaker.runToggle') { runStatusItem = item; }
+        if (command === 'uimaker.debugToggle') { debugStatusItem = item; }
     }
 }
 
@@ -140,11 +158,11 @@ function updateRunStatusItems(dotnet: DotnetTools): void {
     }
 }
 
-/** Toggle status-bar buttons and the `formforge.hasProject` context key. */
+/** Toggle status-bar buttons and the `uimaker.hasProject` context key. */
 async function refreshProjectContext(): Promise<void> {
     const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 1);
     const hasProject = found.length > 0;
-    await vscode.commands.executeCommand('setContext', 'formforge.hasProject', hasProject);
+    await vscode.commands.executeCommand('setContext', 'uimaker.hasProject', hasProject);
     for (const item of statusItems) {
         if (hasProject) {
             item.show();

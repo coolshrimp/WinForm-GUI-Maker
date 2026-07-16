@@ -1,9 +1,9 @@
 {
-    "name": "formforge",
+    "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer, side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps (WPF & WinForms, C# & VB) inside VS Code.",
-    "version": "0.5.1",
-    "publisher": "formforge",
+    "version": "0.6.0",
+    "publisher": "coolshrimp",
     "license": "MIT",
     "engines": {
         "vscode": "^1.85.0"
@@ -39,7 +39,7 @@
         "views": {
             "uimaker": [
                 {
-                    "id": "formforge.sidebar",
+                    "id": "uimaker.sidebar",
                     "name": "Designer",
                     "icon": "media/sidebar-icon.svg",
                     "contextualTitle": "UI Maker"
@@ -48,7 +48,7 @@
         },
         "customEditors": [
             {
-                "viewType": "formforge.designer",
+                "viewType": "uimaker.designer",
                 "displayName": "UI Maker Designer",
                 "selector": [
                     {
@@ -63,218 +63,256 @@
         ],
         "commands": [
             {
-                "command": "formforge.newProject",
+                "command": "uimaker.newProject",
                 "title": "New .NET Desktop Project",
                 "category": "UI Maker",
                 "icon": "$(new-folder)"
             },
             {
-                "command": "formforge.openDesigner",
+                "command": "uimaker.openDesigner",
                 "title": "Open in Designer",
                 "category": "UI Maker",
                 "icon": "$(layout)"
             },
             {
-                "command": "formforge.openCodeBeside",
+                "command": "uimaker.openCodeBeside",
                 "title": "View XAML Source (Beside)",
                 "category": "UI Maker",
                 "icon": "$(code)"
             },
             {
-                "command": "formforge.build",
+                "command": "uimaker.build",
                 "title": "Build",
                 "category": "UI Maker",
                 "icon": "$(tools)"
             },
             {
-                "command": "formforge.run",
+                "command": "uimaker.run",
                 "title": "Run App",
                 "category": "UI Maker",
                 "icon": "$(play)"
             },
             {
-                "command": "formforge.debug",
+                "command": "uimaker.debug",
                 "title": "Debug App",
                 "category": "UI Maker",
                 "icon": "$(debug-alt)"
             },
             {
-                "command": "formforge.release",
+                "command": "uimaker.release",
                 "title": "Build Release (Publish)",
                 "category": "UI Maker",
                 "icon": "$(package)"
             },
             {
-                "command": "formforge.stop",
+                "command": "uimaker.stop",
                 "title": "Stop Running App",
                 "category": "UI Maker",
                 "icon": "$(debug-stop)"
             },
             {
-                "command": "formforge.runToggle",
+                "command": "uimaker.runToggle",
                 "title": "Run / Stop App",
                 "category": "UI Maker",
                 "icon": "$(play)"
             },
             {
-                "command": "formforge.debugToggle",
+                "command": "uimaker.debugToggle",
                 "title": "Debug / Stop Debugging",
                 "category": "UI Maker",
                 "icon": "$(debug-alt)"
             },
             {
-                "command": "formforge.addWindow",
+                "command": "uimaker.addWindow",
                 "title": "New WPF Window",
                 "category": "UI Maker",
                 "icon": "$(add)"
             },
             {
-                "command": "formforge.addForm",
+                "command": "uimaker.addForm",
                 "title": "New WinForms Form",
                 "category": "UI Maker",
                 "icon": "$(add)"
             },
             {
-                "command": "formforge.duplicateDesignFile",
+                "command": "uimaker.duplicateDesignFile",
                 "title": "Duplicate",
                 "category": "UI Maker",
                 "icon": "$(copy)"
             },
             {
-                "command": "formforge.refreshSidebar",
+                "command": "uimaker.refreshSidebar",
                 "title": "Refresh",
                 "category": "UI Maker",
                 "icon": "$(refresh)"
             },
             {
-                "command": "formforge.recentOpen",
+                "command": "uimaker.recentOpen",
                 "title": "Open Project",
                 "category": "UI Maker"
             },
             {
-                "command": "formforge.recentOpenNewWindow",
+                "command": "uimaker.recentOpenNewWindow",
                 "title": "Open in New Window",
                 "category": "UI Maker",
                 "icon": "$(multiple-windows)"
             },
             {
-                "command": "formforge.recentRemove",
+                "command": "uimaker.recentRemove",
                 "title": "Remove from Recent Projects",
                 "category": "UI Maker",
                 "icon": "$(close)"
+            },
+            {
+                "command": "uimaker.recentRevealFolder",
+                "title": "Open Folder in File Explorer",
+                "category": "UI Maker",
+                "icon": "$(folder-opened)"
+            },
+            {
+                "command": "uimaker.openWorkingFolder",
+                "title": "Open Working Folder",
+                "category": "UI Maker",
+                "icon": "$(folder-opened)"
+            },
+            {
+                "command": "uimaker.appSettings",
+                "title": "App Settings",
+                "category": "UI Maker",
+                "icon": "$(settings-gear)"
+            },
+            {
+                "command": "uimaker.openGuide",
+                "title": "Guide: How to Build an App",
+                "category": "UI Maker",
+                "icon": "$(book)"
             }
         ],
         "menus": {
             "view/title": [
                 {
-                    "command": "formforge.newProject",
-                    "when": "view == formforge.sidebar",
+                    "command": "uimaker.newProject",
+                    "when": "view == uimaker.sidebar",
                     "group": "navigation@1"
                 },
                 {
-                    "command": "formforge.refreshSidebar",
-                    "when": "view == formforge.sidebar",
+                    "command": "uimaker.refreshSidebar",
+                    "when": "view == uimaker.sidebar",
                     "group": "navigation@2"
+                },
+                {
+                    "command": "uimaker.openGuide",
+                    "when": "view == uimaker.sidebar",
+                    "group": "navigation@3"
                 }
             ],
             "editor/title": [
                 {
-                    "command": "formforge.openDesigner",
-                    "when": "(resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/) && activeCustomEditorId != formforge.designer",
+                    "command": "uimaker.openDesigner",
+                    "when": "(resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/) && activeCustomEditorId != uimaker.designer",
                     "group": "navigation@1"
                 },
                 {
-                    "command": "formforge.openCodeBeside",
-                    "when": "activeCustomEditorId == formforge.designer",
+                    "command": "uimaker.openCodeBeside",
+                    "when": "activeCustomEditorId == uimaker.designer",
                     "group": "navigation@1"
                 },
                 {
-                    "command": "formforge.runToggle",
-                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|vb|csproj|vbproj)$/",
+                    "command": "uimaker.runToggle",
+                    "when": "uimaker.hasProject && resourceExtname =~ /\\.(xaml|cs|vb|csproj|vbproj)$/",
                     "group": "navigation@2"
                 },
                 {
-                    "command": "formforge.debugToggle",
-                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|vb|csproj|vbproj)$/",
+                    "command": "uimaker.debugToggle",
+                    "when": "uimaker.hasProject && resourceExtname =~ /\\.(xaml|cs|vb|csproj|vbproj)$/",
                     "group": "navigation@3"
                 }
             ],
             "explorer/context": [
                 {
-                    "command": "formforge.openDesigner",
+                    "command": "uimaker.openDesigner",
                     "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/",
                     "group": "navigation@10"
                 }
             ],
             "view/item/context": [
                 {
-                    "command": "formforge.recentOpenNewWindow",
-                    "when": "view == formforge.sidebar && viewItem == uimakerRecent",
+                    "command": "uimaker.recentOpenNewWindow",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerRecent",
                     "group": "inline@1"
                 },
                 {
-                    "command": "formforge.recentRemove",
-                    "when": "view == formforge.sidebar && viewItem == uimakerRecent",
+                    "command": "uimaker.recentRevealFolder",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerRecent",
                     "group": "inline@2"
                 },
                 {
-                    "command": "formforge.addWindow",
-                    "when": "view == formforge.sidebar && viewItem == uimakerXamlGroup",
+                    "command": "uimaker.recentRemove",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerRecent",
+                    "group": "inline@3"
+                },
+                {
+                    "command": "uimaker.addWindow",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerXamlGroup",
                     "group": "inline@1"
                 },
                 {
-                    "command": "formforge.addWindow",
-                    "when": "view == formforge.sidebar && viewItem == uimakerXamlGroup",
+                    "command": "uimaker.addWindow",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerXamlGroup",
                     "group": "1_create@1"
                 },
                 {
-                    "command": "formforge.addForm",
-                    "when": "view == formforge.sidebar && viewItem == uimakerFormGroup",
+                    "command": "uimaker.addForm",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerFormGroup",
                     "group": "inline@1"
                 },
                 {
-                    "command": "formforge.addForm",
-                    "when": "view == formforge.sidebar && viewItem == uimakerFormGroup",
+                    "command": "uimaker.addForm",
+                    "when": "view == uimaker.sidebar && viewItem == uimakerFormGroup",
                     "group": "1_create@1"
                 },
                 {
-                    "command": "formforge.duplicateDesignFile",
-                    "when": "view == formforge.sidebar && viewItem =~ /^uimaker(Xaml|Form)$/",
+                    "command": "uimaker.duplicateDesignFile",
+                    "when": "view == uimaker.sidebar && viewItem =~ /^uimaker(Xaml|Form)$/",
                     "group": "inline@1"
                 },
                 {
-                    "command": "formforge.duplicateDesignFile",
-                    "when": "view == formforge.sidebar && viewItem =~ /^uimaker(Xaml|Form)$/",
+                    "command": "uimaker.duplicateDesignFile",
+                    "when": "view == uimaker.sidebar && viewItem =~ /^uimaker(Xaml|Form)$/",
                     "group": "1_create@1"
                 }
             ],
             "commandPalette": [
                 {
-                    "command": "formforge.openDesigner",
+                    "command": "uimaker.openDesigner",
                     "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/"
                 },
                 {
-                    "command": "formforge.openCodeBeside",
-                    "when": "activeCustomEditorId == formforge.designer"
+                    "command": "uimaker.openCodeBeside",
+                    "when": "activeCustomEditorId == uimaker.designer"
                 },
                 {
-                    "command": "formforge.refreshSidebar",
+                    "command": "uimaker.refreshSidebar",
                     "when": "false"
                 },
                 {
-                    "command": "formforge.recentOpen",
+                    "command": "uimaker.recentOpen",
                     "when": "false"
                 },
                 {
-                    "command": "formforge.recentOpenNewWindow",
+                    "command": "uimaker.recentOpenNewWindow",
                     "when": "false"
                 },
                 {
-                    "command": "formforge.recentRemove",
+                    "command": "uimaker.recentRemove",
                     "when": "false"
                 },
                 {
-                    "command": "formforge.duplicateDesignFile",
+                    "command": "uimaker.recentRevealFolder",
+                    "when": "false"
+                },
+                {
+                    "command": "uimaker.duplicateDesignFile",
                     "when": "false"
                 }
             ]
@@ -282,29 +320,29 @@
         "configuration": {
             "title": "UI Maker",
             "properties": {
-                "formforge.gridSize": {
+                "uimaker.gridSize": {
                     "type": "number",
                     "default": 8,
                     "minimum": 1,
                     "maximum": 64,
                     "description": "Snap grid size (pixels) on the design canvas."
                 },
-                "formforge.snapToGrid": {
+                "uimaker.snapToGrid": {
                     "type": "boolean",
                     "default": true,
                     "description": "Snap control positions and sizes to the grid."
                 },
-                "formforge.publish.singleFile": {
+                "uimaker.publish.singleFile": {
                     "type": "boolean",
                     "default": false,
                     "description": "Build Release (Publish) produces a single .exe (PublishSingleFile). Applies to modern .NET projects; .NET Framework projects ignore it."
                 },
-                "formforge.publish.selfContained": {
+                "uimaker.publish.selfContained": {
                     "type": "boolean",
                     "default": false,
                     "description": "Bundle the .NET runtime into the publish output so the app runs on machines without .NET installed (larger output)."
                 },
-                "formforge.publish.runtime": {
+                "uimaker.publish.runtime": {
                     "type": "string",
                     "default": "win-x64",
                     "enum": [

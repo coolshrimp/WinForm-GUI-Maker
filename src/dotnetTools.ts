@@ -131,13 +131,90 @@ export class DotnetTools implements vscode.Disposable {
                 vscode.window.showErrorMessage('UI Maker: build succeeded but the output .exe was not found.');
                 return;
             }
-            this.launchExe(exe);
+            if (this.requiresElevation(project)) {
+                this.launchExeElevated(exe);
+            } else {
+                this.launchExe(exe);
+            }
             return;
+        }
+
+        // Apps whose manifest demands administrator rights cannot be started
+        // by `dotnet run` — the launch dies with "The requested operation
+        // requires elevation" (error 740). Build, then launch the exe through
+        // a UAC prompt instead.
+        if (this.requiresElevation(project)) {
+            const code = await this.execTaskAndWait('build', ['build', project, '-c', 'Debug']);
+            if (code !== 0) {
+                vscode.window.showErrorMessage('UI Maker: build failed — see the terminal output.');
+                return;
+            }
+            const exe = this.findOutputBinary(project, '.exe');
+            if (exe) {
+                this.launchExeElevated(exe);
+                return;
+            }
+            // No apphost .exe found — fall through and let dotnet run try.
         }
 
         // `dotnet run` builds first, so a stale binary is never launched.
         // Running it as a task tells us when the app exits (play/stop toggle).
         this.runExecution = await this.execTask('run', ['run', '--project', project]);
+        this.setState('running');
+    }
+
+    // -------------------------------------------------------------- elevation
+
+    /**
+     * True when the app's manifest asks Windows for administrator rights
+     * (requireAdministrator or highestAvailable). Such apps cannot be started
+     * by `dotnet run` or a plain process spawn.
+     */
+    private requiresElevation(project: string): boolean {
+        const dir = path.dirname(project);
+        const xml = this.tryRead(project) ?? '';
+        // The csproj can point at the manifest; otherwise check the two
+        // places Visual Studio puts app.manifest by default.
+        const declared = /<ApplicationManifest>\s*([^<]+?)\s*<\/ApplicationManifest>/.exec(xml)?.[1];
+        const candidates = declared
+            ? [path.isAbsolute(declared) ? declared : path.join(dir, declared)]
+            : [path.join(dir, 'app.manifest'), path.join(dir, 'Properties', 'app.manifest')];
+        for (const file of candidates) {
+            const manifest = this.tryRead(file);
+            if (manifest && /requestedExecutionLevel\s[^>]*level\s*=\s*"(requireAdministrator|highestAvailable)"/i.test(manifest)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Launch an admin-manifested .exe through the UAC prompt
+     * (Start-Process -Verb RunAs). The PowerShell wrapper waits for the app,
+     * so the play/stop toggle still follows it; if the user cancels the UAC
+     * prompt the wrapper exits and the state flips straight back to idle.
+     */
+    private launchExeElevated(exe: string): void {
+        this.output ??= vscode.window.createOutputChannel('UI Maker: Run');
+        this.output.appendLine(`[UI Maker] ${path.basename(exe)} requests administrator rights — launching with a UAC prompt.`);
+        this.output.appendLine('[UI Maker] note: Stop cannot force-close an elevated app; close its window instead.');
+        const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+        const child = cp.spawn('powershell', [
+            '-NoProfile', '-Command',
+            `Start-Process -FilePath ${psQuote(exe)} -WorkingDirectory ${psQuote(path.dirname(exe))} -Verb RunAs -Wait`
+        ], { windowsHide: true });
+        child.stderr?.on('data', d => this.output?.append(String(d)));
+        child.on('error', err => {
+            this.output?.appendLine(`[UI Maker] failed to start: ${err.message}`);
+            this.runProcess = undefined;
+            this.setState('idle');
+        });
+        child.on('exit', code => {
+            this.output?.appendLine(`[UI Maker] exited with code ${code ?? 'unknown'}`);
+            this.runProcess = undefined;
+            this.setState('idle');
+        });
+        this.runProcess = child;
         this.setState('running');
     }
 
@@ -203,6 +280,13 @@ export class DotnetTools implements vscode.Disposable {
             vscode.window.showWarningMessage('UI Maker: could not locate the build output. Launching without the debugger.');
             await this.run();
             return;
+        }
+
+        // Elevated apps can only be debugged from an elevated VS Code —
+        // warn up front so a failed launch is not a mystery.
+        if (this.requiresElevation(project)) {
+            vscode.window.showWarningMessage(
+                'UI Maker: this app requests administrator rights — debugging it requires running VS Code as Administrator. (Run works: it shows a UAC prompt.)');
         }
 
         const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project));
@@ -275,7 +359,7 @@ export class DotnetTools implements vscode.Disposable {
         const info = readProjectInfo(project);
         if (info?.netFramework) { return args; }
 
-        const cfg = vscode.workspace.getConfiguration('formforge');
+        const cfg = vscode.workspace.getConfiguration('uimaker');
         const singleFile = cfg.get<boolean>('publish.singleFile', false);
         const selfContained = cfg.get<boolean>('publish.selfContained', false);
         const runtime = cfg.get<string>('publish.runtime', 'win-x64');
@@ -405,7 +489,7 @@ export class DotnetTools implements vscode.Disposable {
         if (found.length === 0) {
             const create = 'New Project';
             const choice = await vscode.window.showWarningMessage('UI Maker: no .NET project found in this workspace.', create);
-            if (choice === create) { void vscode.commands.executeCommand('formforge.newProject'); }
+            if (choice === create) { void vscode.commands.executeCommand('uimaker.newProject'); }
             return undefined;
         }
         if (found.length === 1) { return found[0].fsPath; }
@@ -435,7 +519,7 @@ export class DotnetTools implements vscode.Disposable {
     /** Run a build tool as a shared task with MSBuild problem matching. */
     private execTask(name: string, args: string[], executable = 'dotnet'): Thenable<vscode.TaskExecution> {
         const task = new vscode.Task(
-            { type: 'formforge', task: name },
+            { type: 'uimaker', task: name },
             vscode.TaskScope.Workspace,
             name,
             'UI Maker',

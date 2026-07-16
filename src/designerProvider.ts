@@ -10,7 +10,7 @@ import * as path from 'path';
 import { ensureEventHandler } from './codeBehind';
 
 export class DesignerProvider implements vscode.CustomTextEditorProvider {
-    public static readonly viewType = 'formforge.designer';
+    public static readonly viewType = 'uimaker.designer';
 
     /** Document shown in the most recently focused designer (for commands). */
     public static activeDocumentUri: vscode.Uri | undefined;
@@ -50,7 +50,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             void panel.webview.postMessage({ type: 'update', text: document.getText() });
         };
         const postConfig = () => {
-            const cfg = vscode.workspace.getConfiguration('formforge');
+            const cfg = vscode.workspace.getConfiguration('uimaker');
             void panel.webview.postMessage({
                 type: 'config',
                 gridSize: cfg.get<number>('gridSize', 8),
@@ -68,7 +68,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         }));
 
         subs.push(vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('formforge')) { postConfig(); }
+            if (e.affectsConfiguration('uimaker')) { postConfig(); }
         }));
 
         subs.push(panel.onDidChangeViewState(() => {
