@@ -1,10 +1,18 @@
 {
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
-    "description": "Visual drag-and-drop designer, side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps (WPF & WinForms, C# & VB) inside VS Code.",
-    "version": "0.11.2",
+    "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
+    "version": "0.12.0",
     "publisher": "coolshrimp",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/coolshrimp/WinForm-GUI-Maker.git"
+    },
+    "bugs": {
+        "url": "https://github.com/coolshrimp/WinForm-GUI-Maker/issues"
+    },
+    "homepage": "https://github.com/coolshrimp/WinForm-GUI-Maker#readme",
     "icon": "media/icon.png",
     "engines": {
         "vscode": "^1.85.0"
@@ -67,6 +75,9 @@
                     },
                     {
                         "filenamePattern": "*.Designer.cs"
+                    },
+                    {
+                        "filenamePattern": "*.Designer.vb"
                     }
                 ],
                 "priority": "option"
@@ -262,7 +273,7 @@
             "editor/title": [
                 {
                     "command": "uimaker.openDesigner",
-                    "when": "(resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/) && activeCustomEditorId != uimaker.designer",
+                    "when": "(resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.(cs|vb)$/) && activeCustomEditorId != uimaker.designer",
                     "group": "navigation@1"
                 },
                 {
@@ -284,7 +295,7 @@
             "explorer/context": [
                 {
                     "command": "uimaker.openDesigner",
-                    "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/",
+                    "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.(cs|vb)$/",
                     "group": "navigation@10"
                 }
             ],
@@ -353,7 +364,7 @@
             "commandPalette": [
                 {
                     "command": "uimaker.openDesigner",
-                    "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.cs$/"
+                    "when": "resourceExtname == .xaml || resourceFilename =~ /\\.Designer\\.(cs|vb)$/"
                 },
                 {
                     "command": "uimaker.openCodeBeside",

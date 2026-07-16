@@ -4,8 +4,14 @@
 
 UI Maker is an open-source Visual Studio Code extension that brings a drag-and-drop
 form designer, one-click build/run/debug/release buttons, and project scaffolding for
-.NET desktop applications (WPF and Windows Forms) directly into the editor. No more
-switching to full Visual Studio just to lay out a window.
+.NET desktop applications (WPF and Windows Forms, **C# and Visual Basic**) directly
+into the editor. No more switching to full Visual Studio just to lay out a window.
+
+![The UI Maker designer, side panel, and run buttons](screenshots/main.png)
+
+| Visual designer | Side panel |
+|---|---|
+| ![Drag-and-drop designer with the VS-style property grid](screenshots/designer.png) | ![Actions, recent projects, and per-project file lists](screenshots/panel.png) |
 
 ---
 
@@ -47,7 +53,8 @@ the far left) to open the side panel:
   Hover a project for one-click **Open in New Window**, **Open Folder in File
   Explorer**, and **Remove**.
 - **XAML Windows** and **WinForms Forms** — every designable file in the
-  *working project*; click one to open it straight in the visual designer. Use
+  *working project*, C# (`*.Designer.cs`) and Visual Basic (`*.Designer.vb`)
+  alike; click one to open it straight in the visual designer. Use
   the **+** button on a group to add a new window/form, or a row's
   **Duplicate** action to copy an existing one (new class name, registered in
   the project, opened in the designer). The lists update automatically as
@@ -61,7 +68,8 @@ the far left) to open the side panel:
   solution-explorer-style categories: **Code**, **Images & Icons**,
   **Resources**, **Data & Config**, **Project & Solution**, and **Other**,
   with real file icons and click-to-open. The categories have inline **＋**
-  buttons: *New C# Class File* (class stub, registered in the project),
+  buttons: *New Class File* (a `.cs` or `.vb` stub matching the working
+  project's language, registered in the project),
   *Add Image*, and *Add Resource* — files are imported into `Resources/`,
   registered in `Properties/Resources.resx` with the right CLR type (Bitmap,
   Icon, String, or byte[]), and exposed through a regenerated
@@ -121,8 +129,9 @@ Open any `.xaml` window in the UI Maker Designer:
   sequence to re-number them (WinForms).
 - **Rename controls safely** — edit `(Name)` in the grid and, when the C#
   language service is installed, UI Maker performs a solution-wide symbol
-  rename just like VS (with a safe Designer/code-behind fallback). Handler
-  names and user-visible strings are kept.
+  rename just like VS (with a safe Designer/code-behind fallback). Visual
+  Basic renames are case-insensitive and update `Handles` clauses in the
+  code-behind. Handler names and user-visible strings are kept.
 - **Component tray** — Timer, ToolTip, ContextMenuStrip, NotifyIcon,
   BackgroundWorker, ImageList, ErrorProvider, HelpProvider, BindingSource,
   FileSystemWatcher, Process, the file/color/font/folder dialogs, and the
@@ -264,9 +273,9 @@ launches with UI Maker loaded.
 | Command | What it does |
 |---|---|
 | `UI Maker: New .NET Desktop Project` | Scaffold a WPF, WinForms, or Console app (C#/VB) via `dotnet new` |
-| `UI Maker: New WPF Window` | Add a `.xaml` + code-behind pair to the project |
-| `UI Maker: New WinForms Form` | Add a Form (`.cs` + `.Designer.cs`) to the project |
-| `UI Maker: Open in Designer` | Open the current `.xaml` file in the visual designer |
+| `UI Maker: New WPF Window` | Add a `.xaml` + code-behind pair (`.xaml.cs` / `.xaml.vb`) to the project |
+| `UI Maker: New WinForms Form` | Add a Form in the project's language (`.cs` + `.Designer.cs`, or `.vb` + `.Designer.vb`) |
+| `UI Maker: Open in Designer` | Open the current `.xaml`, `*.Designer.cs`, or `*.Designer.vb` file in the visual designer |
 | `UI Maker: View XAML Source (Beside)` | Split view — XAML text editor next to the designer |
 | `UI Maker: Build` | Build (Debug configuration) |
 | `UI Maker: Run / Stop App` | Build and launch the app, or stop it if running |
@@ -306,10 +315,19 @@ launches with UI Maker loaded.
 
 Files like `MainWindow.xaml` belong to **WPF** (or WinUI), the markup-based way
 to build Windows desktop UIs. **Windows Forms** stores its layout in generated
-C# (`*.Designer.cs`) instead — and UI Maker designs both: open a `.xaml` window
-or a `Form.Designer.cs` file in the designer and get the same drag-and-drop
-canvas, properties panel, and event wiring. WinForms edits are surgical — only
-the affected `this.control.Prop = …;` statements change, so diffs stay clean.
+code (`*.Designer.cs` in C#, `*.Designer.vb` in Visual Basic) instead — and UI
+Maker designs all of them: open a `.xaml` window, a `Form.Designer.cs`, or a
+`Form.Designer.vb` file in the designer and get the same drag-and-drop canvas,
+properties panel, and event wiring. WinForms edits are surgical — only the
+affected `this.control.Prop = …;` / `Me.Control.Prop = …` statements change, so
+diffs stay clean, and generated code follows the file's own dialect (`Me.` vs
+`this.`, qualified vs. implicit namespaces, VB literals like `True` and `9.75!`).
+
+Visual Basic events work the VB way: wiring an event writes a
+`Private Sub … Handles Button1.Click` into the code-behind (creating the stub
+if needed), the events panel reads existing `Handles` clauses live, and
+clearing an event removes just its `Handles` target — handler code is never
+deleted.
 
 ## Known limitations
 
@@ -331,10 +349,12 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
   intentionally disabled until every nested object can be cloned losslessly.
 - Without the C# language service, control rename falls back to the
   Designer.cs/code-behind pair; project-wide references then need a manual rename.
-- C# generation is currently the complete path. VB projects can be scaffolded,
-  built, run, debugged, and published, but Add Window/Form, WinForms design,
-  event-stub generation, resources, App Settings, and classic conversion do
-  not yet generate Visual Basic source.
+- Visual Basic parity covers the WinForms designer (`*.Designer.vb`
+  round-tripping), Add Form/Window, Duplicate, New Class, event stubs with
+  `Handles` clauses, and control rename. Still C#-only for now: the App
+  Settings editor, classic→SDK conversion, and importing new images as
+  project resources in VB projects (`My.Resources` generation) — existing VB
+  images render fine on the canvas.
 - The classic-project converter deliberately stops before writing when it finds
   custom imports/targets, conditional target frameworks, framework profiles,
   or package install-script/content semantics it cannot migrate safely.
@@ -352,7 +372,8 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 - [x] MenuStrip / ToolStrip / StatusStrip designers and a component tray (Timer, ToolTip, ContextMenuStrip, dialogs)
 - [x] Multi-select, alignment & distribution tools, tab-order view, copy/paste across forms
 - [x] Docked controls that push each other for space; TabControl and tab-page drops
-- [ ] Full Visual Basic designer/code-generation parity
+- [x] Visual Basic WinForms designer (`*.Designer.vb` round-tripping, `Handles`-based events, VB scaffolding)
+- [ ] Remaining VB parity: App Settings editor, classic→SDK conversion, `My.Resources` image import
 - [ ] Sub-menu (nested menu item) designing and item icons
 - [ ] Drag-reordering inside StackPanel / DockPanel children
 - [ ] "Create an Installer" for multi-file releases (Inno Setup script generation)

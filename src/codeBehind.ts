@@ -8,6 +8,10 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { findCSharpClassEnd, findCSharpVoidMethod, isCSharpIdentifier } from './csharpText';
+import {
+    addVbHandlesTarget, findVbClassBounds, findVbSub, isVbHandlesTarget,
+    isVbIdentifier, removeVbHandlesTarget
+} from './vbText';
 import { decodeXmlEntities } from './xmlText';
 
 /**
@@ -38,30 +42,56 @@ const EVENT_ARGS: Record<string, string> = {
  *  Everything interpolated into generated code must match this. */
 const TYPE_REF = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*(<[A-Za-z0-9_.,<> \[\]]+>)?(\[\])?$/;
 
+/** Code-behind path for a designer document, honoring the file's language:
+ *  Main.Designer.cs -> Main.cs, Main.Designer.vb -> Main.vb,
+ *  Window.xaml -> Window.xaml.cs (or .xaml.vb when that is what exists). */
+export function codeBehindPathOf(designerPath: string): string {
+    if (/\.designer\.cs$/i.test(designerPath)) { return designerPath.replace(/\.designer\.cs$/i, '.cs'); }
+    if (/\.designer\.vb$/i.test(designerPath)) { return designerPath.replace(/\.designer\.vb$/i, '.vb'); }
+    const vb = `${designerPath}.vb`;
+    return !fs.existsSync(`${designerPath}.cs`) && fs.existsSync(vb) ? vb : `${designerPath}.cs`;
+}
+
 /**
  * Ensure `handler` exists in the code-behind of `designerPath`, creating a
  * stub when missing, and open the file beside the designer with the method
- * revealed. Works for both designer flavors:
- *   MainWindow.xaml     -> MainWindow.xaml.cs   (WPF)
- *   Main.Designer.cs    -> Main.cs              (WinForms)
+ * revealed. Works for every designer flavor:
+ *   MainWindow.xaml     -> MainWindow.xaml.cs / .xaml.vb   (WPF)
+ *   Main.Designer.cs    -> Main.cs                          (WinForms C#)
+ *   Main.Designer.vb    -> Main.vb                          (WinForms VB)
  * `argsType` overrides the WPF event->args table (WinForms events send it).
+ * `options.handles` is the VB Handles target ("Button1.Click" / "MyBase.Load");
+ * `options.reveal: false` wires without opening the code-behind.
  */
-export async function ensureEventHandler(designerPath: string, handler: string, eventName: string, argsType?: string): Promise<void> {
-    // The webview is untrusted input — never interpolate anything that is
-    // not a plain identifier / type reference into generated C#.
-    if (!isCSharpIdentifier(handler)) {
-        vscode.window.showWarningMessage(`UI Maker: "${handler}" is not a valid handler name — use a non-keyword C# identifier.`);
-        return;
-    }
-    if (!isCSharpIdentifier(eventName)) { return; }
+export async function ensureEventHandler(
+    designerPath: string,
+    handler: string,
+    eventName: string,
+    argsType?: string,
+    options?: { handles?: string; reveal?: boolean }
+): Promise<void> {
     if (argsType !== undefined && !TYPE_REF.test(argsType)) { argsType = undefined; }
 
-    const csPath = /\.designer\.cs$/i.test(designerPath)
-        ? designerPath.replace(/\.designer\.cs$/i, '.cs')
-        : `${designerPath}.cs`;
+    const csPath = codeBehindPathOf(designerPath);
+    const isVb = /\.vb$/i.test(csPath);
+
+    // The webview is untrusted input — never interpolate anything that is
+    // not a plain identifier / type reference into generated code.
+    const validName = isVb ? isVbIdentifier(handler) : isCSharpIdentifier(handler);
+    if (!validName) {
+        vscode.window.showWarningMessage(
+            `UI Maker: "${handler}" is not a valid handler name — use a non-keyword ${isVb ? 'Visual Basic' : 'C#'} identifier.`);
+        return;
+    }
+    const validEvent = isVb ? isVbIdentifier(eventName) : isCSharpIdentifier(eventName);
+    if (!validEvent) { return; }
+
     if (!fs.existsSync(csPath)) {
         vscode.window.showWarningMessage(`UI Maker: no code-behind file found (${csPath}).`);
         return;
+    }
+    if (isVb) {
+        return ensureVbEventHandler(csPath, designerPath, handler, eventName, argsType, options);
     }
 
     const doc = await vscode.workspace.openTextDocument(csPath);
@@ -118,21 +148,117 @@ export async function ensureEventHandler(designerPath: string, handler: string, 
 
 /** Class that owns the designer surface, even when it differs from the file name. */
 function designerClassName(designerPath: string): string | undefined {
+    const isIdentifier = (name: string | undefined) =>
+        /\.vb$/i.test(designerPath) ? isVbIdentifier(name) : isCSharpIdentifier(name);
     try {
         const source = fs.readFileSync(designerPath, 'utf8');
         if (/\.xaml$/i.test(designerPath)) {
             const qualified = /\b[A-Za-z_][A-Za-z0-9_]*:Class\s*=\s*["']([^"']+)["']/.exec(source)?.[1];
             const name = qualified ? decodeXmlEntities(qualified).split(/[.+]/).pop() : undefined;
-            if (isCSharpIdentifier(name)) { return name; }
+            if (isIdentifier(name)) { return name; }
+        } else if (/\.designer\.vb$/i.test(designerPath)) {
+            const declared = /\bPartial\s+(?:Public\s+|Friend\s+)?Class\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(source)?.[1];
+            if (isVbIdentifier(declared)) { return declared; }
         } else {
             const declared = /\bpartial\s+class\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(source)?.[1];
             if (isCSharpIdentifier(declared)) { return declared; }
         }
     } catch { /* use the conventional file name */ }
-    const base = /\.designer\.cs$/i.test(designerPath)
-        ? path.basename(designerPath).replace(/\.designer\.cs$/i, '')
+    const base = /\.designer\.(cs|vb)$/i.test(designerPath)
+        ? path.basename(designerPath).replace(/\.designer\.(cs|vb)$/i, '')
         : path.basename(designerPath, path.extname(designerPath));
-    return isCSharpIdentifier(base) ? base : undefined;
+    return isIdentifier(base) ? base : undefined;
+}
+
+// ------------------------------------------------------------- Visual Basic
+
+/**
+ * VB event wiring lives in the code-behind: `Sub Handler(...) Handles a.B`.
+ * Wiring therefore means editing the .vb file — move the Handles target onto
+ * the requested handler (creating a stub when it does not exist yet).
+ */
+async function ensureVbEventHandler(
+    csPath: string,
+    designerPath: string,
+    handler: string,
+    eventName: string,
+    argsType: string | undefined,
+    options?: { handles?: string; reveal?: boolean }
+): Promise<void> {
+    const handles = options?.handles;
+    if (handles !== undefined && !isVbHandlesTarget(handles)) { return; }
+
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(csPath));
+    const wasDirty = doc.isDirty;
+    const before = doc.getText();
+    const targetClass = designerClassName(designerPath);
+
+    let after = handles ? removeVbHandlesTarget(before, handles, handler) : before;
+    let revealOffset = findVbSub(after, handler, targetClass);
+
+    if (revealOffset >= 0) {
+        // Handler exists — make sure it handles this event (WinForms only).
+        if (handles) {
+            const wired = addVbHandlesTarget(after, handler, handles);
+            if (wired !== null) { after = wired; }
+        }
+    } else {
+        const bounds = findVbClassBounds(after, targetClass);
+        if (!bounds) {
+            vscode.window.showWarningMessage('UI Maker: could not find a class body in the code-behind.');
+            return;
+        }
+        const lineStart = after.lastIndexOf('\n', bounds.end - 1) + 1;
+        const classIndent = /^[ \t]*/.exec(after.slice(lineStart, bounds.end))?.[0] ?? '';
+        const indent = classIndent + '    ';
+        const args = argsType ?? EVENT_ARGS[eventName] ?? 'System.EventArgs';
+        const stub =
+            `\n${indent}Private Sub ${handler}(sender As Object, e As ${args})${handles ? ` Handles ${handles}` : ''}\n` +
+            `${indent}    ' TODO: handle the ${eventName} event\n` +
+            `${indent}End Sub\n`;
+        after = `${after.slice(0, lineStart)}${stub.replace(/^\n/, '')}\n${after.slice(lineStart)}`;
+        revealOffset = lineStart + stub.indexOf("' TODO") - 1;
+    }
+
+    if (after !== before) {
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(before.length)), after);
+        const applied = await vscode.workspace.applyEdit(edit);
+        if (!applied) {
+            vscode.window.showWarningMessage('UI Maker: the event handler could not be added — the code-behind may be read-only.');
+            return;
+        }
+        if (!wasDirty) { await doc.save(); }
+    }
+
+    if (options?.reveal === false) { return; }
+    const editor = await vscode.window.showTextDocument(doc, {
+        viewColumn: vscode.ViewColumn.Beside,
+        preview: false
+    });
+    const at = findVbSub(doc.getText(), handler, targetClass);
+    const pos = doc.positionAt(Math.max(0, at >= 0 ? at : revealOffset));
+    editor.selection = new vscode.Selection(pos, pos);
+    editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+}
+
+/**
+ * Unwire a VB event: remove `handles` (e.g. "Button1.Click") from every
+ * Handles clause in the code-behind. The handler methods themselves stay —
+ * exactly what Visual Studio does when an event is cleared in the grid.
+ */
+export async function removeEventHandles(designerPath: string, handles: string): Promise<void> {
+    if (!isVbHandlesTarget(handles)) { return; }
+    const csPath = codeBehindPathOf(designerPath);
+    if (!/\.vb$/i.test(csPath) || !fs.existsSync(csPath)) { return; }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(csPath));
+    const wasDirty = doc.isDirty;
+    const before = doc.getText();
+    const after = removeVbHandlesTarget(before, handles);
+    if (after === before) { return; }
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(before.length)), after);
+    if (await vscode.workspace.applyEdit(edit) && !wasDirty) { await doc.save(); }
 }
 
 /**

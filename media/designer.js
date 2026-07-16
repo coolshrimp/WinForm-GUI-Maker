@@ -62,9 +62,43 @@
             && !CSHARP_RESERVED_KEYWORDS.has(value);
     }
 
+    /** Reserved VB.NET keywords (VB identifiers are case-insensitive). */
+    const VB_RESERVED_KEYWORDS = new Set([
+        'addhandler', 'addressof', 'alias', 'and', 'andalso', 'as', 'boolean',
+        'byref', 'byte', 'byval', 'call', 'case', 'catch', 'cbool', 'cbyte',
+        'cchar', 'cdate', 'cdbl', 'cdec', 'char', 'cint', 'class', 'clng',
+        'cobj', 'const', 'continue', 'csbyte', 'cshort', 'csng', 'cstr',
+        'ctype', 'cuint', 'culng', 'cushort', 'date', 'decimal', 'declare',
+        'default', 'delegate', 'dim', 'directcast', 'do', 'double', 'each',
+        'else', 'elseif', 'end', 'endif', 'enum', 'erase', 'error', 'event',
+        'exit', 'false', 'finally', 'for', 'friend', 'function', 'get',
+        'gettype', 'getxmlnamespace', 'global', 'gosub', 'goto', 'handles',
+        'if', 'implements', 'imports', 'in', 'inherits', 'integer',
+        'interface', 'is', 'isnot', 'let', 'lib', 'like', 'long', 'loop',
+        'me', 'mod', 'module', 'mustinherit', 'mustoverride', 'mybase',
+        'myclass', 'nameof', 'namespace', 'narrowing', 'new', 'next', 'not',
+        'nothing', 'notinheritable', 'notoverridable', 'object', 'of', 'on',
+        'operator', 'option', 'optional', 'or', 'orelse', 'overloads',
+        'overridable', 'overrides', 'paramarray', 'partial', 'private',
+        'property', 'protected', 'public', 'raiseevent', 'readonly', 'redim',
+        'rem', 'removehandler', 'resume', 'return', 'sbyte', 'select', 'set',
+        'shadows', 'shared', 'short', 'single', 'static', 'step', 'stop',
+        'string', 'structure', 'sub', 'synclock', 'then', 'throw', 'to',
+        'true', 'try', 'trycast', 'typeof', 'uinteger', 'ulong', 'ushort',
+        'using', 'variant', 'wend', 'when', 'while', 'widening', 'with',
+        'withevents', 'writeonly', 'xor'
+    ]);
+
+    function isVbIdentifier(value) {
+        return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
+            && !VB_RESERVED_KEYWORDS.has(value.toLowerCase());
+    }
+
+    /** Generated identifiers must be valid in the DOCUMENT's language. */
     function validateCSharpIdentifier(value, subject) {
-        if (isCSharpIdentifier(value)) { return true; }
-        setStatus(`UI Maker: "${value}" is not a valid ${subject} — use a non-keyword C# identifier.`);
+        const ok = wfLang === 'vb' ? isVbIdentifier(value) : isCSharpIdentifier(value);
+        if (ok) { return true; }
+        setStatus(`UI Maker: "${value}" is not a valid ${subject} — use a non-keyword ${wfLang === 'vb' ? 'Visual Basic' : 'C#'} identifier.`);
         return false;
     }
 
@@ -204,6 +238,8 @@
     let wfControls = new Map(); // WinForms mode: name -> control record
     let wfForm = null;          // WinForms mode: the form itself
     let wfStyle = { thisPrefix: true, qualified: true }; // code dialect of the file
+    let wfLang = 'cs';          // WinForms language: 'cs' (Designer.cs) | 'vb' (Designer.vb)
+    let wfVbHandles = [];       // VB: [{handler, target}] Handles wiring from the code-behind
     const uiTabs = new Map();   // TabControl path/name -> active tab index
     let activeTab = 'props';    // 'props' | 'events'
     let zoom = 1;
@@ -233,7 +269,12 @@
 
     function handleHostMessage(msg) {
         if (msg.type === 'update') {
-            if (msg.text === xamlText) { return; } // echo of our own edit
+            // VB event wiring lives in the code-behind (Handles clauses); the
+            // host parses and sends it because the webview sees only THIS file.
+            const handlesChanged = Array.isArray(msg.vbHandles)
+                && JSON.stringify(msg.vbHandles) !== JSON.stringify(wfVbHandles);
+            if (Array.isArray(msg.vbHandles)) { wfVbHandles = msg.vbHandles; }
+            if (msg.text === xamlText && !handlesChanged) { return; } // echo of our own edit
             xamlText = msg.text;
             parseAndRender();
         } else if (msg.type === 'editResult') {
@@ -277,11 +318,14 @@
     function parseAndRender() {
         bannerEl.hidden = true;
 
-        // WinForms designer files are C#, not XAML — hand them to the
-        // dedicated parser/renderer.
-        const wantWinForms = /\.designer\.cs$/i.test(config.docName)
+        // WinForms designer files are C# or Visual Basic, not XAML — hand
+        // them to the dedicated parser/renderer.
+        const wantWinForms = /\.designer\.(cs|vb)$/i.test(config.docName)
             || (/InitializeComponent\s*\(\s*\)/.test(xamlText) && /System\.Windows\.Forms/.test(xamlText));
         if (wantWinForms) {
+            wfLang = /\.designer\.vb$/i.test(config.docName)
+                || (!/\.designer\.cs$/i.test(config.docName) && /^\s*(?:Partial\s+Class|End\s+Sub)\b/mi.test(xamlText))
+                ? 'vb' : 'cs';
             // WinForms edits are surgical rewrites of the CURRENT text (never
             // a model re-serialization), so the stale latch does not apply.
             setModelStale(false);
@@ -2213,7 +2257,9 @@
                 .filter(c => c.__wf && c !== wfForm && (WF_CONTROLS[c.type] || WF_TRAY[c.type]))
                 .map(c => ({ type: c.type, props: { ...c.props } }));
             if (!items.length) { return false; }
-            clipboard = { mode: 'wf', items };
+            // props carry raw source-language code, so the paste target must
+            // speak the same language (see pasteClipboard).
+            clipboard = { mode: 'wf', lang: wfLang, items };
             setStatus(`UI Maker: copied ${items.length} control${items.length === 1 ? '' : 's'} — Ctrl+V to paste.`);
         } else {
             clipboard = { mode: 'xaml', xml: new XMLSerializer().serializeToString(selected) };
@@ -2227,6 +2273,12 @@
         if (!clipboard) { setStatus('UI Maker: nothing to paste yet — copy a control first (Ctrl+C).'); return; }
 
         if (clipboard.mode === 'wf' && docMode === 'winforms' && wfForm) {
+            // Copied property values are raw C# or VB code — never inject one
+            // language's code into the other's designer file.
+            if ((clipboard.lang ?? 'cs') !== wfLang) {
+                setStatus('UI Maker: the clipboard holds controls from a different language project — paste them into a matching form.');
+                return;
+            }
             let pasted = 0;
             for (const item of clipboard.items) {
                 if (WF_TRAY[item.type]) { wfAddComponent(item.type); pasted++; continue; }
@@ -2529,7 +2581,7 @@
         const ind = wfIndent(text);
         const name = wfUniqueName('TabPage');
         const ins = wfInsertBeforeSuspend(text,
-            `${ind}${wfRef(name)} = new ${wfCode('System.Windows.Forms.TabPage')}();`);
+            `${ind}${wfRef(name)} = ${wfCode('new System.Windows.Forms.TabPage()')}${wfSemi()}`);
         if (!ins) {
             setStatus('UI Maker: could not find a place to insert the tab page.');
             return;
@@ -2538,31 +2590,30 @@
 
         const pages = tc.children.filter(c => c.type === 'TabPage');
         const size = wfSizeVal(tc.props.Size) ?? { w: 300, h: 200 };
+        const semi = wfSemi();
         text = wfInsertBlockBeforeForm(text, [
-            `${ind}// `,
-            `${ind}// ${name}`,
-            `${ind}// `,
-            `${ind}${wfRef(name)}.Location = new ${wfCode('System.Drawing.Point')}(4, 24);`,
-            `${ind}${wfRef(name)}.Name = "${name}";`,
-            `${ind}${wfRef(name)}.Padding = new ${wfCode('System.Windows.Forms.Padding')}(3);`,
-            `${ind}${wfRef(name)}.Size = new ${wfCode('System.Drawing.Size')}(${Math.max(10, size.w - 8)}, ${Math.max(10, size.h - 28)});`,
-            `${ind}${wfRef(name)}.TabIndex = ${pages.length};`,
-            `${ind}${wfRef(name)}.Text = "${name}";`,
-            `${ind}${wfRef(name)}.UseVisualStyleBackColor = true;`
+            ...wfCommentTrio(ind, name),
+            `${ind}${wfRef(name)}.Location = ${wfCode('new System.Drawing.Point(4, 24)')}${semi}`,
+            `${ind}${wfRef(name)}.Name = "${name}"${semi}`,
+            `${ind}${wfRef(name)}.Padding = ${wfCode('new System.Windows.Forms.Padding(3)')}${semi}`,
+            `${ind}${wfRef(name)}.Size = ${wfCode(`new System.Drawing.Size(${Math.max(10, size.w - 8)}, ${Math.max(10, size.h - 28)})`)}${semi}`,
+            `${ind}${wfRef(name)}.TabIndex = ${pages.length}${semi}`,
+            `${ind}${wfRef(name)}.Text = "${name}"${semi}`,
+            `${ind}${wfRef(name)}.UseVisualStyleBackColor = ${wfCode('true')}${semi}`
         ]) ?? text;
 
         // tc.Controls.Add(newPage) after the last existing page add (keeps
         // tab order), else after the TabControl's first statement.
-        const addLine = `${ind}${wfRef(tc.name)}.Controls.Add(${wfRef(name)});`;
+        const addLine = `${ind}${wfRef(tc.name)}.Controls.Add(${wfRef(name)})${semi}`;
         let last = null;
-        for (const m of text.matchAll(new RegExp(`^[ \\t]*(?:this\\.)?${tc.name}\\.Controls\\.Add\\([^\\n]*$`, 'gm'))) { last = m; }
+        for (const m of text.matchAll(new RegExp(`^[ \\t]*(?:this\\.|Me\\.)?${tc.name}\\.Controls\\.Add\\([^\\r\\n]*$`, 'gm'))) { last = m; }
         const anchor = last
-            ?? new RegExp(`^([ \\t]*)(?:this\\.)?${tc.name}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
+            ?? new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${tc.name}\\.[\\w\\.]+[^\\r\\n]*$`, 'm').exec(text);
         if (anchor) {
             const end = anchor.index + anchor[0].length;
             text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
         }
-        text = wfInsertField(text, 'System.Windows.Forms.TabPage', name);
+        text = wfInsertField(text, 'System.Windows.Forms.TabPage', name) ?? text;
 
         uiTabs.set(tc.name, pages.length); // activate the new tab
         wfSelectInserted(name, 'TabPage');
@@ -2593,7 +2644,7 @@
         const eol = wfEol();
         let text = xamlText;
         const lineRe = new RegExp(
-            `^[ \\t]*((?:this\\.)?[\\w\\.]*?Controls)\\.Add\\((?:this\\.)?${ctrl.name}(?:\\s*,[^)]*)?\\);[ \\t]*\\r?\\n`, 'm');
+            `^[ \\t]*((?:this\\.|Me\\.)?[\\w\\.]*?Controls)\\.Add\\((?:this\\.|Me\\.)?${ctrl.name}(?:\\s*,[^)]*)?\\);?[ \\t]*\\r?\\n`, 'm');
         const m = lineRe.exec(text);
         if (!m) {
             setStatus('UI Maker: this control is added via AddRange — reorder it in the code view.');
@@ -2602,7 +2653,7 @@
         const line = m[0];
         const prefix = m[1];
         text = text.replace(lineRe, '');
-        const sibRe = new RegExp(`^[ \\t]*${reEsc(prefix)}\\.Add\\([^\\n]*$`, 'gm');
+        const sibRe = new RegExp(`^[ \\t]*${reEsc(prefix)}\\.Add\\([^\\r\\n]*$`, 'gm');
         let first = null, lastSib = null;
         for (const s of text.matchAll(sibRe)) { if (!first) { first = s; } lastSib = s; }
         if (!first) {
@@ -3188,10 +3239,15 @@
         wfControls = new Map();
         const text = xamlText;
 
-        const cls = /partial\s+class\s+(\w+)/.exec(text);
+        // Parsing is deliberately permissive across BOTH generated dialects
+        // and languages: "this." or "Me." receivers, "new"/"New", optional
+        // trailing semicolons. Generation is exact per language (see wfCode).
+        const cls = wfLang === 'vb'
+            ? /\bPartial\s+(?:Public\s+|Friend\s+)?Class\s+(\w+)/i.exec(text)
+            : /partial\s+class\s+(\w+)/.exec(text);
         wfForm = { __wf: true, name: cls ? cls[1] : 'Form', type: 'Form', props: {}, events: {}, children: [] };
 
-        if (!/InitializeComponent\s*\(\s*\)[\s\S]*?\{/.test(text)) {
+        if (!wfInitializeComponentBody(text)) {
             // Not a designable form — hand the file straight to the text editor.
             showBanner('No InitializeComponent method found — this file has no form layout to design. Opening the code view…');
             renderEmpty();
@@ -3200,13 +3256,14 @@
         }
 
         // The generated code comes in two dialects. Classic (.NET Framework /
-        // VS pre-2022): "this.button1 = new System.Windows.Forms.Button();".
-        // Modern (.NET 6+ / VS 2022): "button1 = new Button();" — no "this."
-        // and no namespace qualification. Parsing accepts both; edits are
-        // written back in whichever dialect the file already uses.
+        // VS pre-2022): "this.button1 = new System.Windows.Forms.Button();"
+        // (VB: "Me.Button1 = New ..."). Modern (.NET 6+ / VS 2022):
+        // "button1 = new Button();" — no receiver and no namespace
+        // qualification. Parsing accepts both; edits are written back in
+        // whichever dialect the file already uses.
         wfStyle = {
-            thisPrefix: /^[ \t]*this\.\w+\s*=\s*new\s/m.test(text),
-            qualified: /new\s+System\.(?:Windows\.Forms|Drawing)\./.test(text)
+            thisPrefix: /^[ \t]*(?:this|Me)\.\w+\s*=\s*[Nn]ew\s/m.test(text),
+            qualified: /[Nn]ew\s+System\.(?:Windows\.Forms|Drawing)\./.test(text)
         };
 
         // Control instantiations: [this.]name = new [System.Windows.Forms.]Type(...);
@@ -3217,8 +3274,8 @@
             'Container', 'ComponentResourceManager', 'Size', 'SizeF', 'Point', 'PointF',
             'Font', 'Padding', 'Rectangle', 'RectangleF', 'Color', 'Icon', 'Bitmap'
         ]);
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*=\s*new\s+(?:[\w\.]+\.)?(\w+)\s*\(/gm)) {
-            if (m[1] === 'components' || valueTypes.has(m[2])) { continue; }
+        for (const m of text.matchAll(/^[ \t]*(?:this\.|Me\.)?(\w+)\s*=\s*[Nn]ew\s+(?:[\w\.]+\.)?(\w+)\s*\(/gm)) {
+            if (m[1].toLowerCase() === 'components' || valueTypes.has(m[2])) { continue; }
             wfControls.set(m[1], {
                 __wf: true, name: m[1], type: m[2],
                 props: {}, events: {}, children: [], columns: [], items: [], parent: null
@@ -3226,17 +3283,25 @@
         }
 
         // Property assignments (single-line): [this.]name.Prop = value;
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.([\w]+)\s*=\s*(.+);\s*$/gm)) {
+        // C# keeps its trailing-semicolon requirement so wrapped multi-line
+        // statements are never half-captured; VB statements end at the line.
+        const propLine = wfLang === 'vb'
+            ? /^[ \t]*(?:Me\.)?(\w+)\.(\w+)\s*=\s*(.+?)[ \t]*$/gm
+            : /^[ \t]*(?:this\.)?(\w+)\.([\w]+)\s*=\s*(.+);\s*$/gm;
+        for (const m of text.matchAll(propLine)) {
             const ctrl = wfControls.get(m[1]);
             if (ctrl) { ctrl.props[m[2]] = m[3]; }
         }
 
         // Form-level assignments: [this.]Prop = value; (control names filtered out).
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*=\s*(.+);\s*$/gm)) {
+        const formLine = wfLang === 'vb'
+            ? /^[ \t]*(?:Me\.)?(\w+)\s*=\s*(.+?)[ \t]*$/gm
+            : /^[ \t]*(?:this\.)?(\w+)\s*=\s*(.+);\s*$/gm;
+        for (const m of text.matchAll(formLine)) {
             if (!wfControls.has(m[1])) { wfForm.props[m[1]] = m[2]; }
         }
 
-        // Events, both "x.Click += new EventHandler(this.H);" and "x.Click += H;".
+        // C# events, both "x.Click += new EventHandler(this.H);" and "x.Click += H;".
         for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.(\w+)\s*\+=\s*(?:new\s+[\w\.]+\(\s*)?(?:this\.)?(\w+)\s*\)?\s*;/gm)) {
             const ctrl = wfControls.get(m[1]);
             if (ctrl) { ctrl.events[m[2]] = m[3]; }
@@ -3244,10 +3309,35 @@
         for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*\+=\s*(?:new\s+[\w\.]+\(\s*)?(?:this\.)?(\w+)\s*\)?\s*;/gm)) {
             if (!wfControls.has(m[1])) { wfForm.events[m[1]] = m[2]; }
         }
+        // VB events: hand-written AddHandler lines in the designer file plus
+        // the Handles clauses the host parsed out of the code-behind.
+        if (wfLang === 'vb') {
+            for (const m of text.matchAll(/^[ \t]*AddHandler\s+(?:Me\.)?(\w+)\.(\w+)\s*,\s*AddressOf\s+(?:Me\.)?(\w+)[ \t]*$/gm)) {
+                const ctrl = wfControls.get(m[1]);
+                if (ctrl) { ctrl.events[m[2]] = m[3]; }
+            }
+            const byLowerName = new Map([...wfControls.values()].map(c => [c.name.toLowerCase(), c]));
+            for (const h of wfVbHandles) {
+                const dot = String(h.target ?? '').indexOf('.');
+                if (dot < 1) { continue; }
+                const receiver = h.target.slice(0, dot).toLowerCase();
+                const eventName = h.target.slice(dot + 1);
+                const owner = (receiver === 'me' || receiver === 'mybase')
+                    ? wfForm
+                    : byLowerName.get(receiver);
+                if (!owner) { continue; }
+                // Restore the catalog's event casing (VB is case-insensitive).
+                const catalog = owner === wfForm
+                    ? WF_FORM_EVENTS
+                    : ((WF_CONTROLS[owner.type] ?? WF_TRAY[owner.type])?.events ?? []);
+                const canonical = catalog.find(e => e.toLowerCase() === eventName.toLowerCase()) ?? eventName;
+                owner.events[canonical] = h.handler;
+            }
+        }
 
         // Hierarchy: parent.Controls.Add(child) / Controls.Add(child).
         // TableLayoutPanel adds may carry a cell: Controls.Add(child, col, row).
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.Controls\.Add\((?:this\.)?(\w+)(?:\s*,\s*(\d+)\s*,\s*(\d+))?\);/gm)) {
+        for (const m of text.matchAll(/^[ \t]*(?:this\.|Me\.)?(\w+)\.Controls\.Add\((?:this\.|Me\.)?(\w+)(?:\s*,\s*(\d+)\s*,\s*(\d+))?\);?/gm)) {
             const parent = wfControls.get(m[1]);
             const child = wfControls.get(m[2]);
             if (parent && child) {
@@ -3257,7 +3347,7 @@
             }
         }
         // SplitContainer panels: split.Panel1.Controls.Add(child).
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.(Panel1|Panel2)\.Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
+        for (const m of text.matchAll(/^[ \t]*(?:this\.|Me\.)?(\w+)\.(Panel1|Panel2)\.Controls\.Add\((?:this\.|Me\.)?(\w+)\);?/gm)) {
             const parent = wfControls.get(m[1]);
             const child = wfControls.get(m[3]);
             if (parent && child) {
@@ -3266,18 +3356,19 @@
                 child.panelSlot = m[2];
             }
         }
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
+        for (const m of text.matchAll(/^[ \t]*(?:this\.|Me\.)?Controls\.Add\((?:this\.|Me\.)?(\w+)\);?/gm)) {
             const child = wfControls.get(m[1]);
             if (child) { wfForm.children.push(child); child.parent = wfForm; }
         }
 
-        // Controls.AddRange(new Control[] { a, b, ... }) — parent and form level.
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(?:([\w]+(?:\.(?:Panel1|Panel2))?)\.)?Controls\.AddRange\([^{]*\{([\s\S]*?)\}\)/gm)) {
+        // Controls.AddRange(new Control[] { a, b, ... }) — parent and form
+        // level; VB writes "New Control() { ... }".
+        for (const m of text.matchAll(/^[ \t]*(?:this\.|Me\.)?(?:([\w]+(?:\.(?:Panel1|Panel2))?)\.)?Controls\.AddRange\([^{]*\{([\s\S]*?)\}\)/gm)) {
             const receiver = m[1] ?? '';
             const [parentName, panelSlot] = receiver.split('.');
             const parent = receiver ? wfControls.get(parentName) : wfForm;
             if (!parent) { continue; }
-            for (const n of m[2].matchAll(/(?:this\.)?(\w+)/g)) {
+            for (const n of m[2].matchAll(/(?:this\.|Me\.)?(\w+)/g)) {
                 const child = wfControls.get(n[1]);
                 if (child && !child.parent) {
                     parent.children.push(child);
@@ -3288,17 +3379,19 @@
         }
 
         // DataGridView columns / MenuStrip items (multi-line AddRange arrays).
-        for (const m of text.matchAll(/(?:this\.)?(\w+)\.Columns\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
+        for (const m of text.matchAll(/(?:this\.|Me\.)?(\w+)\.Columns\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
             const ctrl = wfControls.get(m[1]);
-            if (ctrl) { ctrl.columns = [...m[2].matchAll(/(?:this\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n)); }
+            if (ctrl) { ctrl.columns = [...m[2].matchAll(/(?:this\.|Me\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n)); }
         }
-        for (const m of text.matchAll(/(?:this\.)?(\w+)\.Items\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
+        for (const m of text.matchAll(/(?:this\.|Me\.)?(\w+)\.Items\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
             const ctrl = wfControls.get(m[1]);
             if (!ctrl) { continue; }
             // Strips reference generated item controls; list controls hold
             // plain string values — capture whichever the array contains.
-            ctrl.items = [...m[2].matchAll(/(?:this\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n));
-            ctrl.strItems = [...m[2].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(x => x[1].replace(/\\(.)/g, '$1'));
+            ctrl.items = [...m[2].matchAll(/(?:this\.|Me\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n));
+            ctrl.strItems = wfLang === 'vb'
+                ? [...m[2].matchAll(/"((?:[^"]|"")*)"/g)].map(x => x[1].replace(/""/g, '"'))
+                : [...m[2].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(x => x[1].replace(/\\(.)/g, '$1'));
         }
 
         // Re-select the records with the same names after the re-parse.
@@ -3700,7 +3793,7 @@
             case 'TextBox':
             case 'MaskedTextBox':
                 inner.classList.add('ff-look-input');
-                if (ctrl.props.Multiline?.trim() === 'true') { inner.classList.add('ff-look-textarea'); }
+                if (/^true$/i.test(ctrl.props.Multiline?.trim() ?? '')) { inner.classList.add('ff-look-textarea'); }
                 inner.textContent = text;
                 break;
             case 'RichTextBox':
@@ -3709,12 +3802,12 @@
                 break;
             case 'CheckBox':
                 inner.classList.add('ff-look-label');
-                inner.innerHTML = `<span class="ff-glyph">${ctrl.props.Checked?.trim() === 'true' ? '☑' : '☐'}</span>`;
+                inner.innerHTML = `<span class="ff-glyph">${/^true$/i.test(ctrl.props.Checked?.trim() ?? '') ? '☑' : '☐'}</span>`;
                 inner.append(text || ctrl.name);
                 break;
             case 'RadioButton':
                 inner.classList.add('ff-look-label');
-                inner.innerHTML = `<span class="ff-glyph">${ctrl.props.Checked?.trim() === 'true' ? '◉' : '○'}</span>`;
+                inner.innerHTML = `<span class="ff-glyph">${/^true$/i.test(ctrl.props.Checked?.trim() ?? '') ? '◉' : '○'}</span>`;
                 inner.append(text || ctrl.name);
                 break;
             case 'ComboBox':
@@ -3879,6 +3972,10 @@
     function wfString(v) {
         const m = /^"([\s\S]*)"$/.exec((v ?? '').trim());
         if (!m) { return null; }
+        if (wfLang === 'vb') {
+            // VB strings escape quotes by doubling; no backslash escapes.
+            return m[1].replace(/""/g, '"');
+        }
         const esc = { '"': '"', '\\': '\\', r: '', n: ' ', t: ' ', '0': '' };
         return m[1].replace(/\\(.)/g, (_, c) => esc[c] ?? c);
     }
@@ -3908,7 +4005,8 @@
     }
 
     function wfFont(v) {
-        const m = /new\s+(?:System\.Drawing\.)?Font\("([^"]+)",\s*([\d.]+)F?/.exec(v ?? '');
+        // C# writes "9.75F" size suffixes; VB writes "9.75!".
+        const m = /[Nn]ew\s+(?:System\.Drawing\.)?Font\("([^"]+)",\s*([\d.]+)[F!]?/.exec(v ?? '');
         if (!m) { return null; }
         return {
             family: m[1],
@@ -3926,10 +4024,12 @@
 
     const imageCache = new Map(); // 'p:name' | 'l:name' -> uri, or null while pending
 
-    /** Parse a C# image expression into { scope: 'p'|'l', key } (or null). */
+    /** Parse an image expression into { scope: 'p'|'l', key } (or null).
+     *  C# project resources read "Properties.Resources.name"; VB reads
+     *  "My.Resources.name". Local form resources use GetObject in both. */
     function wfImageRef(raw) {
         if (!raw) { return null; }
-        let m = /Properties\.Resources\.(\w+)/.exec(raw);
+        let m = /(?:Properties|My)\.Resources\.(\w+)/.exec(raw);
         if (m) { return { scope: 'p', key: m[1] }; }
         m = /resources\.GetObject\("([^"]+)"/.exec(raw);
         if (m) { return { scope: 'l', key: m[1] }; }
@@ -3983,6 +4083,9 @@
         if (!flags.length) { return 'System.Windows.Forms.AnchorStyles.None'; }
         if (flags.length === 1) { return `System.Windows.Forms.AnchorStyles.${flags[0]}`; }
         // Multi-flag combinations use the cast form Visual Studio generates.
+        if (wfLang === 'vb') {
+            return `CType(${flags.map(f => `System.Windows.Forms.AnchorStyles.${f}`).join(' Or ')}, System.Windows.Forms.AnchorStyles)`;
+        }
         return `((System.Windows.Forms.AnchorStyles)(${flags.map(f => `System.Windows.Forms.AnchorStyles.${f}`).join(' | ')}))`;
     }
 
@@ -4033,7 +4136,7 @@
     }
 
     function wfFontDisplay(v) {
-        const m = /new\s+(?:System\.Drawing\.)?Font\("([^"]+)",\s*([\d.]+)F?/.exec(v ?? '');
+        const m = /[Nn]ew\s+(?:System\.Drawing\.)?Font\("([^"]+)",\s*([\d.]+)[F!]?/.exec(v ?? '');
         if (!m) { return v; }
         const styles = ['Bold', 'Italic', 'Underline', 'Strikeout']
             .filter(s => new RegExp(`FontStyle\\.${s}\\b`).test(v));
@@ -4047,6 +4150,12 @@
         const styles = (m[3] ?? '').split(/[,|\s]+/)
             .map(s => ['Bold', 'Italic', 'Underline', 'Strikeout'].find(k => k.toLowerCase() === s.toLowerCase()))
             .filter(Boolean);
+        if (wfLang === 'vb') {
+            const base = `New System.Drawing.Font("${m[1].trim()}", ${parseFloat(m[2])}!`;
+            if (!styles.length) { return `${base})`; }
+            if (styles.length === 1) { return `${base}, System.Drawing.FontStyle.${styles[0]})`; }
+            return `${base}, ${styles.map(s => `System.Drawing.FontStyle.${s}`).join(' Or ')})`;
+        }
         const size = `${parseFloat(m[2])}F`;
         const base = `new System.Drawing.Font("${m[1].trim()}", ${size}`;
         if (!styles.length) { return `${base})`; }
@@ -4054,9 +4163,10 @@
         return `${base}, (${styles.map(s => `System.Drawing.FontStyle.${s}`).join(' | ')}))`;
     }
 
-    /** Numeric value of "new decimal(new int[] { lo, mid, hi, flags })". */
+    /** Numeric value of "new decimal(new int[] { lo, mid, hi, flags })"
+     *  (VB: "New Decimal(New Integer() { ... })"). */
     function wfDecimalVal(v) {
-        const m = /new\s+decimal\(new\s+int\[\]\s*\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}\)/.exec(v ?? '');
+        const m = /[Nn]ew\s+[Dd]ecimal\([Nn]ew\s+(?:int\[\]|Integer\(\))\s*\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}\)/.exec(v ?? '');
         if (!m) {
             const n = parseFloat(v);
             return Number.isFinite(n) ? n : null;
@@ -4075,7 +4185,9 @@
         const lo = Math.round(Math.abs(parseFloat(v)) * Math.pow(10, scale));
         if (!Number.isSafeInteger(lo) || lo > 0x7fffffff) { return null; }
         const flags = (neg ? -2147483648 : 0) + (scale << 16);
-        return `new decimal(new int[] { ${lo}, 0, 0, ${flags} })`;
+        return wfLang === 'vb'
+            ? `New Decimal(New Integer() { ${lo}, 0, 0, ${flags} })`
+            : `new decimal(new int[] { ${lo}, 0, 0, ${flags} })`;
     }
 
     /** Friendly display text for a raw C# property value, per editor kind. */
@@ -4087,7 +4199,10 @@
             case 'bool': return /^true$/i.test(v) ? 'True' : /^false$/i.test(v) ? 'False' : v;
             case 'int': case 'float': { const m = /-?[\d.]+/.exec(v); return m ? m[0] : v; }
             case 'decimal': { const d = wfDecimalVal(v); return d !== null ? String(d) : v; }
-            case 'char': { const m = /^'\\?(.)'$/.exec(v); return m ? m[1] : v; }
+            case 'char': {
+                const m = /^'\\?(.)'$/.exec(v) ?? /^"(""|.)"c$/.exec(v);
+                return m ? (m[1] === '""' ? '"' : m[1]) : v;
+            }
             case 'enum': case 'ref': { const m = /(\w+)\s*\)*\s*$/.exec(v); return m ? m[1] : v; }
             case 'anchor': { const f = wfAnchorFlags(v); return f.length ? f.join(', ') : 'None'; }
             case 'point': { const p = wfPoint(v); return p ? `${p.x}, ${p.y}` : v; }
@@ -4100,16 +4215,29 @@
         }
     }
 
-    /** User input -> C# code for the property, or null when invalid. */
+    /** User input -> compilable code for the property (per the document's
+     *  language), or null when invalid. */
     function wfSerialize(def, input) {
         const v = input.trim();
         switch (def.kind) {
             case 'string': return wfQuote(v);
-            case 'bool': return /^t/i.test(v) ? 'true' : 'false';
+            case 'bool': {
+                const b = /^t/i.test(v);
+                return wfLang === 'vb' ? (b ? 'True' : 'False') : (b ? 'true' : 'false');
+            }
             case 'int': { const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : null; }
-            case 'float': { const n = parseFloat(v); return Number.isFinite(n) ? `${n}D` : null; }
+            case 'float': {
+                const n = parseFloat(v);
+                if (!Number.isFinite(n)) { return null; }
+                return wfLang === 'vb' ? `${n}R` : `${n}D`;
+            }
             case 'decimal': return wfDecimalCode(v);
-            case 'char': { if (!v) { return null; } const c = v[0]; return c === "'" ? "'\\''" : c === '\\' ? "'\\\\'" : `'${c}'`; }
+            case 'char': {
+                if (!v) { return null; }
+                const c = v[0];
+                if (wfLang === 'vb') { return `"${c === '"' ? '""' : c}"c`; }
+                return c === "'" ? "'\\''" : c === '\\' ? "'\\\\'" : `'${c}'`;
+            }
             case 'enum': {
                 const ns = def.enum === 'ContentAlignment' ? 'System.Drawing' : 'System.Windows.Forms';
                 return `${def.prefix ?? `${ns}.${def.enum}`}.${v}`;
@@ -4163,33 +4291,67 @@
         selectedPath = '';
     }
 
-    /** "this.name" or plain "name", matching the file's dialect. */
+    /** "this.name" / "Me.name" or plain "name", matching the file's dialect. */
     function wfRef(name) {
-        return wfStyle.thisPrefix ? `this.${name}` : name;
+        if (!wfStyle.thisPrefix) { return name; }
+        return wfLang === 'vb' ? `Me.${name}` : `this.${name}`;
     }
 
-    /** Strip namespace qualification from generated code on modern-style files.
-     *  System.Drawing.Printing stays qualified — it is a sub-namespace, not a
-     *  type, and the WinForms implicit usings do not cover it. */
+    /** Statement terminator for generated lines ("" in VB). */
+    function wfSemi() {
+        return wfLang === 'vb' ? '' : ';';
+    }
+
+    /**
+     * Adapt a canonical generated-C# snippet to the document. Two passes:
+     *   1. VB translation — keywords, receivers, arrays, casts, and literal
+     *      suffixes are rewritten OUTSIDE string literals only (a Text value
+     *      like "brand new" must never become "brand New").
+     *   2. Namespace stripping on modern-style unqualified files.
+     */
     function wfCode(code) {
-        return wfStyle.qualified ? code : code.replace(/\bSystem\.(?:Windows\.Forms\.|Drawing\.(?!Printing\.))/g, '');
+        let result = code;
+        if (wfLang === 'vb') {
+            result = result.split(/("(?:[^"]|"")*")/).map((part, i) => {
+                if (i % 2 === 1) { return part; } // string literal — verbatim
+                return part
+                    .replace(/\(\(([\w\.]+)\)\((.+?)\)\)/g, 'CType($2, $1)')
+                    .replace(/\bnew\s+int\[\]\s*\{/g, 'New Integer() {')
+                    .replace(/\bnew\s+object\[\]\s*\{/g, 'New Object() {')
+                    .replace(/\bnew\s+([\w\.]+)\[\]\s*\{/g, 'New $1() {')
+                    .replace(/\bnew\s+decimal\(/g, 'New Decimal(')
+                    .replace(/\bnew\b/g, 'New')
+                    .replace(/\btrue\b/g, 'True')
+                    .replace(/\bfalse\b/g, 'False')
+                    .replace(/\bthis\./g, 'Me.')
+                    .replace(/(\d(?:\.\d+)?)F\b/g, '$1!')
+                    .replace(/ \| /g, ' Or ');
+            }).join('');
+        }
+        return wfStyle.qualified ? result : result.replace(/\bSystem\.(?:Windows\.Forms\.|Drawing\.(?!Printing\.))/g, '');
     }
 
     /**
      * Replace "[this.]<name>.<prop> = ...;" or insert it into the control's
      * statement block. Returns the new text (does not apply it).
      */
+    /** Statement-end fragment for match patterns: C# lines must close with
+     *  ';' so a wrapped multi-line statement is never half-replaced. */
+    function wfTermRe() {
+        return wfLang === 'vb' ? '' : ';';
+    }
+
     function wfSetLine(name, prop, code, text = xamlText) {
-        const line = `${wfRef(name)}.${prop} = ${wfCode(code)};`;
-        const re = new RegExp(`^([ \\t]*)(?:this\\.)?${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
+        const line = `${wfRef(name)}.${prop} = ${wfCode(code)}${wfSemi()}`;
+        const re = new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${name}\\.${prop}\\s*=[^\\r\\n]*${wfTermRe()}[ \\t]*$`, 'm');
         if (re.test(text)) {
             return text.replace(re, `$1${line}`);
         }
         // Insert after the first existing statement of this control's block,
         // or — for controls without property lines yet (fresh tray
         // components) — right after the instantiation.
-        const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${name}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text)
-            ?? new RegExp(`^([ \\t]*)(?:this\\.)?${name}\\s*=\\s*new\\s[^\\n]*$`, 'm').exec(text);
+        const anchor = new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${name}\\.[\\w\\.]+[^\\r\\n]*$`, 'm').exec(text)
+            ?? new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${name}\\s*=\\s*[Nn]ew\\s[^\\r\\n]*$`, 'm').exec(text);
         if (!anchor) { return text; }
         const end = anchor.index + anchor[0].length;
         return `${text.slice(0, end)}${wfEol()}${anchor[1]}${line}${text.slice(end)}`;
@@ -4197,12 +4359,12 @@
 
     /** Same as wfSetLine but for the form's own "[this.]<prop> = ...;" lines. */
     function wfSetFormLine(prop, code, text = xamlText) {
-        const line = `${wfRef(prop)} = ${wfCode(code)};`;
-        const re = new RegExp(`^([ \\t]*)(?:this\\.)?${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
+        const line = `${wfRef(prop)} = ${wfCode(code)}${wfSemi()}`;
+        const re = new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${prop}\\s*=[^\\r\\n]*${wfTermRe()}[ \\t]*$`, 'm');
         if (re.test(text)) {
             return text.replace(re, `$1${line}`);
         }
-        const m = /^([ \t]*)(?:this\.)?ClientSize\s*=/m.exec(text);
+        const m = /^([ \t]*)(?:this\.|Me\.)?ClientSize\s*=/m.exec(text);
         if (!m) { return text; }
         const end = text.indexOf('\n', m.index);
         return `${text.slice(0, end)}${wfEol()}${m[1]}${line}${text.slice(end)}`;
@@ -4210,17 +4372,17 @@
 
     /** Remove the "[this.]<name>.<prop> = ...;" line entirely (if present). */
     function wfRemoveLine(name, prop, text = xamlText) {
-        const re = new RegExp(`^[ \\t]*(?:this\\.)?${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
+        const re = new RegExp(`^[ \\t]*(?:this\\.|Me\\.)?${name}\\.${prop}\\s*=[^\\r\\n]*${wfTermRe()}[ \\t]*\\r?\\n`, 'm');
         return text.replace(re, '');
     }
 
     /** Remove a form-level "[this.]<prop> = ...;" line (if present). */
     function wfRemoveFormLine(prop, text = xamlText) {
-        const re = new RegExp(`^[ \\t]*(?:this\\.)?${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
+        const re = new RegExp(`^[ \\t]*(?:this\\.|Me\\.)?${prop}\\s*=[^\\r\\n]*${wfTermRe()}[ \\t]*\\r?\\n`, 'm');
         return text.replace(re, '');
     }
 
-    /** Wire (or rewire) an event line and ask the host for the C# stub. */
+    /** Wire (or rewire) an event and ask the host for the handler stub. */
     function wfWireEvent(el, eventName, handler, openStub = true) {
         const isForm = el === wfForm;
         const finalName = handler || `${isForm ? wfForm.name : el.name}_${eventName}`;
@@ -4231,6 +4393,25 @@
         const et = WF_EVENT_TYPE_OVERRIDES[el.type]?.[eventName]
             ?? WF_EVENT_TYPES[eventName]
             ?? WF_DEFAULT_EVENT_TYPE;
+
+        // VB wires events with a Handles clause on the handler Sub in the
+        // code-behind — the designer file itself does not change. The host
+        // moves the Handles target and (re)creates the stub; the refreshed
+        // wiring comes back with the next update message.
+        if (wfLang === 'vb') {
+            el.events[eventName] = finalName;
+            vscode.postMessage({
+                type: 'addHandler',
+                handler: finalName,
+                event: eventName,
+                argsType: et.args,
+                handles: `${isForm ? 'MyBase' : el.name}.${eventName}`,
+                reveal: openStub
+            });
+            renderPanel();
+            return;
+        }
+
         const lhs = isForm ? wfRef(eventName) : `${wfRef(el.name)}.${eventName}`;
         // Classic files wrap the handler in a delegate; modern ones don't.
         const line = wfStyle.thisPrefix
@@ -4241,7 +4422,7 @@
             : `(?:this\\.)?${el.name}\\.${eventName}`;
 
         let text = xamlText;
-        const re = new RegExp(`^([ \\t]*)${lhsPattern}\\s*\\+=[^\\n]*$`, 'm');
+        const re = new RegExp(`^([ \\t]*)${lhsPattern}\\s*\\+=[^\\r\\n]*$`, 'm');
         if (re.test(text)) {
             text = text.replace(re, `$1${line}`);
         } else if (isForm) {
@@ -4252,7 +4433,7 @@
             text = `${text.slice(0, m.index)}${m[1]}${line}${wfEol()}${text.slice(m.index)}`;
         } else {
             // Append after the last statement of the control's block.
-            const blockRe = new RegExp(`^([ \\t]*)(?:this\\.)?${el.name}\\.[\\w\\.]+[^\\n]*$`, 'gm');
+            const blockRe = new RegExp(`^([ \\t]*)(?:this\\.)?${el.name}\\.[\\w\\.]+[^\\r\\n]*$`, 'gm');
             let last = null;
             for (const m of text.matchAll(blockRe)) { last = m; }
             if (!last) { return; }
@@ -4265,21 +4446,37 @@
         }
     }
 
-    /** Remove an event wiring line ("[this.]x.Click += ...."). */
+    /** Remove an event wiring ("x.Click += ..." line, or a VB Handles target). */
     function wfUnwireEvent(el, eventName) {
+        if (wfLang === 'vb') {
+            delete el.events[eventName];
+            // Hand-written AddHandler lines in the designer file are removed
+            // here; Handles clauses live in the code-behind — the host edits those.
+            const addHandler = new RegExp(
+                `^[ \\t]*AddHandler\\s+(?:Me\\.)?${el === wfForm ? 'MyBase' : el.name}\\.${eventName}\\b[^\\r\\n]*\\r?\\n`, 'im');
+            if (addHandler.test(xamlText)) { wfApply(xamlText.replace(addHandler, '')); }
+            vscode.postMessage({
+                type: 'removeHandler',
+                handles: `${el === wfForm ? 'MyBase' : el.name}.${eventName}`
+            });
+            renderPanel();
+            return;
+        }
         const lhs = el === wfForm
             ? `(?:this\\.)?${eventName}`
             : `(?:this\\.)?${el.name}\\.${eventName}`;
-        const re = new RegExp(`^[ \\t]*${lhs}\\s*\\+=[^\\n]*\\r?\\n`, 'm');
+        const re = new RegExp(`^[ \\t]*${lhs}\\s*\\+=[^\\r\\n]*\\r?\\n`, 'm');
         wfApply(xamlText.replace(re, ''));
     }
 
     // -------------------------------------------------------- wf add / delete
 
     function wfUniqueName(type) {
-        const base = type.charAt(0).toLowerCase() + type.slice(1);
+        // VB names collide case-insensitively; VS also capitalizes them there.
+        const base = wfLang === 'vb' ? type : type.charAt(0).toLowerCase() + type.slice(1);
+        const flags = wfLang === 'vb' ? 'i' : '';
         for (let i = 1; ; i++) {
-            if (!wfControls.has(`${base}${i}`) && !new RegExp(`\\b${base}${i}\\b`).test(xamlText)) {
+            if (!wfControls.has(`${base}${i}`) && !new RegExp(`\\b${base}${i}\\b`, flags).test(xamlText)) {
                 return `${base}${i}`;
             }
         }
@@ -4413,38 +4610,27 @@
     function wfInsertControl(type, name, props, parentName, cell = null) {
         const eol = wfEol();
         let text = xamlText;
-
-        // Indentation of generated statements, taken from an existing line.
-        const indentMatch = /^([ \t]*)(?:this\.)?SuspendLayout\(\);/m.exec(text);
-        const ind = indentMatch ? indentMatch[1] : '            ';
+        const ind = wfIndent(text);
 
         // 1) Instantiation — before the first Suspend/BeginInit line.
-        const suspend = /^[ \t]*(?:(?:[\w\.]+\.)?SuspendLayout\(\);|\(\((?:System\.ComponentModel\.)?ISupportInitialize\))/m.exec(text);
-        if (!suspend) {
+        const withNew = wfInsertBeforeSuspend(text,
+            `${ind}${wfRef(name)} = ${wfCode(`new System.Windows.Forms.${type}()`)}${wfSemi()}`);
+        if (!withNew) {
             setStatus('UI Maker: could not find a place to insert the control.');
             return false;
         }
-        text = `${text.slice(0, suspend.index)}${ind}${wfRef(name)} = new ${wfCode(`System.Windows.Forms.${type}`)}();${eol}${text.slice(suspend.index)}`;
+        text = withNew;
 
         // 2) Property block — before the form's own section (AutoScaleDimensions).
-        const formAnchor = /^[ \t]*(?:this\.)?AutoScaleDimensions\s*=/m.exec(text);
-        if (!formAnchor) {
+        const withBlock = wfInsertBlockBeforeForm(text, [
+            ...wfCommentTrio(ind, name),
+            ...props.map(([prop, code]) => `${ind}${wfRef(name)}.${prop} = ${wfCode(code)}${wfSemi()}`)
+        ]);
+        if (!withBlock) {
             setStatus('UI Maker: could not find the form section in InitializeComponent.');
             return false;
         }
-        // Back up over the "// <formname> //" comment trio if it sits right above.
-        let insertAt = formAnchor.index;
-        const before = text.slice(0, insertAt);
-        const trio = /(^[ \t]*\/\/[ \t]*\r?\n[ \t]*\/\/[^\r\n]*\r?\n[ \t]*\/\/[ \t]*\r?\n)$/m.exec(before);
-        if (trio) { insertAt -= trio[1].length; }
-
-        const blockLines = [
-            `${ind}// `,
-            `${ind}// ${name}`,
-            `${ind}// `,
-            ...props.map(([prop, code]) => `${ind}${wfRef(name)}.${prop} = ${wfCode(code)};`)
-        ];
-        text = `${text.slice(0, insertAt)}${blockLines.join(eol)}${eol}${text.slice(insertAt)}`;
+        text = withBlock;
 
         // 3) Controls.Add — into the parent container or the form. The parent
         // may be a dotted path like "splitContainer1.Panel1".
@@ -4454,11 +4640,11 @@
             ? `${wfRef(name)}, ${cell.col}, ${cell.row}`
             : wfRef(name);
         const addLine = parentName
-            ? `${ind}${wfRef(parentName)}.Controls.Add(${addArgument});`
-            : `${ind}${wfStyle.thisPrefix ? 'this.' : ''}Controls.Add(${wfRef(name)});`;
+            ? `${ind}${wfRef(parentName)}.Controls.Add(${addArgument})${wfSemi()}`
+            : `${ind}${wfStyle.thisPrefix ? (wfLang === 'vb' ? 'Me.' : 'this.') : ''}Controls.Add(${wfRef(name)})${wfSemi()}`;
         const firstAdd = parentName
-            ? new RegExp(`^[ \\t]*(?:this\\.)?${parentRe}\\.Controls\\.Add\\(`, 'm').exec(text)
-            : /^[ \t]*(?:this\.)?Controls\.Add\(/m.exec(text);
+            ? new RegExp(`^[ \\t]*(?:this\\.|Me\\.)?${parentRe}\\.Controls\\.Add\\(`, 'm').exec(text)
+            : /^[ \t]*(?:this\.|Me\.)?Controls\.Add\(/m.exec(text);
         let added = false;
         if (firstAdd) {
             text = `${text.slice(0, firstAdd.index)}${addLine}${eol}${text.slice(firstAdd.index)}`;
@@ -4466,15 +4652,15 @@
         } else if (parentName) {
             // Parent has no Controls.Add lines yet — append after its first
             // statement (fall back to the base control's block for panels).
-            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${parentRe}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text)
-                ?? new RegExp(`^([ \\t]*)(?:this\\.)?${reEsc(parentBase)}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
+            const anchor = new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${parentRe}\\.[\\w\\.]+[^\\r\\n]*$`, 'm').exec(text)
+                ?? new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${reEsc(parentBase)}\\.[\\w\\.]+[^\\r\\n]*$`, 'm').exec(text);
             if (anchor) {
                 const end = anchor.index + anchor[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
                 added = true;
             }
         } else {
-            const cs = /^([ \t]*)(?:this\.)?ClientSize\s*=[^\n]*$/m.exec(text);
+            const cs = /^([ \t]*)(?:this\.|Me\.)?ClientSize\s*=[^\r\n]*$/m.exec(text);
             if (cs) {
                 const end = cs.index + cs[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
@@ -4487,26 +4673,12 @@
         }
 
         // 4) Field declaration — after the last existing designer field.
-        const fieldLine = `        private ${wfCode(`System.Windows.Forms.${type}`)} ${name};`;
-        let lastField = null;
-        for (const m of text.matchAll(/^[ \t]*private\s+[\w\.<>]+\s+\w+;\s*$/gm)) { lastField = m; }
-        let fieldInserted = false;
-        if (lastField) {
-            const end = lastField.index + lastField[0].length;
-            text = `${text.slice(0, end)}${eol}${fieldLine}${text.slice(end)}`;
-            fieldInserted = true;
-        } else {
-            const endRegion = /^[ \t]*#endregion[^\n]*$/m.exec(text);
-            if (endRegion) {
-                const end = endRegion.index + endRegion[0].length;
-                text = `${text.slice(0, end)}${eol}${eol}${fieldLine}${text.slice(end)}`;
-                fieldInserted = true;
-            }
-        }
-        if (!fieldInserted) {
+        const withField = wfInsertField(text, `System.Windows.Forms.${type}`, name);
+        if (!withField) {
             setStatus('UI Maker: insertion was cancelled because a safe designer-field anchor was not found.');
             return false;
         }
+        text = withField;
 
         wfSelectInserted(name, type);
         wfApply(text);
@@ -4517,37 +4689,77 @@
 
     /** Indentation used by generated statements (from SuspendLayout). */
     function wfIndent(text) {
-        return /^([ \t]*)(?:this\.)?SuspendLayout\(\);/m.exec(text)?.[1] ?? '            ';
+        return /^([ \t]*)(?:this\.|Me\.)?SuspendLayout\(\);?/m.exec(text)?.[1]
+            ?? (wfLang === 'vb' ? '        ' : '            ');
+    }
+
+    /** The "// name //" (C#) or "' 'name '" (VB) block header trio. */
+    function wfCommentTrio(ind, name) {
+        return wfLang === 'vb'
+            ? [`${ind}'`, `${ind}'${name}`, `${ind}'`]
+            : [`${ind}// `, `${ind}// ${name}`, `${ind}// `];
     }
 
     /** Insert a statement line before the first Suspend/BeginInit line. */
     function wfInsertBeforeSuspend(text, line) {
-        const m = /^[ \t]*(?:(?:[\w\.]+\.)?SuspendLayout\(\);|\(\((?:System\.ComponentModel\.)?ISupportInitialize\))/m.exec(text);
+        const m = /^[ \t]*(?:(?:[\w\.]+\.)?SuspendLayout\(\);?|\(\((?:System\.ComponentModel\.)?ISupportInitialize\)|CType\([^\r\n]*?,\s*(?:System\.ComponentModel\.)?ISupportInitialize\))/m.exec(text);
         if (!m) { return null; }
         return `${text.slice(0, m.index)}${line}${wfEol()}${text.slice(m.index)}`;
     }
 
     /** Insert block lines before the form's own section (its comment trio). */
     function wfInsertBlockBeforeForm(text, blockLines) {
-        const anchor = /^[ \t]*(?:this\.)?AutoScaleDimensions\s*=/m.exec(text);
+        const anchor = /^[ \t]*(?:this\.|Me\.)?AutoScaleDimensions\s*=/m.exec(text);
         if (!anchor) { return null; }
         let at = anchor.index;
-        const trio = /(^[ \t]*\/\/[ \t]*\r?\n[ \t]*\/\/[^\r\n]*\r?\n[ \t]*\/\/[ \t]*\r?\n)$/m.exec(text.slice(0, at));
+        const trio = wfLang === 'vb'
+            ? /(^[ \t]*'[ \t]*\r?\n[ \t]*'[^\r\n]*\r?\n[ \t]*'[ \t]*\r?\n)$/m.exec(text.slice(0, at))
+            : /(^[ \t]*\/\/[ \t]*\r?\n[ \t]*\/\/[^\r\n]*\r?\n[ \t]*\/\/[ \t]*\r?\n)$/m.exec(text.slice(0, at));
         if (trio) { at -= trio[1].length; }
         return `${text.slice(0, at)}${blockLines.join(wfEol())}${wfEol()}${text.slice(at)}`;
     }
 
-    /** Append a field declaration after the last designer field (or #endregion). */
+    /**
+     * Append a field declaration after the last designer field. Returns null
+     * when no safe anchor exists (the caller aborts its insertion).
+     * C#: after the last `private Type name;` field or `#endregion`.
+     * VB:  after the last `Friend WithEvents name As Type` field, else after
+     *      InitializeComponent's End Sub, else before the final End Class.
+     */
     function wfInsertField(text, qualifiedType, name) {
+        const eol = wfEol();
+        if (wfLang === 'vb') {
+            const fieldRe = /^([ \t]*)(?:Friend|Private|Public|Protected)(?:\s+\w+)*\s+WithEvents\s+\w+\s+As\s+[\w\.]+[ \t]*$/gm;
+            let last = null;
+            for (const m of text.matchAll(fieldRe)) { last = m; }
+            if (last) {
+                const end = last.index + last[0].length;
+                const line = `${last[1]}Friend WithEvents ${name} As ${wfCode(qualifiedType)}`;
+                return `${text.slice(0, end)}${eol}${line}${text.slice(end)}`;
+            }
+            const body = wfInitializeComponentBody(text);
+            if (body) {
+                const endSub = /^([ \t]*)End\s+Sub[ \t]*$/m.exec(text.slice(body.end));
+                if (endSub) {
+                    const end = body.end + endSub.index + endSub[0].length;
+                    const line = `${endSub[1]}Friend WithEvents ${name} As ${wfCode(qualifiedType)}`;
+                    return `${text.slice(0, end)}${eol}${line}${text.slice(end)}`;
+                }
+            }
+            const endClass = /^([ \t]*)End\s+Class[ \t]*\r?\n?(?![\s\S]*^\s*End\s+Class)/m.exec(text);
+            if (!endClass) { return null; }
+            const line = `${endClass[1]}    Friend WithEvents ${name} As ${wfCode(qualifiedType)}`;
+            return `${text.slice(0, endClass.index)}${line}${eol}${text.slice(endClass.index)}`;
+        }
         const fieldLine = `        private ${wfCode(qualifiedType)} ${name};`;
         let last = null;
-        for (const m of text.matchAll(/^[ \t]*private\s+[\w\.<>\[\]]+\s+\w+;\s*$/gm)) { last = m; }
+        for (const m of text.matchAll(/^[ \t]*private\s+[\w\.<>\[\]]+\s+\w+;[ \t]*$/gm)) { last = m; }
         if (last) {
             const end = last.index + last[0].length;
             return `${text.slice(0, end)}${wfEol()}${fieldLine}${text.slice(end)}`;
         }
-        const endRegion = /^[ \t]*#endregion[^\n]*$/m.exec(text);
-        if (!endRegion) { return text; }
+        const endRegion = /^[ \t]*#endregion[^\r\n]*$/m.exec(text);
+        if (!endRegion) { return null; }
         const end = endRegion.index + endRegion[0].length;
         return `${text.slice(0, end)}${wfEol()}${wfEol()}${fieldLine}${text.slice(end)}`;
     }
@@ -4565,33 +4777,45 @@
 
         // IContainer-based components need the components container.
         if (def.ctor === 'components') {
-            if (!/\bcomponents\s*=\s*new\s+System\.ComponentModel\.Container\(\)/.test(text)) {
+            if (!/\bcomponents\s*=\s*[Nn]ew\s+System\.ComponentModel\.Container\(\)/.test(text)) {
                 const t = wfInsertBeforeSuspend(text,
-                    `${ind}${wfRef('components')} = new System.ComponentModel.Container();`);
+                    `${ind}${wfRef('components')} = ${wfCode('new System.ComponentModel.Container()')}${wfSemi()}`);
                 if (t) { text = t; }
             }
-            if (!/private\s+System\.ComponentModel\.IContainer\s+components/.test(text)) {
-                let t = text;
-                const last = /^[ \t]*#endregion[^\n]*$/m.exec(t);
-                if (last) {
-                    t = `${t.slice(0, last.index + last[0].length)}${eol}${eol}        private System.ComponentModel.IContainer components;${t.slice(last.index + last[0].length)}`;
-                    text = t;
+            const hasField = wfLang === 'vb'
+                ? /\bcomponents\s+As\s+System\.ComponentModel\.IContainer/.test(text)
+                : /private\s+System\.ComponentModel\.IContainer\s+components/.test(text);
+            if (!hasField) {
+                if (wfLang === 'vb') {
+                    const endClass = /^([ \t]*)End\s+Class[ \t]*\r?\n?(?![\s\S]*^\s*End\s+Class)/m.exec(text);
+                    if (endClass) {
+                        text = `${text.slice(0, endClass.index)}${endClass[1]}    Private components As System.ComponentModel.IContainer${eol}${text.slice(endClass.index)}`;
+                    }
+                } else {
+                    const last = /^[ \t]*#endregion[^\r\n]*$/m.exec(text);
+                    if (last) {
+                        text = `${text.slice(0, last.index + last[0].length)}${eol}${eol}        private System.ComponentModel.IContainer components;${text.slice(last.index + last[0].length)}`;
+                    }
                 }
             }
         }
 
         const qualified = `${def.ns ?? 'System.Windows.Forms'}.${type}`;
-        const arg = def.ctor === 'components' ? `(${wfStyle.thisPrefix ? 'this.' : ''}components)` : '()';
+        const arg = def.ctor === 'components' ? `(${wfRef('components')})` : '()';
         const t2 = wfInsertBeforeSuspend(text,
-            `${ind}${wfRef(name)} = new ${wfCode(qualified)}${arg};`);
+            `${ind}${wfRef(name)} = ${wfCode(`new ${qualified}`)}${arg}${wfSemi()}`);
         if (!t2) {
             setStatus('UI Maker: could not find a place to insert the component.');
             return;
         }
-        text = wfInsertField(t2, qualified, name);
+        const withField = wfInsertField(t2, qualified, name);
+        if (!withField) {
+            setStatus('UI Maker: insertion was cancelled because a safe designer-field anchor was not found.');
+            return;
+        }
 
         wfSelectInserted(name, type);
-        wfApply(text);
+        wfApply(withField);
         setStatus(`UI Maker: added ${name} to the component tray.`);
     }
 
@@ -4620,9 +4844,10 @@
         stem = stem ? stem.charAt(0).toLowerCase() + stem.slice(1) : 'item';
         if (/^[0-9]/.test(stem)) { stem = `_${stem}`; }
         const base = `${stem}${itemType}`;
-        if (!wfControls.has(base) && !new RegExp(`\\b${base}\\b`).test(text)) { return base; }
+        const flags = wfLang === 'vb' ? 'i' : '';
+        if (!wfControls.has(base) && !new RegExp(`\\b${base}\\b`, flags).test(text)) { return base; }
         for (let i = 1; ; i++) {
-            if (!wfControls.has(`${base}${i}`) && !new RegExp(`\\b${base}${i}\\b`).test(text)) {
+            if (!wfControls.has(`${base}${i}`) && !new RegExp(`\\b${base}${i}\\b`, flags).test(text)) {
                 return `${base}${i}`;
             }
         }
@@ -4659,27 +4884,25 @@
             const name = wfStripItemName(texts[i], itemType, text);
             finalNames.push(name);
             const t = wfInsertBeforeSuspend(text,
-                `${ind}${wfRef(name)} = new ${wfCode(`System.Windows.Forms.${itemType}`)}();`);
+                `${ind}${wfRef(name)} = ${wfCode(`new System.Windows.Forms.${itemType}()`)}${wfSemi()}`);
             if (!t) { return; }
             text = wfInsertBlockBeforeForm(t, [
-                `${ind}// `,
-                `${ind}// ${name}`,
-                `${ind}// `,
-                `${ind}${wfRef(name)}.Name = "${name}";`,
-                `${ind}${wfRef(name)}.Text = ${wfCode(wfQuote(texts[i]))};`
+                ...wfCommentTrio(ind, name),
+                `${ind}${wfRef(name)}.Name = "${name}"${wfSemi()}`,
+                `${ind}${wfRef(name)}.Text = ${wfCode(wfQuote(texts[i]))}${wfSemi()}`
             ]) ?? t;
-            text = wfInsertField(text, `System.Windows.Forms.${itemType}`, name);
+            text = wfInsertField(text, `System.Windows.Forms.${itemType}`, name) ?? text;
         }
 
         // Rewrite the AddRange call (may span multiple lines).
-        const addRe = new RegExp(`^[ \\t]*(?:this\\.)?${strip.name}\\.Items\\.AddRange\\([\\s\\S]*?\\);[ \\t]*\\r?\\n`, 'm');
+        const addRe = new RegExp(`^[ \\t]*(?:this\\.|Me\\.)?${strip.name}\\.Items\\.AddRange\\([\\s\\S]*?\\);?[ \\t]*\\r?\\n`, 'm');
         text = text.replace(addRe, '');
         if (finalNames.length) {
             const arr = finalNames.map(n => wfRef(n)).join(', ');
-            const line = `${ind}${wfRef(strip.name)}.Items.AddRange(new ${wfCode('System.Windows.Forms.ToolStripItem')}[] { ${arr} });`;
+            const line = `${ind}${wfRef(strip.name)}.Items.AddRange(${wfCode(`new System.Windows.Forms.ToolStripItem[] { ${arr} }`)})${wfSemi()}`;
             // After the strip's first property line, else after its instantiation.
-            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${strip.name}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text)
-                ?? new RegExp(`^([ \\t]*)(?:this\\.)?${strip.name}\\s*=\\s*new\\s[^\\n]*$`, 'm').exec(text);
+            const anchor = new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${strip.name}\\.[\\w\\.]+[^\\r\\n]*$`, 'm').exec(text)
+                ?? new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${strip.name}\\s*=\\s*[Nn]ew\\s[^\\r\\n]*$`, 'm').exec(text);
             if (anchor) {
                 const end = anchor.index + anchor[0].length;
                 text = `${text.slice(0, end)}${eol}${line}${text.slice(end)}`;
@@ -4696,13 +4919,13 @@
         const eol = wfEol();
         let text = xamlText;
         const ind = wfIndent(text);
-        const re = new RegExp(`^[ \\t]*(?:this\\.)?${ctrl.name}\\.Items\\.AddRange\\([\\s\\S]*?\\);[ \\t]*\\r?\\n`, 'm');
+        const re = new RegExp(`^[ \\t]*(?:this\\.|Me\\.)?${ctrl.name}\\.Items\\.AddRange\\([\\s\\S]*?\\);?[ \\t]*\\r?\\n`, 'm');
         text = text.replace(re, '');
         if (texts.length) {
             const arr = texts.map(t => wfQuote(t)).join(', ');
-            const line = `${ind}${wfRef(ctrl.name)}.Items.AddRange(new object[] { ${arr} });`;
-            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${ctrl.name}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text)
-                ?? new RegExp(`^([ \\t]*)(?:this\\.)?${ctrl.name}\\s*=\\s*new\\s[^\\n]*$`, 'm').exec(text);
+            const line = `${ind}${wfRef(ctrl.name)}.Items.AddRange(${wfCode(`new object[] { ${arr} }`)})${wfSemi()}`;
+            const anchor = new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${ctrl.name}\\.[\\w\\.]+[^\\r\\n]*$`, 'm').exec(text)
+                ?? new RegExp(`^([ \\t]*)(?:this\\.|Me\\.)?${ctrl.name}\\s*=\\s*[Nn]ew\\s[^\\r\\n]*$`, 'm').exec(text);
             if (!anchor) {
                 setStatus('UI Maker: could not find the control block to write the items.');
                 return;
@@ -4721,43 +4944,42 @@
         const tc = wfUniqueName('TabControl');
         // Two page names — wfUniqueName can't reserve, so pick sequentially.
         const freePage = taken => {
+            const stem = wfLang === 'vb' ? 'TabPage' : 'tabPage';
+            const flags = wfLang === 'vb' ? 'i' : '';
             for (let i = 1; ; i++) {
-                const cand = `tabPage${i}`;
-                if (cand !== taken && !wfControls.has(cand) && !new RegExp(`\\b${cand}\\b`).test(text)) { return cand; }
+                const cand = `${stem}${i}`;
+                if (cand !== taken && !wfControls.has(cand) && !new RegExp(`\\b${cand}\\b`, flags).test(text)) { return cand; }
             }
         };
         const p1 = freePage('');
         const p2 = freePage(p1);
 
         for (const [n, t] of [[tc, 'TabControl'], [p1, 'TabPage'], [p2, 'TabPage']]) {
-            const ins = wfInsertBeforeSuspend(text, `${ind}${wfRef(n)} = new ${wfCode(`System.Windows.Forms.${t}`)}();`);
+            const ins = wfInsertBeforeSuspend(text, `${ind}${wfRef(n)} = ${wfCode(`new System.Windows.Forms.${t}()`)}${wfSemi()}`);
             if (!ins) { return; }
             text = ins;
         }
 
+        const semi = wfSemi();
         const pageBlock = (n, i) => [
-            `${ind}// `,
-            `${ind}// ${n}`,
-            `${ind}// `,
-            `${ind}${wfRef(n)}.Location = new ${wfCode('System.Drawing.Point')}(4, 24);`,
-            `${ind}${wfRef(n)}.Name = "${n}";`,
-            `${ind}${wfRef(n)}.Padding = new ${wfCode('System.Windows.Forms.Padding')}(3);`,
-            `${ind}${wfRef(n)}.Size = new ${wfCode('System.Drawing.Size')}(292, 172);`,
-            `${ind}${wfRef(n)}.TabIndex = ${i};`,
-            `${ind}${wfRef(n)}.Text = "${n}";`,
-            `${ind}${wfRef(n)}.UseVisualStyleBackColor = true;`
+            ...wfCommentTrio(ind, n),
+            `${ind}${wfRef(n)}.Location = ${wfCode('new System.Drawing.Point(4, 24)')}${semi}`,
+            `${ind}${wfRef(n)}.Name = "${n}"${semi}`,
+            `${ind}${wfRef(n)}.Padding = ${wfCode('new System.Windows.Forms.Padding(3)')}${semi}`,
+            `${ind}${wfRef(n)}.Size = ${wfCode('new System.Drawing.Size(292, 172)')}${semi}`,
+            `${ind}${wfRef(n)}.TabIndex = ${i}${semi}`,
+            `${ind}${wfRef(n)}.Text = "${n}"${semi}`,
+            `${ind}${wfRef(n)}.UseVisualStyleBackColor = ${wfCode('true')}${semi}`
         ];
         const block = [
-            `${ind}// `,
-            `${ind}// ${tc}`,
-            `${ind}// `,
-            `${ind}${wfRef(tc)}.Controls.Add(${wfRef(p1)});`,
-            `${ind}${wfRef(tc)}.Controls.Add(${wfRef(p2)});`,
-            `${ind}${wfRef(tc)}.Location = new ${wfCode('System.Drawing.Point')}(${x}, ${y});`,
-            `${ind}${wfRef(tc)}.Name = "${tc}";`,
-            `${ind}${wfRef(tc)}.SelectedIndex = 0;`,
-            `${ind}${wfRef(tc)}.Size = new ${wfCode('System.Drawing.Size')}(300, 200);`,
-            `${ind}${wfRef(tc)}.TabIndex = ${wfControls.size};`,
+            ...wfCommentTrio(ind, tc),
+            `${ind}${wfRef(tc)}.Controls.Add(${wfRef(p1)})${semi}`,
+            `${ind}${wfRef(tc)}.Controls.Add(${wfRef(p2)})${semi}`,
+            `${ind}${wfRef(tc)}.Location = ${wfCode(`new System.Drawing.Point(${x}, ${y})`)}${semi}`,
+            `${ind}${wfRef(tc)}.Name = "${tc}"${semi}`,
+            `${ind}${wfRef(tc)}.SelectedIndex = 0${semi}`,
+            `${ind}${wfRef(tc)}.Size = ${wfCode('new System.Drawing.Size(300, 200)')}${semi}`,
+            `${ind}${wfRef(tc)}.TabIndex = ${wfControls.size}${semi}`,
             ...pageBlock(p1, 0),
             ...pageBlock(p2, 1)
         ];
@@ -4766,21 +4988,21 @@
         text = withBlock;
 
         // Controls.Add on the form.
-        const addLine = `${ind}${wfStyle.thisPrefix ? 'this.' : ''}Controls.Add(${wfRef(tc)});`;
-        const firstAdd = /^[ \t]*(?:this\.)?Controls\.Add\(/m.exec(text);
+        const addLine = `${ind}${wfStyle.thisPrefix ? (wfLang === 'vb' ? 'Me.' : 'this.') : ''}Controls.Add(${wfRef(tc)})${semi}`;
+        const firstAdd = /^[ \t]*(?:this\.|Me\.)?Controls\.Add\(/m.exec(text);
         if (firstAdd) {
             text = `${text.slice(0, firstAdd.index)}${addLine}${eol}${text.slice(firstAdd.index)}`;
         } else {
-            const cs = /^([ \t]*)(?:this\.)?ClientSize\s*=[^\n]*$/m.exec(text);
+            const cs = /^([ \t]*)(?:this\.|Me\.)?ClientSize\s*=[^\r\n]*$/m.exec(text);
             if (cs) {
                 const end = cs.index + cs[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
             }
         }
 
-        text = wfInsertField(text, 'System.Windows.Forms.TabControl', tc);
-        text = wfInsertField(text, 'System.Windows.Forms.TabPage', p1);
-        text = wfInsertField(text, 'System.Windows.Forms.TabPage', p2);
+        text = wfInsertField(text, 'System.Windows.Forms.TabControl', tc) ?? text;
+        text = wfInsertField(text, 'System.Windows.Forms.TabPage', p1) ?? text;
+        text = wfInsertField(text, 'System.Windows.Forms.TabPage', p2) ?? text;
 
         wfSelectInserted(tc, 'TabControl');
         wfApply(text);
@@ -4789,7 +5011,9 @@
     /** `line` with the contents of its string literals blanked out, so
      *  identifier matching can never hit text inside quotes. */
     function wfMaskStrings(line) {
-        return line.replace(/"(?:[^"\\]|\\.)*"/g, s => `"${'_'.repeat(s.length - 2)}"`);
+        return wfLang === 'vb'
+            ? line.replace(/"(?:[^"]|"")*"/g, s => `"${'_'.repeat(s.length - 2)}"`)
+            : line.replace(/"(?:[^"\\]|\\.)*"/g, s => `"${'_'.repeat(s.length - 2)}"`);
     }
 
     /** Return the first index after a C# comment/string/character token, or
@@ -4849,8 +5073,19 @@
         return at;
     }
 
-    /** Bounds of the generated InitializeComponent body, excluding braces. */
+    /** Bounds of the generated InitializeComponent body, excluding the
+     *  delimiters (C# braces; VB signature line and End Sub). */
     function wfInitializeComponentBody(source) {
+        if (wfLang === 'vb') {
+            const sub = /\b(?:Private|Friend|Protected|Public)\s+Sub\s+InitializeComponent\s*\(\s*\)[ \t]*\r?\n/i.exec(source);
+            if (!sub) { return null; }
+            const start = sub.index + sub[0].length;
+            // InitializeComponent never nests Subs, so the first End Sub at a
+            // line start closes it (VB strings/comments cannot span lines).
+            const endSub = /^[ \t]*End\s+Sub[ \t]*$/m.exec(source.slice(start));
+            if (!endSub) { return null; }
+            return { start, end: start + endSub.index };
+        }
         const signature = /\b(?:private|protected|internal|public)\s+(?:static\s+)?void\s+InitializeComponent\s*\(\s*\)/g.exec(source);
         if (!signature) { return null; }
         let open = -1;
@@ -4892,34 +5127,41 @@
             setStatus('UI Maker: delete was cancelled because InitializeComponent could not be bounded safely.');
             return text;
         }
-        const isRef = it => it === name || it === `this.${name}`;
+        const isRef = it => it === name || it === `this.${name}` || it === `Me.${name}`;
         let body = text.slice(range.start, range.end);
 
         // AddRange statements first (they can span lines and list several
         // controls). Owned by the doomed control -> remove whole statement;
-        // merely listing it -> prune the one item.
+        // merely listing it -> prune the one item. VB array creation writes
+        // "New Type() {...}" instead of "new Type[] {...}".
         body = body.replace(
-            /^([ \t]*)((?:this\.)?[\w\.]+)\.AddRange\(\s*(new\s+[\w\.\[\]]+)\s*\{([\s\S]*?)\}\s*\)\s*;[ \t]*(\r?\n)?/gm,
-            (all, ind, recv, arrType, body, nl) => {
-                if (isRef(recv) || recv.startsWith(`${name}.`) || recv.startsWith(`this.${name}.`)) { return ''; }
-                if (body.includes('"')) { return all; } // string arrays: no control refs
-                const items = body.split(',').map(s => s.trim()).filter(Boolean);
+            /^([ \t]*)((?:this\.|Me\.)?[\w\.]+)\.AddRange\(\s*([Nn]ew\s+[\w\.\[\]]+(?:\(\))?)\s*\{([\s\S]*?)\}\s*\)\s*;?[ \t]*(\r?\n)?/gm,
+            (all, ind, recv, arrType, arrBody, nl) => {
+                if (isRef(recv) || recv.startsWith(`${name}.`) || recv.startsWith(`this.${name}.`) || recv.startsWith(`Me.${name}.`)) { return ''; }
+                if (arrBody.includes('"')) { return all; } // string arrays: no control refs
+                const items = arrBody.split(',').map(s => s.trim()).filter(Boolean);
                 if (!items.some(isRef)) { return all; }
                 const kept = items.filter(it => !isRef(it));
                 if (!kept.length) { return ''; }
-                return `${ind}${recv}.AddRange(${arrType} { ${kept.join(', ')} });${nl ?? ''}`;
+                return `${ind}${recv}.AddRange(${arrType} { ${kept.join(', ')} })${wfSemi()}${nl ?? ''}`;
             });
 
         const lines = body.split('\n');
         const keep = [];
         const safeName = reEsc(name);
-        const ref = new RegExp(`\\b(?:this\\.)?${safeName}\\b`);
+        const ref = new RegExp(`\\b(?:this\\.|Me\\.)?${safeName}\\b`);
+        const isTrioMiddle = wfLang === 'vb'
+            ? t => t === `'${name}` || t === `' ${name}`
+            : t => t === `// ${name}`;
+        const isTrioEdge = wfLang === 'vb'
+            ? t => t === `'`
+            : t => t === '//';
         for (let i = 0; i < lines.length; i++) {
             const t = lines[i].trim();
-            // "// name" comment trio above the control's block.
-            if (t === `// ${name}`
-                && lines[i - 1]?.trim() === '//'
-                && lines[i + 1]?.trim() === '//') {
+            // The "name" comment trio above the control's block.
+            if (isTrioMiddle(t)
+                && isTrioEdge(lines[i - 1]?.trim() ?? '')
+                && isTrioEdge(lines[i + 1]?.trim() ?? '')) {
                 keep.pop();
                 i += 1;
                 continue;
@@ -4933,8 +5175,11 @@
         // Generated fields live outside InitializeComponent. Remove only the
         // exact simple declaration; never erase user code that merely refers
         // to the control identifier.
-        const field = new RegExp(
-            `^[ \\t]*private\\s+[\\w\\.:<>?,\\[\\]]+\\s+${safeName}\\s*;[ \\t]*(?:\\r?\\n|$)`, 'gm');
+        const field = wfLang === 'vb'
+            ? new RegExp(
+                `^[ \\t]*(?:Friend|Private|Public|Protected)(?:\\s+\\w+)*\\s+(?:WithEvents\\s+)?${safeName}\\s+As\\s+[\\w\\.]+[ \\t]*(?:\\r?\\n|$)`, 'gm')
+            : new RegExp(
+                `^[ \\t]*private\\s+[\\w\\.:<>?,\\[\\]]+\\s+${safeName}\\s*;[ \\t]*(?:\\r?\\n|$)`, 'gm');
         return text.replace(field, '');
     }
 
@@ -4968,10 +5213,13 @@
     // ----------------------------------------------------------- wf rename
 
     /**
-     * Rename an identifier in generated C# while copying comments and literals
-     * verbatim. This keeps examples, notes, and user-visible text untouched.
+     * Rename an identifier in generated code while copying comments and
+     * literals verbatim. This keeps notes and user-visible text untouched.
+     * VB identifiers are case-insensitive; VB comments are apostrophes and
+     * VB strings double their quotes (no backslash escapes).
      */
     function wfRenameIdentifier(source, oldName, newName) {
+        if (wfLang === 'vb') { return wfRenameVbIdentifier(source, oldName, newName); }
         const idRe = new RegExp(`\\b${oldName}\\b`, 'g');
         const n = source.length;
         let out = '';
@@ -5059,6 +5307,46 @@
         return out;
     }
 
+    /** VB flavor of the rename scanner: ' comments, ""-doubled strings, and
+     *  case-insensitive identifier matching. */
+    function wfRenameVbIdentifier(source, oldName, newName) {
+        const idRe = new RegExp(`\\b${oldName}\\b`, 'gi');
+        const n = source.length;
+        let out = '';
+        let codeStart = 0;
+        let i = 0;
+
+        const flushCode = end => { out += source.slice(codeStart, end).replace(idRe, newName); };
+        const skipVerbatim = (from, to) => {
+            flushCode(from);
+            out += source.slice(from, to);
+            codeStart = i = to;
+        };
+
+        while (i < n) {
+            const ch = source[i];
+            if (ch === '\'') {
+                let end = source.indexOf('\n', i);
+                if (end < 0) { end = n; }
+                skipVerbatim(i, end);
+                continue;
+            }
+            if (ch === '"') {
+                let j = i + 1;
+                while (j < n) {
+                    if (source[j] === '"' && source[j + 1] === '"') { j += 2; continue; }
+                    if (source[j] === '"' || source[j] === '\n') { j++; break; }
+                    j++;
+                }
+                skipVerbatim(i, j);
+                continue;
+            }
+            i++;
+        }
+        flushCode(n);
+        return out;
+    }
+
     /**
      * Rename a control's generated-code references and its own Name string,
      * then ask the host to mirror the identifier change into code-behind.
@@ -5072,8 +5360,10 @@
             renderPanel();
             return;
         }
+        // VB identifiers collide case-insensitively.
+        const usedFlags = wfLang === 'vb' ? 'i' : '';
         if (wfControls.has(newName) || newName === wfForm.name
-            || new RegExp(`\\b${newName}\\b`).test(xamlText)) {
+            || new RegExp(`\\b${newName}\\b`, usedFlags).test(xamlText)) {
             setStatus(`UI Maker: "${newName}" is already used in this file — pick another name.`);
             renderPanel();
             return;
@@ -5081,8 +5371,14 @@
         let text = wfRenameIdentifier(xamlText, oldName, newName);
         // Literals stay untouched except this control's generated Name
         // assignment, whose receiver was just renamed above.
-        const ownName = new RegExp(`((?:this\\.)?${newName}\\.Name\\s*=\\s*)"${oldName}"`);
+        const ownName = new RegExp(`((?:this\\.|Me\\.)?${newName}\\.Name\\s*=\\s*)"${oldName}"`, usedFlags);
         text = text.replace(ownName, `$1"${newName}"`);
+        // Comments survive renames too — except the generated block-header
+        // trio, whose middle line IS the control name (VS regenerates it).
+        const trioLine = wfLang === 'vb'
+            ? new RegExp(`^([ \\t]*)'[ ]?${oldName}[ \\t]*$`, 'm')
+            : new RegExp(`^([ \\t]*)// ${oldName}[ \\t]*$`, 'm');
+        text = text.replace(trioLine, wfLang === 'vb' ? `$1'${newName}` : `$1// ${newName}`);
         ctrl.name = newName; // re-parse re-selects by name
         vscode.postMessage({ type: 'renameControl', oldName, newName });
         wfApply(text);
@@ -5341,7 +5637,9 @@
 
         const hint = document.createElement('div');
         hint.className = 'ff-events-hint';
-        hint.textContent = 'Type a handler name (or click ⚡ for the default) to wire the event and create the C# stub.';
+        hint.textContent = wfLang === 'vb'
+            ? 'Type a handler name (or click ⚡ for the default) to create the Sub with its Handles clause in the code-behind.'
+            : 'Type a handler name (or click ⚡ for the default) to wire the event and create the C# stub.';
         propsBody.appendChild(hint);
 
         for (const ev of events) {
@@ -5375,6 +5673,10 @@
     }
 
     function wfQuote(s) {
+        if (wfLang === 'vb') {
+            // VB strings double their quotes; backslashes are literal.
+            return `"${s.replace(/"/g, '""')}"`;
+        }
         return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     }
 
@@ -5440,4 +5742,23 @@
     buildToolbox();
     initFormGrips();
     vscode.postMessage({ type: 'ready' });
+
+    // Test hook: the node test suite loads this file with a stub DOM and
+    // exercises the pure text-transform internals. Webviews never set the
+    // flag, so this block is inert in production.
+    if (typeof globalThis !== 'undefined' && globalThis.__UIMAKER_TEST__) {
+        globalThis.__uimakerTest = {
+            setDoc(name, text) { config.docName = name; xamlText = text; parseAndRender(); },
+            setVbHandles(entries) { wfVbHandles = entries; },
+            get lang() { return wfLang; },
+            get text() { return xamlText; },
+            get controls() { return wfControls; },
+            get form() { return wfForm; },
+            wfSetLine, wfSetFormLine, wfRemoveControlLines, wfRenameControl,
+            wfAddControl, wfDeleteControls, wfWireEvent, wfUnwireEvent,
+            wfInitializeComponentBody, wfInsertField, wfAddComponent,
+            wfCode, wfQuote, wfSerialize, wfDisplay, wfString, wfFont,
+            wfApply
+        };
+    }
 })();

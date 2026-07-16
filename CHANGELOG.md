@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.12.0
+
+**Visual Basic WinForms designer.** `*.Designer.vb` files now open in the same
+drag-and-drop designer as C#:
+
+* **Full round-tripping** — VB `InitializeComponent` bodies parse (controls,
+  hierarchy, `Me.` receivers, `New` instantiations, AddRange arrays, VB string
+  and number literals like `15.75!`), and every edit is written back in VB
+  syntax: no semicolons, `Me.`/implicit receivers matching the file's dialect,
+  `True`/`False`, `CType` anchor casts, apostrophe comment trios, and
+  `Friend WithEvents … As …` field declarations.
+* **VB events, the VB way** — wiring an event creates a
+  `Private Sub … Handles Button1.Click` stub in the code-behind (or moves the
+  Handles target when rewiring); the events panel reads existing `Handles`
+  clauses live, including `MyBase.Load`-style form events, and clearing an
+  event removes only its Handles target — handler code is never deleted.
+* **Rename** — case-insensitive VB identifier rename across the designer file
+  and code-behind (Handles clauses included), preserving comments and string
+  literals; the generated block-header comment trio now follows renames in
+  both languages.
+* **Scaffolding parity** — Add Form and New WPF Window generate VB file pairs
+  in VB projects, Duplicate copies `.vb`/`.Designer.vb`/`.resx` sets, the
+  sidebar lists VB forms (excluding `My Project` codegen), and the Code
+  category's New Class button emits a `.vb` stub in VB projects.
+* **Resources** — existing VB images (`My.Resources.*` and local form resx)
+  render on the canvas. Cross-language clipboard pastes are blocked so C# code
+  can never be injected into a VB designer file (and vice versa).
+* Still C#-only for now: the App Settings editor, classic→SDK conversion, and
+  importing new images as project resources into VB projects.
+
+Also in this release: the designer's text-surgery core now has a Node test
+harness exercising both languages end-to-end (parse → edit → re-parse), CRLF
+line endings are preserved exactly on replaced/inserted lines, and the README
+gained screenshots plus updated feature/command tables.
+
 ## 0.11.2
 
 **Marketplace identity.** Added the final UI Maker app icon to the extension

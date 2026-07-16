@@ -44,12 +44,14 @@ export interface ImageKey {
 const IMAGE_FILTERS = { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico'] };
 const ICON_FILTERS = { 'Icons': ['ico'] };
 
-/** Walk up from a file to the directory containing a .csproj (or null). */
+/** Walk up from a file to the directory containing a .csproj/.vbproj (or null).
+ *  Resource IMPORTS additionally require a .csproj (see importResourceFile);
+ *  resolution and webview roots work for both languages. */
 export function findProjectDir(startFile: string): string | null {
     let dir = path.dirname(startFile);
     for (let i = 0; i < 24; i++) {
         try {
-            if (fs.readdirSync(dir).some(f => /\.csproj$/i.test(f))) { return dir; }
+            if (fs.readdirSync(dir).some(f => /\.(cs|vb)proj$/i.test(f))) { return dir; }
         } catch { return null; }
         const parent = path.dirname(dir);
         if (parent === dir) { return null; }
@@ -409,78 +411,94 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
 /**
  * The project directory sidebar commands operate on: the WORKING folder when
  * one is set (multi-project workspaces are never guessed at), else the
- * workspace's single project, else a picker.
+ * workspace's single project, else a picker. `languages` limits which project
+ * types qualify — resource IMPORTS generate C# accessors, so they stay
+ * C#-only; file creation works for both languages.
  */
-async function workspaceProjectDir(): Promise<string | null> {
+async function workspaceProjectDir(languages: 'cs' | 'any' = 'cs'): Promise<string | null> {
     const working = getWorkingFolder();
-    const hasCsProject = (dir: string): boolean => {
-        try { return fs.readdirSync(dir).some(f => /\.csproj$/i.test(f)); }
+    const projRe = languages === 'cs' ? /\.csproj$/i : /\.(cs|vb)proj$/i;
+    const hasProject = (dir: string): boolean => {
+        try { return fs.readdirSync(dir).some(f => projRe.test(f)); }
         catch { return false; }
     };
 
     // A selected working project is authoritative. In particular, never fall
     // through from a VB project to some unrelated C# project in the workspace.
-    if (working) { return hasCsProject(working) ? working : null; }
+    if (working) { return hasProject(working) ? working : null; }
 
     const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 2);
     if (found.length === 1) {
-        return /\.csproj$/i.test(found[0].fsPath) ? path.dirname(found[0].fsPath) : null;
+        return projRe.test(found[0].fsPath) ? path.dirname(found[0].fsPath) : null;
     }
     if (found.length === 0) { return null; }
     // Several projects and no working folder chosen — ask, don't guess.
     const picked = await pickWorkingFolder();
-    return picked && hasCsProject(picked) ? picked : null;
+    return picked && hasProject(picked) ? picked : null;
 }
 
-/** Side panel "Add Class" on the Code category: create Name.cs with a stub. */
+/** Any project file in the folder (used to pick the class-file language). */
+function anyProjectPath(projDir: string): string | null {
+    const name = fs.readdirSync(projDir).find(f => /\.(cs|vb)proj$/i.test(f));
+    return name ? path.join(projDir, name) : null;
+}
+
+/** Side panel "Add Class" on the Code category: create a class-file stub in
+ *  the working project's language (Name.cs or Name.vb). */
 export async function addCsFile(): Promise<void> {
-    const projDir = await workspaceProjectDir();
+    const projDir = await workspaceProjectDir('any');
     if (!projDir) {
-        vscode.window.showWarningMessage('UI Maker: this action currently requires a C# (.csproj) working project.');
+        vscode.window.showWarningMessage('UI Maker: this action requires a .NET working project.');
         return;
     }
+    const project = anyProjectPath(projDir);
+    const isVb = !!project && /\.vbproj$/i.test(project);
+    const ext = isVb ? 'vb' : 'cs';
     const name = await vscode.window.showInputBox({
-        prompt: 'Class name for the new .cs file',
+        prompt: `Class name for the new .${ext} file`,
         placeHolder: 'FileProcessor',
         validateInput: v => isCSharpIdentifier(v.trim())
             ? undefined
-            : 'Use a non-keyword C# class name (letters, digits, underscore).'
+            : 'Use a non-keyword class name (letters, digits, underscore).'
     });
     if (!name) { return; }
     const cls = name.trim();
-    const file = path.join(projDir, `${cls}.cs`);
+    const file = path.join(projDir, `${cls}.${ext}`);
     if (fs.existsSync(file)) {
-        vscode.window.showWarningMessage(`UI Maker: ${cls}.cs already exists.`);
+        vscode.window.showWarningMessage(`UI Maker: ${cls}.${ext} already exists.`);
         return;
     }
 
-    const csproj = csprojPath(projDir);
-    const ns = csproj ? rootNamespace(csproj) : 'App';
-    const classSource =
-        `using System;\r\n` +
-        `\r\n` +
-        `namespace ${ns}\r\n` +
-        `{\r\n` +
-        `    public class ${cls}\r\n` +
-        `    {\r\n` +
-        `    }\r\n` +
-        `}\r\n`;
+    const ns = project && !isVb ? rootNamespace(project) : 'App';
+    // VB projects apply their root namespace implicitly — no wrapper needed.
+    const classSource = isVb
+        ? `Public Class ${cls}\r\n` +
+          `\r\n` +
+          `End Class\r\n`
+        : `using System;\r\n` +
+          `\r\n` +
+          `namespace ${ns}\r\n` +
+          `{\r\n` +
+          `    public class ${cls}\r\n` +
+          `    {\r\n` +
+          `    }\r\n` +
+          `}\r\n`;
     try {
         createFilesAtomically([{ target: file, contents: classSource }]);
     } catch (err) {
-        vscode.window.showErrorMessage(`UI Maker: could not create ${cls}.cs — ${err}`);
+        vscode.window.showErrorMessage(`UI Maker: could not create ${cls}.${ext} — ${err}`);
         return;
     }
 
-    // Classic projects list every file; SDK projects glob *.cs automatically.
-    if (csproj) {
+    // Classic projects list every file; SDK projects glob sources automatically.
+    if (project) {
         try {
-            let xml = fs.readFileSync(csproj, 'utf8');
+            let xml = fs.readFileSync(project, 'utf8');
             if (!/<Project\s[^>]*\bSdk\s*=/.test(xml) && /<\/Project>/.test(xml)) {
                 const eol = xml.includes('\r\n') ? '\r\n' : '\n';
                 xml = xml.replace(/<\/Project>/,
-                    `  <ItemGroup>${eol}    <Compile Include="${cls}.cs" />${eol}  </ItemGroup>${eol}</Project>`);
-                replaceFileAtomically(csproj, xml);
+                    `  <ItemGroup>${eol}    <Compile Include="${cls}.${ext}" />${eol}  </ItemGroup>${eol}</Project>`);
+                replaceFileAtomically(project, xml);
             }
         } catch { /* non-fatal — the file still exists */ }
     }
@@ -491,7 +509,8 @@ export async function addCsFile(): Promise<void> {
 export async function addResourceFiles(imagesOnly: boolean): Promise<void> {
     const projDir = await workspaceProjectDir();
     if (!projDir) {
-        vscode.window.showWarningMessage('UI Maker: this action currently requires a C# (.csproj) working project.');
+        vscode.window.showWarningMessage(
+            'UI Maker: resource import currently requires a C# (.csproj) working project — Visual Basic projects manage resources in Visual Studio (My.Resources).');
         return;
     }
     const picked = await vscode.window.showOpenDialog({
@@ -528,8 +547,12 @@ export function resolveImages(docPath: string, keys: ImageKey[]): Map<string, st
     const projKeys = keys.filter(k => k.scope === 'p');
     if (projKeys.length) {
         const projDir = findProjectDir(docPath);
-        const file = projDir ? resxPath(projDir) : null;
-        if (file && fs.existsSync(file)) {
+        // C# keeps the project resx in Properties/; VB in "My Project".
+        const file = projDir
+            ? [resxPath(projDir), path.join(projDir, 'My Project', 'Resources.resx')]
+                .find(f => fs.existsSync(f)) ?? null
+            : null;
+        if (file) {
             const entries = parseResxEntries(fs.readFileSync(file, 'utf8'));
             for (const k of projKeys) {
                 const e = entries.find(x => x.name === k.key && x.fileRef);
@@ -543,8 +566,8 @@ export function resolveImages(docPath: string, keys: ImageKey[]): Map<string, st
 
     const localKeys = keys.filter(k => k.scope === 'l');
     if (localKeys.length) {
-        // Main.Designer.cs -> Main.resx (next to the designer file).
-        const resx = docPath.replace(/\.designer\.cs$/i, '.resx');
+        // Main.Designer.cs/.Designer.vb -> Main.resx (next to the designer file).
+        const resx = docPath.replace(/\.designer\.(cs|vb)$/i, '.resx');
         if (fs.existsSync(resx)) {
             const xml = fs.readFileSync(resx, 'utf8');
             for (const k of localKeys) {

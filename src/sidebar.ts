@@ -201,7 +201,7 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
             const base = path.basename(uri.fsPath).toLowerCase();
             const ext = path.extname(base);
             // Designable files already have their own groups above.
-            if (ext === '.xaml' || /\.designer\.cs$/.test(base)) { continue; }
+            if (ext === '.xaml' || /\.designer\.(cs|vb)$/.test(base)) { continue; }
             if (ext === '.cs' || ext === '.vb') { cats['Code'].files.push(uri); }
             else if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg', '.cur'].includes(ext)) { cats['Images & Icons'].files.push(uri); }
             else if (['.resx', '.settings'].includes(ext)) { cats['Resources'].files.push(uri); }
@@ -349,17 +349,20 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         });
     }
 
-    /** WinForms *.Designer.cs files (excluding Settings/Resources codegen). */
+    /** WinForms *.Designer.cs/.Designer.vb files (excluding generated codegen
+     *  like Resources/Settings/Application designers and their folders). */
     private async winFormsItems(scope: { mode: string; dir?: string }): Promise<SidebarItem[]> {
         if (!vscode.workspace.workspaceFolders?.length) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
         if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
-        const files = await vscode.workspace.findFiles(this.scopedPattern(scope, '**/*.Designer.cs'), EXCLUDE_GLOB, 200);
+        const files = await vscode.workspace.findFiles(this.scopedPattern(scope, '**/*.Designer.{cs,vb}'), EXCLUDE_GLOB, 200);
         const forms = files.filter(uri => {
             const base = path.basename(uri.fsPath).toLowerCase();
-            if (base === 'resources.designer.cs' || base === 'settings.designer.cs') { return false; }
-            return !uri.fsPath.toLowerCase().includes(`${path.sep}properties${path.sep}`);
+            if (/^(resources|settings|application)\.designer\.(cs|vb)$/.test(base)) { return false; }
+            const p = uri.fsPath.toLowerCase();
+            return !p.includes(`${path.sep}properties${path.sep}`)
+                && !p.includes(`${path.sep}my project${path.sep}`);
         });
         if (!forms.length) {
             return [new SidebarItem('No WinForms designer files found', { icon: 'info' })];

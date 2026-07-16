@@ -180,11 +180,13 @@ designer edits when you work on a window.</p>
         <td>Never — both are safely deletable and belong in <code>.gitignore</code>.</td></tr>
 </table>
 
-<h2>3. A Windows Forms project (layout generated as C#)</h2>
+<h2>3. A Windows Forms project (layout generated as code)</h2>
 <p>WinForms has no markup language — the designer stores each form's layout as generated
-C# inside <code>*.Designer.cs</code>. Every form is a <strong>pair</strong>:
-<code>Form1.cs</code> (your code) + <code>Form1.Designer.cs</code> (the layout), usually
-with a <code>Form1.resx</code> resource file alongside.</p>
+code inside <code>*.Designer.cs</code> (C#) or <code>*.Designer.vb</code> (Visual Basic).
+Every form is a <strong>pair</strong>: <code>Form1.cs</code>/<code>Form1.vb</code>
+(your code) + <code>Form1.Designer.cs</code>/<code>.Designer.vb</code> (the layout),
+usually with a <code>Form1.resx</code> resource file alongside. UI Maker designs both
+languages with the same canvas.</p>
 
 <pre><code>MyApp/
 ├── MyApp.csproj            ${badge('req')}  the project file
@@ -228,9 +230,12 @@ with a <code>Form1.resx</code> resource file alongside.</p>
 </table>
 
 <div class="tip"><strong>Rule of thumb:</strong> files ending in
-<code>.Designer.cs</code> are machine-written. Design them visually; put your own code in
-the matching plain <code>.cs</code> file. That split is what keeps the designer and your
-logic from stepping on each other.</div>
+<code>.Designer.cs</code> / <code>.Designer.vb</code> are machine-written. Design them
+visually; put your own code in the matching plain <code>.cs</code>/<code>.vb</code> file.
+That split is what keeps the designer and your logic from stepping on each other.
+In Visual Basic, event handlers connect through <code>Handles</code> clauses on your
+Subs (<code>Private Sub Button1_Click(…) Handles Button1.Click</code>) — UI Maker
+writes those for you when you wire an event.</div>
 
 <h2>4. Files around the project</h2>
 <table>
@@ -243,7 +248,10 @@ logic from stepping on each other.</div>
             first commit (see below).</td></tr>
     <tr><td><code>*.vbproj</code>, <code>.vb</code> files</td><td></td>
         <td>The Visual Basic equivalents of <code>.csproj</code>/<code>.cs</code> — same
-            structure, different language.</td></tr>
+            structure, different language. VB WinForms forms
+            (<code>*.Designer.vb</code>) open in the same visual designer; VB projects
+            keep their generated files under <code>My Project/</code> instead of
+            <code>Properties/</code>.</td></tr>
 </table>
 
 <h3>A .gitignore to start with</h3>

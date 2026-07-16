@@ -55,8 +55,8 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('uimaker.openDesigner', (uri?: vscode.Uri) => {
             const target = uri ?? vscode.window.activeTextEditor?.document.uri;
             const p = target?.fsPath.toLowerCase() ?? '';
-            if (!target || !(p.endsWith('.xaml') || p.endsWith('.designer.cs'))) {
-                vscode.window.showWarningMessage('UI Maker: select a .xaml or *.Designer.cs file to open in the designer.');
+            if (!target || !(p.endsWith('.xaml') || p.endsWith('.designer.cs') || p.endsWith('.designer.vb'))) {
+                vscode.window.showWarningMessage('UI Maker: select a .xaml, *.Designer.cs, or *.Designer.vb file to open in the designer.');
                 return;
             }
             return vscode.commands.executeCommand('vscode.openWith', target, DesignerProvider.viewType);

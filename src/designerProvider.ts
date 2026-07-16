@@ -6,12 +6,14 @@
 //   designer change  -> postMessage('edit')    -> WorkspaceEdit on document
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { ensureEventHandler } from './codeBehind';
+import { codeBehindPathOf, ensureEventHandler, removeEventHandles } from './codeBehind';
 import { pickAndImportImage, resolveImages, findProjectDir, ImageKey } from './resources';
 import { projectDirOf, setWorkingFolder } from './workingFolder';
 import { escapeRegExp, isCSharpIdentifier, renameCSharpIdentifier } from './csharpText';
+import { isVbIdentifier, parseVbHandles, renameVbIdentifier } from './vbText';
 import { decideDesignerEdit } from './designerSync';
 
 export class DesignerProvider implements vscode.CustomTextEditorProvider {
@@ -67,7 +69,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         let pendingWebviewText: string | undefined;
 
         const postUpdate = () => {
-            void panel.webview.postMessage({ type: 'update', text: document.getText() });
+            void panel.webview.postMessage(designerUpdateMessage(document));
         };
         const postConfig = () => {
             const cfg = vscode.workspace.getConfiguration('uimaker');
@@ -81,7 +83,17 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
         const subs: vscode.Disposable[] = [];
 
+        // VB WinForms wires events with Handles clauses in the code-behind —
+        // when that file changes, the designer's events panel must follow.
+        const vbCodeBehind = /\.designer\.vb$/i.test(document.uri.fsPath)
+            ? codeBehindPathOf(document.uri.fsPath).toLowerCase()
+            : undefined;
+
         subs.push(vscode.workspace.onDidChangeTextDocument(e => {
+            if (vbCodeBehind && e.document.uri.fsPath.toLowerCase() === vbCodeBehind) {
+                postUpdate();
+                return;
+            }
             if (e.document.uri.toString() !== document.uri.toString()) { return; }
             const changedText = e.document.getText();
             if (pendingWebviewText !== undefined && changedText === pendingWebviewText) {
@@ -155,7 +167,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             });
         };
         const postUpdate = () => {
-            void panel.webview.postMessage({ type: 'update', text: document.getText() });
+            void panel.webview.postMessage(designerUpdateMessage(document));
         };
         switch (msg?.type) {
                 // Webview finished loading — send settings and initial content.
@@ -172,10 +184,16 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     DesignerProvider.clipboard = msg.data;
                     break;
 
-                // Control rename: the webview already rewrote the Designer.cs;
-                // mirror the identifier rename into the code-behind .cs file.
+                // Control rename: the webview already rewrote the designer
+                // file; mirror the identifier rename into the code-behind.
                 case 'renameControl': {
                     const { oldName, newName } = msg as { oldName: string; newName: string };
+                    const isVb = /\.designer\.vb$/i.test(document.uri.fsPath);
+                    if (isVb) {
+                        if (!isVbIdentifier(oldName) || !isVbIdentifier(newName)) { break; }
+                        await renameInVbCodeBehind(document, oldName, newName);
+                        break;
+                    }
                     if (!isCSharpIdentifier(oldName) || !isCSharpIdentifier(newName)) { break; }
 
                     // Prefer the installed C# language service. This is a real
@@ -319,15 +337,40 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     break;
                 }
 
-                // Event wiring: guarantee the C# handler stub exists.
+                // Event wiring: guarantee the handler stub exists (C# stub, or
+                // a VB Sub whose Handles clause carries the wiring).
                 case 'addHandler':
-                    await ensureEventHandler(document.uri.fsPath, msg.handler, msg.event, msg.argsType);
+                    await ensureEventHandler(document.uri.fsPath, msg.handler, msg.event, msg.argsType, {
+                        handles: typeof msg.handles === 'string' ? msg.handles : undefined,
+                        reveal: msg.reveal !== false
+                    });
+                    break;
+
+                // VB only: clearing an event removes its Handles target. Form
+                // events may be written against MyBase or Me — clear both.
+                case 'removeHandler':
+                    if (typeof msg.handles === 'string') {
+                        await removeEventHandles(document.uri.fsPath, msg.handles);
+                        const alt = /^MyBase\./i.test(msg.handles)
+                            ? msg.handles.replace(/^MyBase\./i, 'Me.')
+                            : /^Me\./i.test(msg.handles)
+                                ? msg.handles.replace(/^Me\./i, 'MyBase.')
+                                : undefined;
+                        if (alt) { await removeEventHandles(document.uri.fsPath, alt); }
+                    }
                     break;
 
                 // Property grid "…" on an Image/Icon property: import the
                 // picked file as a project resource and hand back the C#
                 // expression plus a URI the canvas can render.
                 case 'pickImage': {
+                    if (/\.designer\.vb$/i.test(document.uri.fsPath)) {
+                        // VB projects keep resources in "My Project" with a VB
+                        // accessor class this importer does not generate yet.
+                        void vscode.window.showInformationMessage(
+                            'UI Maker: importing images into Visual Basic projects is not supported yet — add the image in Visual Studio (My.Resources); existing images render fine.');
+                        break;
+                    }
                     const res = await pickAndImportImage(document.uri.fsPath, !!msg.iconOnly);
                     if (res) {
                         void panel.webview.postMessage({
@@ -458,6 +501,55 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
  */
 export function renameIdentifier(source: string, oldName: string, newName: string): string {
     return renameCSharpIdentifier(source, oldName, newName);
+}
+
+/** The 'update' message for a designer document. VB WinForms documents carry
+ *  the Handles wiring parsed from the code-behind so the events panel can
+ *  show it (the webview never reads other files itself). */
+function designerUpdateMessage(document: vscode.TextDocument): Record<string, unknown> {
+    const message: Record<string, unknown> = { type: 'update', text: document.getText() };
+    if (/\.designer\.vb$/i.test(document.uri.fsPath)) {
+        try {
+            const codePath = codeBehindPathOf(document.uri.fsPath);
+            const open = vscode.workspace.textDocuments.find(
+                d => d.uri.fsPath.toLowerCase() === codePath.toLowerCase());
+            message.vbHandles = parseVbHandles(open ? open.getText() : fs.readFileSync(codePath, 'utf8'));
+        } catch {
+            message.vbHandles = [];
+        }
+    }
+    return message;
+}
+
+/** Mirror a VB control rename into the code-behind .vb file (Handles clauses,
+ *  event handlers, user references). VB has no reliable semantic-rename
+ *  service in VS Code, so the comment/string-aware lexical rename is used. */
+async function renameInVbCodeBehind(document: vscode.TextDocument, oldName: string, newName: string): Promise<void> {
+    const codePath = codeBehindPathOf(document.uri.fsPath);
+    if (codePath.toLowerCase() === document.uri.fsPath.toLowerCase()) { return; }
+    try {
+        const codeUri = vscode.Uri.file(codePath);
+        const codeDoc = await vscode.workspace.openTextDocument(codeUri);
+        const wasDirty = codeDoc.isDirty;
+        const before = codeDoc.getText();
+        const after = renameVbIdentifier(before, oldName, newName);
+        if (after === before) { return; }
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(
+            codeUri,
+            new vscode.Range(codeDoc.positionAt(0), codeDoc.positionAt(before.length)),
+            after
+        );
+        const applied = await vscode.workspace.applyEdit(edit);
+        if (!applied) {
+            void vscode.window.showWarningMessage(
+                'UI Maker: control references could not be renamed in the code-behind.');
+            return;
+        }
+        if (!wasDirty) { await codeDoc.save(); }
+    } catch {
+        // No code-behind next to this designer file — nothing to update.
+    }
 }
 
 function makeNonce(): string {
