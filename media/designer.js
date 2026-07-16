@@ -129,6 +129,7 @@
     let styles = { byKey: new Map(), byType: new Map() }; // resolved <Style> resources
     let wfControls = new Map(); // WinForms mode: name -> control record
     let wfForm = null;          // WinForms mode: the form itself
+    let wfStyle = { thisPrefix: true, qualified: true }; // code dialect of the file
     const uiTabs = new Map();   // TabControl path/name -> active tab index
     let activeTab = 'props';    // 'props' | 'events'
     let zoom = 1;
@@ -1459,7 +1460,11 @@
             commit();
             e.preventDefault();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-            if (selected.__wf) { return; } // duplicate not supported for WinForms yet
+            if (selected.__wf) {
+                if (selected !== wfForm) { wfDuplicateControl(selected); }
+                e.preventDefault();
+                return;
+            }
             // Duplicate: clone, offset, rename, insert next to the original.
             const clone = selected.cloneNode(true);
             setName(clone, uniqueName(selected.localName));
@@ -1619,53 +1624,74 @@
             return;
         }
 
-        // Control instantiations: this.name = new System.Windows.Forms.Type(...);
-        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\s*=\s*new\s+System\.Windows\.Forms\.(\w+)\(/gm)) {
+        // The generated code comes in two dialects. Classic (.NET Framework /
+        // VS pre-2022): "this.button1 = new System.Windows.Forms.Button();".
+        // Modern (.NET 6+ / VS 2022): "button1 = new Button();" — no "this."
+        // and no namespace qualification. Parsing accepts both; edits are
+        // written back in whichever dialect the file already uses.
+        wfStyle = {
+            thisPrefix: /^[ \t]*this\.\w+\s*=\s*new\s/m.test(text),
+            qualified: /new\s+System\.(?:Windows\.Forms|Drawing)\./.test(text)
+        };
+
+        // Control instantiations: [this.]name = new [System.Windows.Forms.]Type(...);
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*=\s*new\s+(?:System\.Windows\.Forms\.)?(\w+)\s*\(/gm)) {
+            if (m[1] === 'components' || m[2] === 'Container' || m[2] === 'ComponentResourceManager') { continue; }
             wfControls.set(m[1], {
                 __wf: true, name: m[1], type: m[2],
                 props: {}, events: {}, children: [], columns: [], items: [], parent: null
             });
         }
 
-        // Property assignments (single-line): this.name.Prop = value;
-        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\.([\w]+)\s*=\s*(.+);\s*$/gm)) {
+        // Property assignments (single-line): [this.]name.Prop = value;
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.([\w]+)\s*=\s*(.+);\s*$/gm)) {
             const ctrl = wfControls.get(m[1]);
             if (ctrl) { ctrl.props[m[2]] = m[3]; }
         }
 
-        // Form-level assignments: this.Prop = value; (control names filtered out).
-        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\s*=\s*(.+);\s*$/gm)) {
+        // Form-level assignments: [this.]Prop = value; (control names filtered out).
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*=\s*(.+);\s*$/gm)) {
             if (!wfControls.has(m[1])) { wfForm.props[m[1]] = m[2]; }
         }
 
-        // Events: this.name.Event += new Delegate(this.Handler);
-        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\.(\w+)\s*\+=\s*new\s+[\w\.]+\(this\.(\w+)\);/gm)) {
+        // Events, both "x.Click += new EventHandler(this.H);" and "x.Click += H;".
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.(\w+)\s*\+=\s*(?:new\s+[\w\.]+\(\s*)?(?:this\.)?(\w+)\s*\)?\s*;/gm)) {
             const ctrl = wfControls.get(m[1]);
             if (ctrl) { ctrl.events[m[2]] = m[3]; }
         }
-        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\s*\+=\s*new\s+[\w\.]+\(this\.(\w+)\);/gm)) {
-            wfForm.events[m[1]] = m[2];
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\s*\+=\s*(?:new\s+[\w\.]+\(\s*)?(?:this\.)?(\w+)\s*\)?\s*;/gm)) {
+            if (!wfControls.has(m[1])) { wfForm.events[m[1]] = m[2]; }
         }
 
-        // Hierarchy: parent.Controls.Add(this.child) / this.Controls.Add(this.child)
-        for (const m of text.matchAll(/^[ \t]*this\.(\w+)\.Controls\.Add\(this\.(\w+)\);/gm)) {
+        // Hierarchy: parent.Controls.Add(child) / Controls.Add(child).
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
             const parent = wfControls.get(m[1]);
             const child = wfControls.get(m[2]);
             if (parent && child) { parent.children.push(child); child.parent = parent; }
         }
-        for (const m of text.matchAll(/^[ \t]*this\.Controls\.Add\(this\.(\w+)\);/gm)) {
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
             const child = wfControls.get(m[1]);
             if (child) { wfForm.children.push(child); child.parent = wfForm; }
         }
 
-        // DataGridView columns / MenuStrip items (multi-line AddRange arrays).
-        for (const m of text.matchAll(/this\.(\w+)\.Columns\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
-            const ctrl = wfControls.get(m[1]);
-            if (ctrl) { ctrl.columns = [...m[2].matchAll(/this\.(\w+)/g)].map(x => x[1]); }
+        // Controls.AddRange(new Control[] { a, b, ... }) — parent and form level.
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(?:(\w+)\.)?Controls\.AddRange\([^{]*\{([\s\S]*?)\}\)/gm)) {
+            const parent = m[1] ? wfControls.get(m[1]) : wfForm;
+            if (!parent) { continue; }
+            for (const n of m[2].matchAll(/(?:this\.)?(\w+)/g)) {
+                const child = wfControls.get(n[1]);
+                if (child && !child.parent) { parent.children.push(child); child.parent = parent; }
+            }
         }
-        for (const m of text.matchAll(/this\.(\w+)\.Items\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
+
+        // DataGridView columns / MenuStrip items (multi-line AddRange arrays).
+        for (const m of text.matchAll(/(?:this\.)?(\w+)\.Columns\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
             const ctrl = wfControls.get(m[1]);
-            if (ctrl) { ctrl.items = [...m[2].matchAll(/this\.(\w+)/g)].map(x => x[1]); }
+            if (ctrl) { ctrl.columns = [...m[2].matchAll(/(?:this\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n)); }
+        }
+        for (const m of text.matchAll(/(?:this\.)?(\w+)\.Items\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
+            const ctrl = wfControls.get(m[1]);
+            if (ctrl) { ctrl.items = [...m[2].matchAll(/(?:this\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n)); }
         }
 
         // Re-select the record with the same name after the re-parse.
@@ -1718,6 +1744,20 @@
         div.style.width = `${size.w}px`;
         div.style.height = `${size.h}px`;
 
+        // Dock overrides Location: stretch along the docked edge(s). This is an
+        // approximation — multiple docked siblings do not push each other.
+        const dock = /DockStyle\.(\w+)/.exec(ctrl.props.Dock ?? '')?.[1];
+        if (dock && dock !== 'None') {
+            div.style.left = '0';
+            div.style.top = '0';
+            if (dock === 'Fill') { div.style.width = '100%'; div.style.height = '100%'; }
+            else if (dock === 'Top') { div.style.width = '100%'; }
+            else if (dock === 'Bottom') { div.style.top = 'auto'; div.style.bottom = '0'; div.style.width = '100%'; }
+            else if (dock === 'Left') { div.style.height = '100%'; }
+            else if (dock === 'Right') { div.style.left = 'auto'; div.style.right = '0'; div.style.height = '100%'; }
+            div.classList.add('ff-docked');
+        }
+
         const bg = wfColor(ctrl.props.BackColor);
         const fg = wfColor(ctrl.props.ForeColor);
         if (bg) { div.style.background = bg; }
@@ -1739,7 +1779,10 @@
             e.preventDefault();
             e.stopPropagation();
             select(ctrl);
-            startMove(e, ctrl, div);
+            // Docked controls are laid out by the framework — select only.
+            if (!div.classList.contains('ff-docked')) {
+                startMove(e, ctrl, div);
+            }
         });
         div.addEventListener('dblclick', e => {
             e.preventDefault();
@@ -1937,7 +1980,7 @@
     }
 
     function wfFont(v) {
-        const m = /new\s+System\.Drawing\.Font\("([^"]+)",\s*([\d.]+)F?/.exec(v ?? '');
+        const m = /new\s+(?:System\.Drawing\.)?Font\("([^"]+)",\s*([\d.]+)F?/.exec(v ?? '');
         if (!m) { return null; }
         return {
             family: m[1],
@@ -1962,40 +2005,50 @@
         wfParseAndRender();
     }
 
+    /** "this.name" or plain "name", matching the file's dialect. */
+    function wfRef(name) {
+        return wfStyle.thisPrefix ? `this.${name}` : name;
+    }
+
+    /** Strip namespace qualification from generated code on modern-style files. */
+    function wfCode(code) {
+        return wfStyle.qualified ? code : code.replace(/\bSystem\.(?:Windows\.Forms|Drawing)\./g, '');
+    }
+
     /**
-     * Replace "this.<name>.<prop> = ...;" or insert it into the control's
+     * Replace "[this.]<name>.<prop> = ...;" or insert it into the control's
      * statement block. Returns the new text (does not apply it).
      */
     function wfSetLine(name, prop, code, text = xamlText) {
-        const line = `this.${name}.${prop} = ${code};`;
-        const re = new RegExp(`^([ \\t]*)this\\.${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
+        const line = `${wfRef(name)}.${prop} = ${wfCode(code)};`;
+        const re = new RegExp(`^([ \\t]*)(?:this\\.)?${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
         if (re.test(text)) {
             return text.replace(re, `$1${line}`);
         }
         // Insert after the first existing statement of this control's block.
-        const anchor = new RegExp(`^([ \\t]*)this\\.${name}\\.[\\w\\.]+[^\\n]*$`, 'm');
+        const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${name}\\.[\\w\\.]+[^\\n]*$`, 'm');
         const m = anchor.exec(text);
         if (!m) { return text; }
         const end = m.index + m[0].length;
         return `${text.slice(0, end)}${wfEol()}${m[1]}${line}${text.slice(end)}`;
     }
 
-    /** Same as wfSetLine but for the form's own "this.<prop> = ...;" lines. */
+    /** Same as wfSetLine but for the form's own "[this.]<prop> = ...;" lines. */
     function wfSetFormLine(prop, code, text = xamlText) {
-        const line = `this.${prop} = ${code};`;
-        const re = new RegExp(`^([ \\t]*)this\\.${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
+        const line = `${wfRef(prop)} = ${wfCode(code)};`;
+        const re = new RegExp(`^([ \\t]*)(?:this\\.)?${prop}\\s*=[^\\n]*;[ \\t]*$`, 'm');
         if (re.test(text)) {
             return text.replace(re, `$1${line}`);
         }
-        const m = /^([ \t]*)this\.ClientSize\s*=/m.exec(text);
+        const m = /^([ \t]*)(?:this\.)?ClientSize\s*=/m.exec(text);
         if (!m) { return text; }
         const end = text.indexOf('\n', m.index);
         return `${text.slice(0, end)}${wfEol()}${m[1]}${line}${text.slice(end)}`;
     }
 
-    /** Remove the "this.<name>.<prop> = ...;" line entirely (if present). */
+    /** Remove the "[this.]<name>.<prop> = ...;" line entirely (if present). */
     function wfRemoveLine(name, prop, text = xamlText) {
-        const re = new RegExp(`^[ \\t]*this\\.${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
+        const re = new RegExp(`^[ \\t]*(?:this\\.)?${name}\\.${prop}\\s*=[^\\n]*;[ \\t]*\\r?\\n`, 'm');
         return text.replace(re, '');
     }
 
@@ -2004,11 +2057,17 @@
         const isForm = el === wfForm;
         const finalName = handler || `${isForm ? wfForm.name : el.name}_${eventName}`;
         const et = WF_EVENT_TYPES[eventName] ?? WF_DEFAULT_EVENT_TYPE;
-        const lhs = isForm ? `this.${eventName}` : `this.${el.name}.${eventName}`;
-        const line = `${lhs} += new ${et.handler}(this.${finalName});`;
+        const lhs = isForm ? wfRef(eventName) : `${wfRef(el.name)}.${eventName}`;
+        // Classic files wrap the handler in a delegate; modern ones don't.
+        const line = wfStyle.thisPrefix
+            ? `${lhs} += new ${et.handler}(this.${finalName});`
+            : `${lhs} += ${finalName};`;
+        const lhsPattern = isForm
+            ? `(?:this\\.)?${eventName}`
+            : `(?:this\\.)?${el.name}\\.${eventName}`;
 
         let text = xamlText;
-        const re = new RegExp(`^([ \\t]*)${lhs.replace(/\./g, '\\.')}\\s*\\+=[^\\n]*$`, 'm');
+        const re = new RegExp(`^([ \\t]*)${lhsPattern}\\s*\\+=[^\\n]*$`, 'm');
         if (re.test(text)) {
             text = text.replace(re, `$1${line}`);
         } else if (isForm) {
@@ -2019,7 +2078,7 @@
             text = `${text.slice(0, m.index)}${m[1]}${line}${wfEol()}${text.slice(m.index)}`;
         } else {
             // Append after the last statement of the control's block.
-            const blockRe = new RegExp(`^([ \\t]*)this\\.${el.name}\\.[\\w\\.]+[^\\n]*$`, 'gm');
+            const blockRe = new RegExp(`^([ \\t]*)(?:this\\.)?${el.name}\\.[\\w\\.]+[^\\n]*$`, 'gm');
             let last = null;
             for (const m of text.matchAll(blockRe)) { last = m; }
             if (!last) { return; }
@@ -2032,9 +2091,11 @@
         }
     }
 
-    /** Remove an event wiring line ("this.x.Click += ...."). */
+    /** Remove an event wiring line ("[this.]x.Click += ...."). */
     function wfUnwireEvent(el, eventName) {
-        const lhs = el === wfForm ? `this\\.${eventName}` : `this\\.${el.name}\\.${eventName}`;
+        const lhs = el === wfForm
+            ? `(?:this\\.)?${eventName}`
+            : `(?:this\\.)?${el.name}\\.${eventName}`;
         const re = new RegExp(`^[ \\t]*${lhs}\\s*\\+=[^\\n]*\\r?\\n`, 'm');
         wfApply(xamlText.replace(re, ''));
     }
@@ -2078,23 +2139,63 @@
     function wfAddControl(type, x, y, parentName) {
         const def = WF_CONTROLS[type];
         const name = wfUniqueName(type);
+        const props = [
+            ['Location', `new System.Drawing.Point(${x}, ${y})`],
+            ['Name', `"${name}"`],
+            ['Size', `new System.Drawing.Size(${def.w}, ${def.h})`],
+            ['TabIndex', String(wfControls.size)]
+        ];
+        if (def.text) { props.push(['Text', `"${name}"`]); }
+        wfInsertControl(type, name, props, parentName);
+    }
+
+    /** Copy of an existing control, offset one grid step, in the same parent. */
+    function wfDuplicateControl(src) {
+        if (!WF_CONTROLS[src.type]) {
+            setStatus(`UI Maker: duplicate is not supported for ${src.type} controls.`);
+            return;
+        }
+        const name = wfUniqueName(src.type);
+        const loc = wfPoint(src.props.Location) ?? { x: 0, y: 0 };
+        const props = [
+            ['Location', `new System.Drawing.Point(${loc.x + config.gridSize}, ${loc.y + config.gridSize})`],
+            ['Name', `"${name}"`],
+            ['TabIndex', String(wfControls.size)]
+        ];
+        // Carry over everything else the source sets (Size, Text, colors, ...).
+        for (const [prop, code] of Object.entries(src.props)) {
+            if (prop === 'Location' || prop === 'Name' || prop === 'TabIndex') { continue; }
+            props.push([prop, code]);
+        }
+        const parentName = src.parent && src.parent !== wfForm ? src.parent.name : null;
+        wfInsertControl(src.type, name, props, parentName);
+        setStatus(`UI Maker: duplicated ${src.name} as ${name}.`);
+    }
+
+    /**
+     * Shared insertion plumbing: instantiation before SuspendLayout, property
+     * block before the form's own section, Controls.Add, field declaration.
+     * `props` is an ordered [prop, code] list; code uses qualified names and
+     * is rewritten to match the file's dialect.
+     */
+    function wfInsertControl(type, name, props, parentName) {
         const eol = wfEol();
         let text = xamlText;
 
         // Indentation of generated statements, taken from an existing line.
-        const indentMatch = /^([ \t]*)this\.SuspendLayout\(\);/m.exec(text);
+        const indentMatch = /^([ \t]*)(?:this\.)?SuspendLayout\(\);/m.exec(text);
         const ind = indentMatch ? indentMatch[1] : '            ';
 
         // 1) Instantiation — before the first Suspend/BeginInit line.
-        const suspend = /^[ \t]*(?:[\w\.]+\.SuspendLayout\(\);|\(\(System\.ComponentModel\.ISupportInitialize\))/m.exec(text);
+        const suspend = /^[ \t]*(?:(?:[\w\.]+\.)?SuspendLayout\(\);|\(\((?:System\.ComponentModel\.)?ISupportInitialize\))/m.exec(text);
         if (!suspend) {
             setStatus('UI Maker: could not find a place to insert the control.');
             return;
         }
-        text = `${text.slice(0, suspend.index)}${ind}this.${name} = new System.Windows.Forms.${type}();${eol}${text.slice(suspend.index)}`;
+        text = `${text.slice(0, suspend.index)}${ind}${wfRef(name)} = new ${wfCode(`System.Windows.Forms.${type}`)}();${eol}${text.slice(suspend.index)}`;
 
         // 2) Property block — before the form's own section (AutoScaleDimensions).
-        const formAnchor = /^[ \t]*this\.AutoScaleDimensions\s*=/m.exec(text);
+        const formAnchor = /^[ \t]*(?:this\.)?AutoScaleDimensions\s*=/m.exec(text);
         if (!formAnchor) {
             setStatus('UI Maker: could not find the form section in InitializeComponent.');
             return;
@@ -2105,37 +2206,32 @@
         const trio = /(^[ \t]*\/\/[ \t]*\r?\n[ \t]*\/\/[^\r\n]*\r?\n[ \t]*\/\/[ \t]*\r?\n)$/m.exec(before);
         if (trio) { insertAt -= trio[1].length; }
 
-        const tabIndex = wfControls.size;
         const blockLines = [
             `${ind}// `,
             `${ind}// ${name}`,
             `${ind}// `,
-            `${ind}this.${name}.Location = new System.Drawing.Point(${x}, ${y});`,
-            `${ind}this.${name}.Name = "${name}";`,
-            `${ind}this.${name}.Size = new System.Drawing.Size(${def.w}, ${def.h});`,
-            `${ind}this.${name}.TabIndex = ${tabIndex};`
+            ...props.map(([prop, code]) => `${ind}${wfRef(name)}.${prop} = ${wfCode(code)};`)
         ];
-        if (def.text) { blockLines.push(`${ind}this.${name}.Text = "${name}";`); }
         text = `${text.slice(0, insertAt)}${blockLines.join(eol)}${eol}${text.slice(insertAt)}`;
 
         // 3) Controls.Add — into the parent container or the form.
         const addLine = parentName
-            ? `${ind}this.${parentName}.Controls.Add(this.${name});`
-            : `${ind}this.Controls.Add(this.${name});`;
+            ? `${ind}${wfRef(parentName)}.Controls.Add(${wfRef(name)});`
+            : `${ind}${wfStyle.thisPrefix ? 'this.' : ''}Controls.Add(${wfRef(name)});`;
         const firstAdd = parentName
-            ? new RegExp(`^[ \\t]*this\\.${parentName}\\.Controls\\.Add\\(`, 'm').exec(text)
-            : /^[ \t]*this\.Controls\.Add\(/m.exec(text);
+            ? new RegExp(`^[ \\t]*(?:this\\.)?${parentName}\\.Controls\\.Add\\(`, 'm').exec(text)
+            : /^[ \t]*(?:this\.)?Controls\.Add\(/m.exec(text);
         if (firstAdd) {
             text = `${text.slice(0, firstAdd.index)}${addLine}${eol}${text.slice(firstAdd.index)}`;
         } else if (parentName) {
             // Parent has no Controls.Add lines yet — append after its first statement.
-            const anchor = new RegExp(`^([ \\t]*)this\\.${parentName}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
+            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${parentName}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
             if (anchor) {
                 const end = anchor.index + anchor[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
             }
         } else {
-            const cs = /^([ \t]*)this\.ClientSize\s*=[^\n]*$/m.exec(text);
+            const cs = /^([ \t]*)(?:this\.)?ClientSize\s*=[^\n]*$/m.exec(text);
             if (cs) {
                 const end = cs.index + cs[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
@@ -2143,7 +2239,7 @@
         }
 
         // 4) Field declaration — after the last existing designer field.
-        const fieldLine = `        private System.Windows.Forms.${type} ${name};`;
+        const fieldLine = `        private ${wfCode(`System.Windows.Forms.${type}`)} ${name};`;
         let lastField = null;
         for (const m of text.matchAll(/^[ \t]*private\s+[\w\.<>]+\s+\w+;\s*$/gm)) { lastField = m; }
         if (lastField) {
@@ -2166,9 +2262,11 @@
         const name = ctrl.name;
         const lines = xamlText.split('\n');
         const keep = [];
-        // Any statement referencing "this.<name>" — property assignments, event
-        // wiring, Controls.Add, SuspendLayout, ISupportInitialize casts, ...
-        const ref = new RegExp(`\\bthis\\.${name}\\b`);
+        // Any statement referencing the control (with or without "this.") —
+        // property assignments, event wiring, Controls.Add, SuspendLayout,
+        // ISupportInitialize casts, ... Handler names like name_Click do not
+        // match because "_" is a word character (no \b boundary).
+        const ref = new RegExp(`\\b(?:this\\.)?${name}\\b`);
         const field = new RegExp(`^\\s*private\\s+[\\w\\.<>]+\\s+${name};\\s*$`);
         for (let i = 0; i < lines.length; i++) {
             const t = lines[i].trim();
