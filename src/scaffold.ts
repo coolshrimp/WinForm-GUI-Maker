@@ -1,7 +1,7 @@
 // UI Maker — "New .NET Desktop Project" scaffolding.
 //
-// Wraps `dotnet new wpf|winforms` behind a short wizard:
-// template -> project name -> destination folder -> open the result.
+// Wraps `dotnet new` behind a short wizard:
+// template -> language -> target framework -> name -> folder -> open.
 
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -26,15 +26,48 @@ export async function newProject(): Promise<void> {
             },
             {
                 label: '$(window) Windows Forms Application',
-                description: 'Code-based forms — build/run supported, designer on the roadmap',
+                description: 'Classic forms — visual designer, build & run supported',
                 id: 'winforms'
+            },
+            {
+                label: '$(terminal) Console Application',
+                description: 'No UI — plain command-line program',
+                id: 'console'
             }
         ],
         { placeHolder: 'Choose a project template' }
     );
     if (!template) { return; }
 
-    // 2) Name ----------------------------------------------------------------
+    // 2) Language --------------------------------------------------------------
+    const language = await vscode.window.showQuickPick(
+        [
+            { label: '$(code) C#', description: 'Default .NET language', id: '' },
+            { label: '$(code) Visual Basic', description: 'VB.NET', id: 'VB' },
+            { label: '$(circle-slash) C++', description: 'Not available — C++ desktop apps need Visual Studio with the C++ workload', id: 'cpp' }
+        ],
+        { placeHolder: 'Choose a language' }
+    );
+    if (!language) { return; }
+    if (language.id === 'cpp') {
+        vscode.window.showInformationMessage(
+            'UI Maker: the dotnet CLI has no C++ desktop templates — use Visual Studio with the "Desktop development with C++" workload for C++ apps. C# and Visual Basic are supported here.');
+        return;
+    }
+
+    // 3) Target framework --------------------------------------------------------
+    const framework = await vscode.window.showQuickPick(
+        [
+            { label: '$(star) SDK default', description: 'Latest .NET installed on this machine (recommended)', id: '' },
+            { label: '.NET 9', id: 'net9.0' },
+            { label: '.NET 8', description: 'Long-term support', id: 'net8.0' },
+            { label: '.NET 6', description: 'Older LTS', id: 'net6.0' }
+        ],
+        { placeHolder: 'Choose the target framework' }
+    );
+    if (!framework) { return; }
+
+    // 4) Name ----------------------------------------------------------------
     const name = await vscode.window.showInputBox({
         prompt: 'Project name (also used as the default namespace)',
         value: 'MyDesktopApp',
@@ -43,7 +76,7 @@ export async function newProject(): Promise<void> {
     });
     if (!name) { return; }
 
-    // 3) Destination folder ----------------------------------------------------
+    // 5) Destination folder ----------------------------------------------------
     const picked = await vscode.window.showOpenDialog({
         canSelectFiles: false,
         canSelectFolders: true,
@@ -59,18 +92,21 @@ export async function newProject(): Promise<void> {
         return;
     }
 
-    // 4) Generate --------------------------------------------------------------
+    // 6) Generate --------------------------------------------------------------
+    const args = ['new', template.id, '-n', name, '-o', target];
+    if (language.id) { args.push('-lang', language.id); }
+    if (framework.id) { args.push('-f', framework.id); }
     try {
         await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Creating ${name}…` },
-            () => execFile('dotnet', ['new', template.id, '-n', name, '-o', target])
+            () => execFile('dotnet', args)
         );
     } catch (err) {
         vscode.window.showErrorMessage(`UI Maker: dotnet new failed — ${err instanceof Error ? err.message : String(err)}`);
         return;
     }
 
-    // 5) Open ------------------------------------------------------------------
+    // 7) Open ------------------------------------------------------------------
     touchRecentProject(target);
     const here = 'Open';
     const newWindow = 'Open in New Window';
