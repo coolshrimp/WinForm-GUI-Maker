@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as cp from 'child_process';
+import { replaceFileAtomically } from './atomicFile';
 
 export interface ProjectInfo {
     /** Full path of the project file this info was read from. */
@@ -166,7 +167,7 @@ export function addRefAssembliesHelper(project: string): boolean {
             `  </ItemGroup>${eol}`;
         if (!/<\/Project>/.test(xml)) { return false; }
         xml = xml.replace(/<\/Project>/, `${block}</Project>`);
-        fs.writeFileSync(project, xml, 'utf8');
+        replaceFileAtomically(project, xml);
         return true;
     } catch {
         return false;

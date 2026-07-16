@@ -21,7 +21,10 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getWorkingFolder, pickWorkingFolder } from './workingFolder';
+import { EXCLUDE_GLOB, getWorkingFolder, pickWorkingFolder } from './workingFolder';
+import { isCSharpIdentifier, sanitizeCSharpNamespace } from './csharpText';
+import { decodeXmlEntities } from './xmlText';
+import { createFilesAtomically, replaceFileAtomically } from './atomicFile';
 
 export interface ImportedImage {
     /** Resource name — a valid C# identifier. */
@@ -65,17 +68,17 @@ function rootNamespace(csproj: string): string {
     try {
         const xml = fs.readFileSync(csproj, 'utf8');
         const root = /<RootNamespace>\s*([^<]+?)\s*<\/RootNamespace>/.exec(xml)?.[1];
-        if (root) { return root; }
+        if (root) { return sanitizeCSharpNamespace(decodeXmlEntities(root)); }
     } catch { /* fall through to the file name */ }
     const base = path.basename(csproj).replace(/\.csproj$/i, '');
-    const ns = base.replace(/[^A-Za-z0-9_.]/g, '_');
-    return /^[0-9]/.test(ns) ? `_${ns}` : ns;
+    return sanitizeCSharpNamespace(base);
 }
 
 /** File base name -> valid C# identifier ("refresh icon.png" -> "refresh_icon"). */
 function resourceKey(file: string): string {
     const base = path.basename(file, path.extname(file)).replace(/[^A-Za-z0-9_]/g, '_');
-    return /^[0-9]/.test(base) ? `_${base}` : (base || '_image');
+    const candidate = /^[0-9]/.test(base) ? `_${base}` : (base || '_image');
+    return isCSharpIdentifier(candidate) ? candidate : `_${candidate}`;
 }
 
 /**
@@ -199,13 +202,16 @@ function parseResxEntries(xml: string): ResxEntry[] {
     const out: ResxEntry[] = [];
     const re = /<data\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/data>/g;
     for (let m = re.exec(xml); m; m = re.exec(xml)) {
-        const attr = (name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(m![2])?.[1] ?? null;
-        const value = /<value>([\s\S]*?)<\/value>/.exec(m[3])?.[1] ?? '';
+        const attr = (name: string) => {
+            const value = new RegExp(`\\b${name}="([^"]*)"`).exec(m![2])?.[1];
+            return value === undefined ? null : decodeXmlEntities(value);
+        };
+        const value = decodeXmlEntities(/<value>([\s\S]*?)<\/value>/.exec(m[3])?.[1] ?? '');
         const typeAttr = attr('type');
         const mimeType = attr('mimetype');
         const isFileRef = !!typeAttr && /ResXFileRef/.test(typeAttr);
         out.push({
-            name: m[1],
+            name: decodeXmlEntities(m[1]),
             fileRef: isFileRef ? value : null,
             typeAttr,
             mimeType,
@@ -268,7 +274,7 @@ function addResxFileRef(projDir: string, fileAbs: string, type: string): string 
         `    <value>${value.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</value>\n` +
         `  </data>\n`;
     xml = xml.replace(/<\/root>/, `${entry}</root>`);
-    fs.writeFileSync(file, xml, 'utf8');
+    replaceFileAtomically(file, xml);
     return key;
 }
 
@@ -281,7 +287,7 @@ function writeResourcesDesigner(projDir: string, rootNs: string): void {
     const props = entries.map(e => {
         // Names must stay valid identifiers — anything else would corrupt
         // the generated class (spaces etc. can appear in hand-edited files).
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.name)) { return ''; }
+        if (!isCSharpIdentifier(e.name)) { return ''; }
         const type = accessorTypeFor(e);
         // Text resources (inline strings and string filerefs) use GetString.
         if (type === 'string') {
@@ -359,7 +365,7 @@ function writeResourcesDesigner(projDir: string, rootNs: string): void {
         `    }\r\n` +
         `}\r\n`;
 
-    fs.writeFileSync(path.join(projDir, 'Properties', 'Resources.Designer.cs'), code, 'utf8');
+    replaceFileAtomically(path.join(projDir, 'Properties', 'Resources.Designer.cs'), code);
 }
 
 /**
@@ -392,7 +398,7 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
         }
         if (!block) { return; }
         xml = xml.replace(/<\/Project>/, `  <ItemGroup>${eol}${block}  </ItemGroup>${eol}</Project>`);
-        fs.writeFileSync(csproj, xml, 'utf8');
+        replaceFileAtomically(csproj, xml);
     } catch {
         vscode.window.showWarningMessage('UI Maker: could not register the resource files in the project — add them manually.');
     }
@@ -407,31 +413,38 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
  */
 async function workspaceProjectDir(): Promise<string | null> {
     const working = getWorkingFolder();
-    try {
-        if (working && fs.readdirSync(working).some(f => /\.csproj$/i.test(f))) {
-            return working;
-        }
-    } catch { /* folder vanished — fall through to the search */ }
-    const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules,packages,.vs,.git}/**', 2);
-    if (found.length === 1) { return path.dirname(found[0].fsPath); }
+    const hasCsProject = (dir: string): boolean => {
+        try { return fs.readdirSync(dir).some(f => /\.csproj$/i.test(f)); }
+        catch { return false; }
+    };
+
+    // A selected working project is authoritative. In particular, never fall
+    // through from a VB project to some unrelated C# project in the workspace.
+    if (working) { return hasCsProject(working) ? working : null; }
+
+    const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 2);
+    if (found.length === 1) {
+        return /\.csproj$/i.test(found[0].fsPath) ? path.dirname(found[0].fsPath) : null;
+    }
     if (found.length === 0) { return null; }
     // Several projects and no working folder chosen — ask, don't guess.
-    return (await pickWorkingFolder()) ?? null;
+    const picked = await pickWorkingFolder();
+    return picked && hasCsProject(picked) ? picked : null;
 }
 
 /** Side panel "Add Class" on the Code category: create Name.cs with a stub. */
 export async function addCsFile(): Promise<void> {
     const projDir = await workspaceProjectDir();
     if (!projDir) {
-        vscode.window.showWarningMessage('UI Maker: open a folder with a .csproj first.');
+        vscode.window.showWarningMessage('UI Maker: this action currently requires a C# (.csproj) working project.');
         return;
     }
     const name = await vscode.window.showInputBox({
         prompt: 'Class name for the new .cs file',
         placeHolder: 'FileProcessor',
-        validateInput: v => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.trim())
+        validateInput: v => isCSharpIdentifier(v.trim())
             ? undefined
-            : 'Use a valid C# class name (letters, digits, underscore; not starting with a digit).'
+            : 'Use a non-keyword C# class name (letters, digits, underscore).'
     });
     if (!name) { return; }
     const cls = name.trim();
@@ -443,7 +456,7 @@ export async function addCsFile(): Promise<void> {
 
     const csproj = csprojPath(projDir);
     const ns = csproj ? rootNamespace(csproj) : 'App';
-    fs.writeFileSync(file,
+    const classSource =
         `using System;\r\n` +
         `\r\n` +
         `namespace ${ns}\r\n` +
@@ -451,7 +464,13 @@ export async function addCsFile(): Promise<void> {
         `    public class ${cls}\r\n` +
         `    {\r\n` +
         `    }\r\n` +
-        `}\r\n`, 'utf8');
+        `}\r\n`;
+    try {
+        createFilesAtomically([{ target: file, contents: classSource }]);
+    } catch (err) {
+        vscode.window.showErrorMessage(`UI Maker: could not create ${cls}.cs — ${err}`);
+        return;
+    }
 
     // Classic projects list every file; SDK projects glob *.cs automatically.
     if (csproj) {
@@ -461,7 +480,7 @@ export async function addCsFile(): Promise<void> {
                 const eol = xml.includes('\r\n') ? '\r\n' : '\n';
                 xml = xml.replace(/<\/Project>/,
                     `  <ItemGroup>${eol}    <Compile Include="${cls}.cs" />${eol}  </ItemGroup>${eol}</Project>`);
-                fs.writeFileSync(csproj, xml, 'utf8');
+                replaceFileAtomically(csproj, xml);
             }
         } catch { /* non-fatal — the file still exists */ }
     }
@@ -472,7 +491,7 @@ export async function addCsFile(): Promise<void> {
 export async function addResourceFiles(imagesOnly: boolean): Promise<void> {
     const projDir = await workspaceProjectDir();
     if (!projDir) {
-        vscode.window.showWarningMessage('UI Maker: open a folder with a .csproj first.');
+        vscode.window.showWarningMessage('UI Maker: this action currently requires a C# (.csproj) working project.');
         return;
     }
     const picked = await vscode.window.showOpenDialog({

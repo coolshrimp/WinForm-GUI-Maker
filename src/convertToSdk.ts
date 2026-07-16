@@ -10,9 +10,8 @@
 //   * UseWPF / UseWindowsForms inferred from the old references;
 //   * packages.config entries become PackageReference (the config file is
 //     renamed to packages.config.bak);
-//   * non-framework assembly references (HintPath) and COM references are
-//     carried over; framework references become implicit;
-//   * Settings.settings / Resources.resx keep their designer generators;
+//   * explicit items, metadata, conditions, assembly/COM/project references,
+//     and configuration-specific properties are carried over;
 //   * GenerateAssemblyInfo=false keeps the existing AssemblyInfo.cs valid.
 //
 // The original project file is saved next to the new one as
@@ -24,19 +23,13 @@ import * as path from 'path';
 import { readProjectInfo } from './projectInfo';
 import { DotnetTools } from './dotnetTools';
 
-/** Framework references that SDK-style desktop projects get implicitly. */
-const IMPLICIT_REFS = new Set([
-    'system', 'system.core', 'system.data', 'system.data.datasetextensions',
-    'system.deployment', 'system.drawing', 'system.net.http', 'system.numerics',
-    'system.runtime.serialization', 'system.windows.forms', 'system.xml',
-    'system.xml.linq', 'microsoft.csharp', 'presentationcore',
-    'presentationframework', 'windowsbase', 'system.xaml', 'uiautomationprovider',
-    'uiautomationtypes', 'system.configuration'
-]);
-
-export async function convertToSdkStyle(dotnet: DotnetTools): Promise<void> {
-    const project = await dotnet.findProject();
+export async function convertToSdkStyle(dotnet: DotnetTools, explicitProject?: string): Promise<void> {
+    const project = explicitProject ?? await dotnet.findProject();
     if (!project) { return; }
+    if (!/\.(cs|vb)proj$/i.test(project) || !fs.existsSync(project)) {
+        vscode.window.showWarningMessage('UI Maker: the selected project no longer exists.');
+        return;
+    }
     if (/\.vbproj$/i.test(project)) {
         vscode.window.showWarningMessage('UI Maker: automatic conversion supports C# projects only (for now).');
         return;
@@ -74,142 +67,414 @@ export async function convertToSdkStyle(dotnet: DotnetTools): Promise<void> {
             if (pick === build) { void vscode.commands.executeCommand('uimaker.build'); }
         });
     } catch (err) {
-        vscode.window.showErrorMessage(`UI Maker: conversion failed — ${err instanceof Error ? err.message : err}. The project file was not changed.`);
+        vscode.window.showErrorMessage(`UI Maker: conversion stopped safely — ${err instanceof Error ? err.message : err}`);
     }
 }
 
 interface ConversionResult { backup: string; warnings: string[]; }
 
+interface XmlElement {
+    name: string;
+    startTag: string;
+    inner: string;
+    raw: string;
+}
+
+interface PackageSpec {
+    id: string;
+    version: string;
+    developmentDependency: boolean;
+}
+
+const DEFAULT_ITEM_TYPES = new Set(['compile', 'embeddedresource', 'none', 'page', 'applicationdefinition']);
+
 /** Rewrite one classic .csproj as SDK-style. Throws before writing on error. */
 export function convertProjectFile(project: string): ConversionResult {
+    if (!/\.csproj$/i.test(project)) { throw new Error('only C# project files can be converted'); }
+
     const dir = path.dirname(project);
     const xml = fs.readFileSync(project, 'utf8');
+    const semanticXml = xml.replace(/<!--[\s\S]*?-->/g, '');
+    const eol = xml.includes('\r\n') ? '\r\n' : '\n';
     const warnings: string[] = [];
+    const topLevel = parseElements(projectBody(xml), 'project');
+    const propertyGroups = topLevel.filter(e => e.name.toLowerCase() === 'propertygroup');
 
-    const prop = (name: string) => new RegExp(`<${name}>\\s*([^<]*?)\\s*</${name}>`).exec(xml)?.[1] ?? '';
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-    // ---- target framework ------------------------------------------------
-    const tfv = prop('TargetFrameworkVersion');           // e.g. v4.7.2
-    const tfm = tfv ? `net${tfv.replace(/^v/, '').split('.').join('')}` : 'net48';
-
-    // ---- UI stack ---------------------------------------------------------
-    const useWinForms = /Include="System\.Windows\.Forms"/.test(xml)
-        || /<UseWindowsForms>\s*true/i.test(xml);
-    const useWpf = /Include="PresentationFramework"/.test(xml) || /<UseWPF>\s*true/i.test(xml);
-
-    // ---- assembly references ----------------------------------------------
-    // Keep non-framework references; ones resolved out of the NuGet packages
-    // folder are covered by the PackageReference conversion below.
-    const keptRefs: string[] = [];
-    for (const m of xml.matchAll(/<Reference\s+Include="([^"]+)"\s*(?:\/>|>([\s\S]*?)<\/Reference>)/g)) {
-        const name = m[1].split(',')[0].trim();
-        const body = m[2] ?? '';
-        const hint = /<HintPath>\s*([^<]+?)\s*<\/HintPath>/.exec(body)?.[1];
-        if (hint && /[\\/]packages[\\/]/i.test(hint)) { continue; }       // from packages.config
-        if (!hint && IMPLICIT_REFS.has(name.toLowerCase())) { continue; } // implicit in SDK style
-        keptRefs.push(hint
-            ? `    <Reference Include="${esc(name)}">\n      <HintPath>${esc(hint)}</HintPath>\n    </Reference>`
-            : `    <Reference Include="${esc(name)}" />`);
-    }
-
-    // ---- COM references ----------------------------------------------------
-    const comRefs = [...xml.matchAll(/<COMReference\s[\s\S]*?<\/COMReference>|<COMReference\s[^>]*\/>/g)]
-        .map(m => `    ${m[0].replace(/\n\s*/g, '\n    ')}`);
-    if (comRefs.length) {
-        warnings.push('COM references were carried over — they build in Visual Studio/MSBuild but may not with the plain dotnet CLI.');
-    }
-
-    // ---- NuGet packages -----------------------------------------------------
-    const packages: string[] = [];
-    const packagesConfig = path.join(dir, 'packages.config');
-    if (fs.existsSync(packagesConfig)) {
-        const cfg = fs.readFileSync(packagesConfig, 'utf8');
-        for (const m of cfg.matchAll(/<package\s+id="([^"]+)"\s+version="([^"]+)"[^>]*>/g)) {
-            packages.push(`    <PackageReference Include="${esc(m[1])}" Version="${esc(m[2])}" />`);
+    // A conditional or ambiguous TargetFrameworkVersion cannot be represented
+    // faithfully by one SDK-style TargetFramework property. Stop before writing.
+    const frameworkVersions: string[] = [];
+    for (const group of propertyGroups) {
+        const matches = [...group.inner.matchAll(/<TargetFrameworkVersion\b([^>]*)>([\s\S]*?)<\/TargetFrameworkVersion\s*>/gi)];
+        if (matches.length && getAttribute(group.startTag, 'Condition')) {
+            throw new Error('conditional TargetFrameworkVersion is not supported; convert this project manually');
+        }
+        for (const match of matches) {
+            if (getAttribute(`<TargetFrameworkVersion${match[1]}>`, 'Condition')) {
+                throw new Error('conditional TargetFrameworkVersion is not supported; convert this project manually');
+            }
+            frameworkVersions.push(xmlUnescape(match[2].trim()));
+        }
+        for (const profile of group.inner.matchAll(/<TargetFrameworkProfile\b[^>]*>([\s\S]*?)<\/TargetFrameworkProfile\s*>/gi)) {
+            if (xmlUnescape(profile[1].trim())) {
+                throw new Error('TargetFrameworkProfile is not supported by the automatic converter');
+            }
         }
     }
-
-    // ---- designer file generators ------------------------------------------
-    const genEntries: string[] = [];
-    if (fs.existsSync(path.join(dir, 'Properties', 'Settings.settings'))) {
-        genEntries.push(
-            `    <None Update="Properties\\Settings.settings">\n` +
-            `      <Generator>SettingsSingleFileGenerator</Generator>\n` +
-            `      <LastGenOutput>Settings.Designer.cs</LastGenOutput>\n` +
-            `    </None>`,
-            `    <Compile Update="Properties\\Settings.Designer.cs">\n` +
-            `      <AutoGen>True</AutoGen>\n` +
-            `      <DesignTimeSharedInput>True</DesignTimeSharedInput>\n` +
-            `      <DependentUpon>Settings.settings</DependentUpon>\n` +
-            `    </Compile>`);
+    const uniqueFrameworks = [...new Set(frameworkVersions.filter(Boolean))];
+    if (uniqueFrameworks.length !== 1 || !/^v\d+(?:\.\d+){1,2}$/i.test(uniqueFrameworks[0])) {
+        throw new Error('the project must have one unconditional .NET Framework TargetFrameworkVersion');
     }
-    if (fs.existsSync(path.join(dir, 'Properties', 'Resources.resx'))) {
-        genEntries.push(
-            `    <EmbeddedResource Update="Properties\\Resources.resx">\n` +
-            `      <Generator>ResXFileCodeGenerator</Generator>\n` +
-            `      <LastGenOutput>Resources.Designer.cs</LastGenOutput>\n` +
-            `    </EmbeddedResource>`,
-            `    <Compile Update="Properties\\Resources.Designer.cs">\n` +
-            `      <AutoGen>True</AutoGen>\n` +
-            `      <DesignTime>True</DesignTime>\n` +
-            `      <DependentUpon>Resources.resx</DependentUpon>\n` +
-            `    </Compile>`);
-    }
+    const tfm = `net${uniqueFrameworks[0].replace(/^v/i, '').replace(/\./g, '')}`;
 
-    // ---- custom build steps -------------------------------------------------
-    if (/<Import\s+Project="(?![^"]*Microsoft\.(?:CSharp|Common|VisualBasic)\.targets)[^"]*"/.test(xml)) {
-        warnings.push('Custom .targets imports were NOT carried over — re-add them manually if the build needs them.');
-    }
-
-    // ---- assemble ------------------------------------------------------------
-    const props: string[] = [];
-    const addProp = (name: string, value: string) => {
-        if (value) { props.push(`    <${name}>${esc(value)}</${name}>`); }
+    const prop = (name: string) => {
+        const match = new RegExp(`<${name}\\b[^>]*>\\s*([^<]*?)\\s*</${name}>`, 'i').exec(semanticXml);
+        return match ? xmlUnescape(match[1]) : '';
     };
-    addProp('OutputType', prop('OutputType') || 'WinExe');
-    addProp('TargetFramework', tfm);
-    if (useWinForms) { addProp('UseWindowsForms', 'true'); }
-    if (useWpf) { addProp('UseWPF', 'true'); }
-    addProp('RootNamespace', prop('RootNamespace'));
-    addProp('AssemblyName', prop('AssemblyName'));
-    addProp('ApplicationIcon', prop('ApplicationIcon'));
-    addProp('ApplicationManifest', prop('ApplicationManifest'));
-    addProp('StartupObject', prop('StartupObject'));
-    addProp('LangVersion', prop('LangVersion'));
-    if (prop('PlatformTarget') && prop('PlatformTarget').toLowerCase() !== 'anycpu') {
-        addProp('PlatformTarget', prop('PlatformTarget'));
-    }
-    // The old AssemblyInfo.cs stays the source of truth for version info.
-    addProp('GenerateAssemblyInfo', 'false');
-    addProp('AutoGenerateBindingRedirects', 'true');
+    const useWinForms = /<Reference\b[^>]*\bInclude=["']System\.Windows\.Forms(?:,|["'])/i.test(semanticXml)
+        || /<UseWindowsForms>\s*true/i.test(semanticXml);
+    const useWpf = /<Reference\b[^>]*\bInclude=["']PresentationFramework(?:,|["'])/i.test(semanticXml)
+        || /<UseWPF>\s*true/i.test(semanticXml);
 
-    const groups: string[] = [`  <PropertyGroup>\n${props.join('\n')}\n  </PropertyGroup>`];
-    const preBuild = prop('PreBuildEvent');
-    const postBuild = prop('PostBuildEvent');
-    if (preBuild || postBuild) {
-        const events: string[] = [];
-        if (preBuild) { events.push(`    <PreBuildEvent>${esc(preBuild)}</PreBuildEvent>`); }
-        if (postBuild) { events.push(`    <PostBuildEvent>${esc(postBuild)}</PostBuildEvent>`); }
-        groups.push(`  <PropertyGroup>\n${events.join('\n')}\n  </PropertyGroup>`);
+    const packagesConfig = path.join(dir, 'packages.config');
+    const migratePackages = fs.existsSync(packagesConfig);
+    const packages = migratePackages ? readPackagesConfig(packagesConfig) : [];
+    const existingPackageIds = new Set<string>();
+    const packageReferences: string[] = [];
+    const removes = new Set<string>();
+    const preservedProperties: string[] = [];
+    const preservedItems: string[] = [];
+    let hasComReferences = false;
+
+    for (const element of topLevel) {
+        const kind = element.name.toLowerCase();
+        if (kind === 'propertygroup') {
+            let raw = removeElement(rawWithoutOuterIndent(element.raw), 'TargetFrameworkVersion');
+            raw = removeElement(raw, 'TargetFrameworkProfile');
+            raw = removeElement(raw, 'GenerateAssemblyInfo');
+            preservedProperties.push(normalizeEol(raw, eol));
+            continue;
+        }
+
+        if (kind === 'itemgroup') {
+            const kept: string[] = [];
+            for (const item of parseElements(element.inner, 'ItemGroup')) {
+                const itemKind = item.name.toLowerCase();
+                const include = getAttribute(item.startTag, 'Include');
+
+                if (itemKind === 'packagereference' && include) {
+                    existingPackageIds.add(include.toLowerCase());
+                }
+                if (migratePackages && (itemKind === 'none' || itemKind === 'content')
+                    && include?.replace(/\\/g, '/').toLowerCase() === 'packages.config') {
+                    continue;
+                }
+                if (itemKind === 'reference') {
+                    const hintMatch = /<HintPath\b[^>]*>\s*([^<]+?)\s*<\/HintPath\s*>/i.exec(item.inner);
+                    const hint = hintMatch ? xmlUnescape(hintMatch[1]) : undefined;
+                    if (migratePackages && hint && /[\\/]packages[\\/]/i.test(hint)) {
+                        if (!packagePathMatches(hint, packages)) {
+                            throw new Error(`cannot map package reference HintPath "${hint}" to packages.config`);
+                        }
+                        continue;
+                    }
+                }
+                if (itemKind === 'comreference') { hasComReferences = true; }
+
+                // SDK default globs would otherwise add an explicit classic
+                // item twice. Remove the implicit item, then retain the exact
+                // original Include, Condition, Link, Generator, and metadata.
+                if (include && DEFAULT_ITEM_TYPES.has(itemKind)) {
+                    removes.add(`    <${item.name} Remove="${xmlEscape(include)}" />`);
+                }
+                kept.push(indentXml(normalizeEol(item.raw, eol), 4, eol));
+            }
+            if (kept.length) {
+                preservedItems.push(`${element.startTag}${eol}${kept.join(eol)}${eol}  </ItemGroup>`);
+            }
+            continue;
+        }
+
+        if (kind === 'import') {
+            const imported = getAttribute(element.startTag, 'Project') ?? '';
+            if (isStandardImport(imported)) { continue; }
+            if (migratePackages && isNugetImport(imported, packages)) { continue; }
+            throw new Error(`custom import "${imported || element.raw.trim()}" cannot be converted safely`);
+        }
+
+        if (kind === 'target' && migratePackages
+            && getAttribute(element.startTag, 'Name')?.toLowerCase() === 'ensurenugetpackagebuildimports') {
+            continue;
+        }
+
+        throw new Error(`top-level <${element.name}> cannot be converted safely; keep the legacy project or migrate it manually`);
+    }
+
+    if (hasComReferences) {
+        warnings.push('COM references were carried over — they build in Visual Studio/MSBuild but may not with the plain dotnet CLI.');
+    }
+    if (prop('PreBuildEvent') || prop('PostBuildEvent')) {
         warnings.push('Build events were carried over — check any $(SolutionDir)-style macros they use.');
     }
-    if (packages.length) { groups.push(`  <ItemGroup>\n${packages.join('\n')}\n  </ItemGroup>`); }
-    if (keptRefs.length) { groups.push(`  <ItemGroup>\n${keptRefs.join('\n')}\n  </ItemGroup>`); }
-    if (comRefs.length) { groups.push(`  <ItemGroup>\n${comRefs.join('\n')}\n  </ItemGroup>`); }
-    if (genEntries.length) { groups.push(`  <ItemGroup>\n${genEntries.join('\n')}\n  </ItemGroup>`); }
 
-    const newXml = `<Project Sdk="Microsoft.NET.Sdk">\n\n${groups.join('\n\n')}\n\n</Project>\n`;
+    for (const pkg of packages) {
+        if (existingPackageIds.has(pkg.id.toLowerCase())) { continue; }
+        packageReferences.push(pkg.developmentDependency
+            ? `    <PackageReference Include="${xmlEscape(pkg.id)}" Version="${xmlEscape(pkg.version)}" PrivateAssets="all" />`
+            : `    <PackageReference Include="${xmlEscape(pkg.id)}" Version="${xmlEscape(pkg.version)}" />`);
+    }
 
-    // ---- write (backup first, then atomic-ish swap) ---------------------------
+    const mainProps = [`    <TargetFramework>${xmlEscape(tfm)}</TargetFramework>`];
+    if (useWinForms) { mainProps.push('    <UseWindowsForms>true</UseWindowsForms>'); }
+    if (useWpf) { mainProps.push('    <UseWPF>true</UseWPF>'); }
+    const hasAssemblyInfo = fs.existsSync(path.join(dir, 'Properties', 'AssemblyInfo.cs'))
+        || /<Compile\b[^>]*\bInclude=["'][^"']*AssemblyInfo\.cs["']/i.test(semanticXml);
+    const oldGenerateAssemblyInfo = prop('GenerateAssemblyInfo');
+    if (hasAssemblyInfo) { mainProps.push('    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>'); }
+    else if (oldGenerateAssemblyInfo) {
+        mainProps.push(`    <GenerateAssemblyInfo>${xmlEscape(oldGenerateAssemblyInfo)}</GenerateAssemblyInfo>`);
+    }
+
+    const groups: string[] = [
+        `  <PropertyGroup>${eol}${mainProps.join(eol)}${eol}  </PropertyGroup>`,
+        ...preservedProperties.map(g => indentXml(g, 2, eol))
+    ];
+    if (removes.size) {
+        groups.push(`  <ItemGroup>${eol}${[...removes].join(eol)}${eol}  </ItemGroup>`);
+    }
+    groups.push(...preservedItems.map(g => indentXml(g, 2, eol)));
+    if (packageReferences.length) {
+        groups.push(`  <ItemGroup>${eol}${packageReferences.join(eol)}${eol}  </ItemGroup>`);
+    }
+
+    const newXml = `<Project Sdk="Microsoft.NET.Sdk">${eol}${eol}${groups.join(eol + eol)}${eol}${eol}</Project>${eol}`;
     const backup = `${project}.legacy.bak`;
+    replaceProjectAtomically(project, newXml, backup, migratePackages ? packagesConfig : undefined);
+    return { backup, warnings };
+}
+
+function projectBody(xml: string): string {
+    const open = /<Project\b[^>]*>/i.exec(xml);
+    if (!open) { throw new Error('invalid project XML: <Project> was not found'); }
+    const closeMatches = [...xml.matchAll(/<\/Project\s*>/gi)];
+    const close = closeMatches[closeMatches.length - 1];
+    if (!close || close.index === undefined || close.index < open.index + open[0].length) {
+        throw new Error('invalid project XML: </Project> was not found');
+    }
+    return xml.slice(open.index + open[0].length, close.index);
+}
+
+/** Parse direct XML child elements while retaining their exact source text. */
+function parseElements(fragment: string, context: string): XmlElement[] {
+    const elements: XmlElement[] = [];
+    let i = 0;
+    while (i < fragment.length) {
+        if (/\s/.test(fragment[i])) { i++; continue; }
+        if (fragment.startsWith('<!--', i)) {
+            const end = fragment.indexOf('-->', i + 4);
+            if (end < 0) { throw new Error(`invalid XML comment in ${context}`); }
+            i = end + 3;
+            continue;
+        }
+        if (fragment.startsWith('<?', i)) {
+            const end = fragment.indexOf('?>', i + 2);
+            if (end < 0) { throw new Error(`invalid processing instruction in ${context}`); }
+            i = end + 2;
+            continue;
+        }
+        if (fragment[i] !== '<') { throw new Error(`unsupported text in ${context}`); }
+
+        const start = i;
+        const startEnd = findTagEnd(fragment, start);
+        const startTag = fragment.slice(start, startEnd + 1);
+        const nameMatch = /^<\s*([A-Za-z_][\w:.-]*)\b/.exec(startTag);
+        if (!nameMatch || /^<\s*\//.test(startTag) || /^<\s*!/.test(startTag)) {
+            throw new Error(`unsupported XML construct in ${context}`);
+        }
+        const name = nameMatch[1];
+        if (/\/\s*>$/.test(startTag)) {
+            elements.push({ name, startTag, inner: '', raw: startTag });
+            i = startEnd + 1;
+            continue;
+        }
+
+        const stack = [name.toLowerCase()];
+        let cursor = startEnd + 1;
+        let closeStart = -1;
+        let closeEnd = -1;
+        while (stack.length) {
+            const next = fragment.indexOf('<', cursor);
+            if (next < 0) { throw new Error(`unclosed <${name}> in ${context}`); }
+            if (fragment.startsWith('<!--', next)) {
+                const end = fragment.indexOf('-->', next + 4);
+                if (end < 0) { throw new Error(`invalid XML comment in ${context}`); }
+                cursor = end + 3;
+                continue;
+            }
+            if (fragment.startsWith('<![CDATA[', next)) {
+                const end = fragment.indexOf(']]>', next + 9);
+                if (end < 0) { throw new Error(`invalid CDATA in ${context}`); }
+                cursor = end + 3;
+                continue;
+            }
+            if (fragment.startsWith('<?', next)) {
+                const end = fragment.indexOf('?>', next + 2);
+                if (end < 0) { throw new Error(`invalid processing instruction in ${context}`); }
+                cursor = end + 2;
+                continue;
+            }
+            const tagEnd = findTagEnd(fragment, next);
+            const tag = fragment.slice(next, tagEnd + 1);
+            const closing = /^<\s*\/\s*([A-Za-z_][\w:.-]*)\s*>$/.exec(tag);
+            if (closing) {
+                const expected = stack.pop();
+                if (closing[1].toLowerCase() !== expected) { throw new Error(`mismatched XML tag in ${context}`); }
+                if (!stack.length) { closeStart = next; closeEnd = tagEnd; break; }
+            } else if (!/\/\s*>$/.test(tag)) {
+                const child = /^<\s*([A-Za-z_][\w:.-]*)\b/.exec(tag);
+                if (!child || /^<\s*!/.test(tag)) { throw new Error(`unsupported XML construct in ${context}`); }
+                stack.push(child[1].toLowerCase());
+            }
+            cursor = tagEnd + 1;
+        }
+        elements.push({
+            name,
+            startTag,
+            inner: fragment.slice(startEnd + 1, closeStart),
+            raw: fragment.slice(start, closeEnd + 1)
+        });
+        i = closeEnd + 1;
+    }
+    return elements;
+}
+
+function findTagEnd(xml: string, start: number): number {
+    let quote = '';
+    for (let i = start + 1; i < xml.length; i++) {
+        const ch = xml[i];
+        if (quote) {
+            if (ch === quote) { quote = ''; }
+        } else if (ch === '"' || ch === '\'') {
+            quote = ch;
+        } else if (ch === '>') {
+            return i;
+        }
+    }
+    throw new Error('unterminated XML tag');
+}
+
+function getAttribute(startTag: string, name: string): string | undefined {
+    const match = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(startTag);
+    return match ? xmlUnescape(match[1] ?? match[2] ?? '') : undefined;
+}
+
+function xmlEscape(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function xmlUnescape(s: string): string {
+    return s
+        .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCodePoint(parseInt(n, 16)))
+        .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(parseInt(n, 10)))
+        .replace(/&quot;/g, '"').replace(/&apos;/g, '\'')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+function removeElement(xml: string, name: string): string {
+    return xml
+        .replace(new RegExp(`<${name}\\b[^>]*>[\\s\\S]*?<\\/${name}\\s*>`, 'gi'), '')
+        .replace(new RegExp(`<${name}\\b[^>]*/\\s*>`, 'gi'), '');
+}
+
+function readPackagesConfig(file: string): PackageSpec[] {
+    const xml = fs.readFileSync(file, 'utf8');
+    const packages = new Map<string, PackageSpec>();
+    for (const match of xml.matchAll(/<package\b[^>]*\/?>/gi)) {
+        const tag = match[0];
+        const id = getAttribute(tag, 'id');
+        const version = getAttribute(tag, 'version');
+        if (!id || !version) { throw new Error('packages.config contains a package without id/version'); }
+        const key = id.toLowerCase();
+        if (packages.has(key)) { throw new Error(`packages.config contains duplicate package "${id}"`); }
+        packages.set(key, {
+            id,
+            version,
+            developmentDependency: getAttribute(tag, 'developmentDependency')?.toLowerCase() === 'true'
+        });
+    }
+    return [...packages.values()];
+}
+
+function packagePathMatches(value: string, packages: PackageSpec[]): boolean {
+    const normalized = value.replace(/\\/g, '/').toLowerCase();
+    return packages.some(p => normalized.includes(`packages/${`${p.id}.${p.version}`.toLowerCase()}/`));
+}
+
+function isStandardImport(value: string): boolean {
+    const normalized = value.replace(/\\/g, '/').toLowerCase();
+    return normalized.endsWith('/microsoft.csharp.targets')
+        || normalized.endsWith('/microsoft.common.props');
+}
+
+function isNugetImport(value: string, packages: PackageSpec[]): boolean {
+    const normalized = value.replace(/\\/g, '/').toLowerCase();
+    return normalized.endsWith('/.nuget/nuget.targets') || packagePathMatches(value, packages);
+}
+
+function normalizeEol(text: string, eol: string): string {
+    return text.replace(/\r\n|\r|\n/g, eol).trim();
+}
+
+function indentXml(text: string, spaces: number, eol: string): string {
+    const prefix = ' '.repeat(spaces);
+    return text.split(eol).map(line => prefix + line.trimEnd()).join(eol);
+}
+
+function rawWithoutOuterIndent(text: string): string {
+    return text.trim();
+}
+
+/** Write and verify a sibling temp file, then atomically replace the project. */
+function replaceProjectAtomically(project: string, contents: string, backup: string, packagesConfig?: string): void {
+    const packagesBackup = packagesConfig ? `${packagesConfig}.bak` : undefined;
     if (fs.existsSync(backup)) {
         throw new Error(`${path.basename(backup)} already exists — a previous conversion backup would be overwritten`);
     }
-    fs.copyFileSync(project, backup);
-    fs.writeFileSync(project, newXml, 'utf8');
-    if (packages.length) {
-        try { fs.renameSync(packagesConfig, `${packagesConfig}.bak`); } catch { /* keep going — harmless leftover */ }
+    if (packagesBackup && fs.existsSync(packagesBackup)) {
+        throw new Error(`${path.basename(packagesBackup)} already exists — the packages.config backup would be overwritten`);
     }
-    return { backup, warnings };
+
+    const stat = fs.statSync(project);
+    if (!stat.isFile()) { throw new Error(`${path.basename(project)} is not a regular file`); }
+    const temp = `${project}.uimaker-${process.pid}-${Date.now()}.tmp`;
+    let backupCreated = false;
+    let packagesMoved = false;
+    let fd: number | undefined;
+    try {
+        fd = fs.openSync(temp, 'wx', stat.mode);
+        fs.writeFileSync(fd, contents, 'utf8');
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+        fd = undefined;
+        if (fs.readFileSync(temp, 'utf8') !== contents) { throw new Error('temporary project verification failed'); }
+
+        fs.copyFileSync(project, backup, fs.constants.COPYFILE_EXCL);
+        backupCreated = true;
+        if (packagesConfig && packagesBackup) {
+            fs.renameSync(packagesConfig, packagesBackup);
+            packagesMoved = true;
+        }
+        // rename() is an atomic replacement on the same volume; the original
+        // remains intact if this operation fails.
+        fs.renameSync(temp, project);
+    } catch (err) {
+        if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* best effort */ } }
+        if (packagesMoved && packagesConfig && packagesBackup) {
+            try { fs.renameSync(packagesBackup, packagesConfig); } catch { /* surfaced below */ }
+        }
+        if (fs.existsSync(temp)) { try { fs.unlinkSync(temp); } catch { /* best effort */ } }
+        if (backupCreated && fs.existsSync(project)) {
+            try { fs.unlinkSync(backup); } catch { /* keep the safety copy */ }
+        }
+        throw err;
+    }
 }

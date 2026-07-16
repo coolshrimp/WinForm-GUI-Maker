@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer, side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps (WPF & WinForms, C# & VB) inside VS Code.",
-    "version": "0.11.0",
+    "version": "0.11.1",
     "publisher": "coolshrimp",
     "license": "MIT",
     "engines": {
@@ -26,6 +26,16 @@
         "onStartupFinished"
     ],
     "main": "./out/extension.js",
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": "limited",
+            "description": "Visual editing remains available, but UI Maker will not execute .NET, NuGet, MSBuild, or conversion commands until the workspace is trusted."
+        },
+        "virtualWorkspaces": {
+            "supported": false,
+            "description": "UI Maker requires local project files and the installed .NET toolchain."
+        }
+    },
     "contributes": {
         "viewsContainers": {
             "activitybar": [
@@ -414,6 +424,8 @@
     },
     "scripts": {
         "compile": "tsc -p ./",
+        "test": "npm run compile && node --test \"tests/*.test.js\"",
+        "check": "npm run compile && node --check media/designer.js && node --test \"tests/*.test.js\"",
         "watch": "tsc -watch -p ./",
         "vscode:prepublish": "npm run compile"
     },

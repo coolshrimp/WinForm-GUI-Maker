@@ -45,7 +45,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // --- Commands -----------------------------------------------------------
     context.subscriptions.push(
-        vscode.commands.registerCommand('uimaker.newProject', () => newProject()),
+        vscode.commands.registerCommand('uimaker.newProject', async () => {
+            if (await requireWorkspaceTrust('create a project with the .NET CLI')) {
+                return newProject();
+            }
+        }),
 
         // Re-open the given (or active) designable file in the designer editor.
         vscode.commands.registerCommand('uimaker.openDesigner', (uri?: vscode.Uri) => {
@@ -69,27 +73,47 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Build / run / debug / release all resolve the project nearest to the
         // active editor so multi-project workspaces behave sensibly.
-        vscode.commands.registerCommand('uimaker.build', () => dotnet.build()),
-        vscode.commands.registerCommand('uimaker.run', () => dotnet.run()),
-        vscode.commands.registerCommand('uimaker.debug', () => dotnet.debug()),
-        vscode.commands.registerCommand('uimaker.release', () => dotnet.release()),
+        vscode.commands.registerCommand('uimaker.build', async () => {
+            if (await requireWorkspaceTrust('build this project')) { return dotnet.build(); }
+        }),
+        vscode.commands.registerCommand('uimaker.run', async () => {
+            if (await requireWorkspaceTrust('run this project')) { return dotnet.run(); }
+        }),
+        vscode.commands.registerCommand('uimaker.debug', async () => {
+            if (await requireWorkspaceTrust('debug this project')) { return dotnet.debug(); }
+        }),
+        vscode.commands.registerCommand('uimaker.release', async () => {
+            if (await requireWorkspaceTrust('publish this project')) { return dotnet.release(); }
+        }),
         vscode.commands.registerCommand('uimaker.stop', () => dotnet.stop()),
-        vscode.commands.registerCommand('uimaker.runToggle', () => dotnet.runToggle()),
-        vscode.commands.registerCommand('uimaker.debugToggle', () => dotnet.debugToggle()),
+        vscode.commands.registerCommand('uimaker.runToggle', async () => {
+            if (dotnet.state === 'running' || await requireWorkspaceTrust('run this project')) {
+                return dotnet.runToggle();
+            }
+        }),
+        vscode.commands.registerCommand('uimaker.debugToggle', async () => {
+            if (dotnet.state === 'debugging' || await requireWorkspaceTrust('debug this project')) {
+                return dotnet.debugToggle();
+            }
+        }),
 
         // The built-in "How to Build an App" guide (side panel + palette).
         vscode.commands.registerCommand('uimaker.openGuide', () => openGuide()),
 
         // Settings editor for the app being built (Properties.Settings grid).
-        vscode.commands.registerCommand('uimaker.appSettings', () => openAppSettings(dotnet)),
+        vscode.commands.registerCommand('uimaker.appSettings', (project?: string) => openAppSettings(dotnet, project)),
 
         // Visual Studio-style project property page and NuGet manager.
         vscode.commands.registerCommand('uimaker.projectProperties', () => openProjectProperties(dotnet)),
-        vscode.commands.registerCommand('uimaker.nugetPackages', () => openNugetPackages(dotnet)),
+        vscode.commands.registerCommand('uimaker.nugetPackages', (project?: string) => openNugetPackages(dotnet, project)),
 
         // Classic .NET Framework project -> modern SDK format (fixes the
         // C# Dev Kit "project file is in unsupported format" warning).
-        vscode.commands.registerCommand('uimaker.convertToSdk', () => convertToSdkStyle(dotnet)),
+        vscode.commands.registerCommand('uimaker.convertToSdk', async (project?: string) => {
+            if (await requireWorkspaceTrust('convert this project')) {
+                return convertToSdkStyle(dotnet, project);
+            }
+        }),
 
         // Show the current WORKING project folder in the OS file manager
         // (falls back to the workspace root when no project is active).
@@ -197,4 +221,18 @@ async function refreshProjectContext(): Promise<void> {
             item.hide();
         }
     }
+}
+
+/** Block code/tool execution in Restricted Mode while keeping visual editing available. */
+async function requireWorkspaceTrust(action: string): Promise<boolean> {
+    if (vscode.workspace.isTrusted) { return true; }
+    const manage = 'Manage Workspace Trust';
+    const choice = await vscode.window.showWarningMessage(
+        `UI Maker cannot ${action} while this workspace is in Restricted Mode.`,
+        manage
+    );
+    if (choice === manage) {
+        await vscode.commands.executeCommand('workbench.trust.manage');
+    }
+    return false;
 }

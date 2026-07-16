@@ -9,6 +9,11 @@
     box-sizing: border-box;
 }
 
+:where(button, input, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--vscode-focusBorder, #007acc);
+    outline-offset: 1px;
+}
+
 html, body {
     height: 100%;
     margin: 0;
@@ -36,6 +41,7 @@ html, body {
     border-bottom: 1px solid var(--vscode-panel-border, #444);
     background: var(--vscode-sideBar-background);
     flex: 0 0 auto;
+    flex-wrap: wrap;
 }
 
 .ff-brand {
@@ -1136,4 +1142,43 @@ html, body {
 
 .ff-web-glyph {
     font-size: 18px;
+}
+
+/* Keep all three work areas usable in a narrow editor group. */
+@media (max-width: 900px) {
+    #ff-toolbox { flex-basis: 145px; }
+    #ff-props { flex-basis: 260px; }
+    #ff-canvas-host { padding: 12px; }
+    #ff-toolbar { gap: 6px; padding-inline: 6px; }
+}
+
+@media (max-width: 700px) {
+    #ff-main {
+        display: grid;
+        grid-template-columns: 130px minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) minmax(190px, 34vh);
+    }
+
+    #ff-toolbox {
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+    }
+
+    #ff-canvas-host {
+        grid-column: 2;
+        grid-row: 1;
+        min-width: 0;
+    }
+
+    #ff-props {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: auto;
+        min-width: 0;
+        border-left: 0;
+        border-top: 1px solid var(--vscode-panel-border, #444);
+    }
+
+    .ff-brand { width: 100%; }
 }

@@ -16,7 +16,12 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DotnetTools } from './dotnetTools';
+import { webviewNonce } from './webviewSecurity';
+import { replaceFileAtomically } from './atomicFile';
 import { readProjectInfo, installedSdkMajors, isLtsDotnet, frameworkLabel } from './projectInfo';
+import { getMsbuildProperty, setMsbuildProperty } from './msbuildXml';
+
+export { setMsbuildProperty } from './msbuildXml';
 
 /** One editable MSBuild property shown on the page. */
 interface PropField {
@@ -42,41 +47,74 @@ let panel: vscode.WebviewPanel | undefined;
 /** Project currently loaded in the (reused) panel — the save handler and
  *  message listeners always read this, never a captured stale value. */
 let currentProject: string | undefined;
+/** Invalidates asynchronous renders when the user switches projects, closes
+ *  the panel, or starts a newer reload before an older one completes. */
+let renderGeneration = 0;
 
 /** Open the Project Properties editor for the working project. */
 export async function openProjectProperties(dotnet: DotnetTools): Promise<void> {
     const project = await dotnet.findProject();
     if (!project) { return; }
 
-    currentProject = project;
-    const html = await buildHtml(project);
+    const generation = ++renderGeneration;
+    let html: string;
+    try {
+        html = await buildHtml(project);
+    } catch (err) {
+        if (generation === renderGeneration) {
+            vscode.window.showErrorMessage(`UI Maker: could not load the project properties — ${err}`);
+        }
+        return;
+    }
+    if (generation !== renderGeneration) { return; }
 
     if (panel) {
-        panel.title = `${path.basename(project)} — Properties`;
-        panel.webview.html = html;
-        panel.reveal();
+        const targetPanel = panel;
+        currentProject = project;
+        targetPanel.title = `${path.basename(project)} — Properties`;
+        targetPanel.webview.html = html;
+        targetPanel.reveal();
         return;
     }
 
-    panel = vscode.window.createWebviewPanel(
+    const createdPanel = vscode.window.createWebviewPanel(
         'uimaker.projectProperties',
         `${path.basename(project)} — Properties`,
         vscode.ViewColumn.One,
         { enableScripts: true }
     );
-    panel.onDidDispose(() => { panel = undefined; currentProject = undefined; });
-    panel.webview.html = html;
+    panel = createdPanel;
+    currentProject = project;
+    createdPanel.onDidDispose(() => {
+        if (panel === createdPanel) {
+            panel = undefined;
+            currentProject = undefined;
+            renderGeneration++;
+        }
+    });
+    createdPanel.webview.html = html;
 
-    panel.webview.onDidReceiveMessage(async (msg: { type: string; values?: Record<string, string>; field?: string; exts?: string[] }) => {
+    createdPanel.webview.onDidReceiveMessage(async (msg: { type: string; values?: Record<string, string>; field?: string; exts?: string[] }) => {
         const proj = currentProject;
-        if (!proj || !panel) { return; }
+        if (!proj || panel !== createdPanel) { return; }
         if (msg.type === 'save' && msg.values) {
             try {
                 saveProperties(proj, msg.values);
                 vscode.window.showInformationMessage(`UI Maker: saved ${path.basename(proj)} properties.`);
-                panel.webview.html = await buildHtml(proj); // reload from disk
             } catch (err) {
                 vscode.window.showErrorMessage(`UI Maker: could not save the project file — ${err}`);
+                return;
+            }
+            const reloadGeneration = ++renderGeneration;
+            try {
+                const refreshed = await buildHtml(proj);
+                if (reloadGeneration === renderGeneration && panel === createdPanel && currentProject === proj) {
+                    createdPanel.webview.html = refreshed;
+                }
+            } catch (err) {
+                if (reloadGeneration === renderGeneration && panel === createdPanel && currentProject === proj) {
+                    vscode.window.showWarningMessage(`UI Maker: properties were saved, but the page could not reload — ${err}`);
+                }
             }
         } else if (msg.type === 'browse' && msg.field) {
             const exts = msg.exts?.length ? msg.exts : ['*'];
@@ -86,21 +124,32 @@ export async function openProjectProperties(dotnet: DotnetTools): Promise<void> 
                 defaultUri: vscode.Uri.file(path.dirname(proj)),
                 filters: { 'Files': exts }
             });
-            if (picked?.length) {
+            if (picked?.length && panel === createdPanel && currentProject === proj) {
                 // VS stores these as project-relative paths.
                 const rel = path.relative(path.dirname(proj), picked[0].fsPath);
-                void panel.webview.postMessage({ type: 'picked', field: msg.field, value: rel });
+                void createdPanel.webview.postMessage({ type: 'picked', field: msg.field, value: rel });
             }
         } else if (msg.type === 'openAppSettings') {
-            void vscode.commands.executeCommand('uimaker.appSettings');
+            void vscode.commands.executeCommand('uimaker.appSettings', proj);
         } else if (msg.type === 'openNuget') {
-            void vscode.commands.executeCommand('uimaker.nugetPackages');
+            void vscode.commands.executeCommand('uimaker.nugetPackages', proj);
         } else if (msg.type === 'openProjectFile') {
             await vscode.window.showTextDocument(vscode.Uri.file(proj));
         } else if (msg.type === 'convertToSdk') {
-            await vscode.commands.executeCommand('uimaker.convertToSdk');
+            const convertGeneration = ++renderGeneration;
+            await vscode.commands.executeCommand('uimaker.convertToSdk', proj);
             // Rebuild the page — after a conversion the project is SDK-style.
-            if (panel && currentProject) { panel.webview.html = await buildHtml(currentProject); }
+            if (convertGeneration !== renderGeneration || panel !== createdPanel || currentProject !== proj) { return; }
+            try {
+                const refreshed = await buildHtml(proj);
+                if (convertGeneration === renderGeneration && panel === createdPanel && currentProject === proj) {
+                    createdPanel.webview.html = refreshed;
+                }
+            } catch (err) {
+                if (convertGeneration === renderGeneration && panel === createdPanel && currentProject === proj) {
+                    vscode.window.showWarningMessage(`UI Maker: conversion finished, but the page could not reload — ${err}`);
+                }
+            }
         }
     });
 }
@@ -109,7 +158,7 @@ export async function openProjectProperties(dotnet: DotnetTools): Promise<void> 
 
 /** Read one MSBuild property value out of project XML ('' when absent). */
 function propValue(xml: string, name: string): string {
-    return new RegExp(`<${name}>\\s*([^<]*?)\\s*</${name}>`).exec(xml)?.[1] ?? '';
+    return getMsbuildProperty(xml, name);
 }
 
 async function buildFields(project: string): Promise<{ fields: PropField[]; sdkStyle: boolean }> {
@@ -117,14 +166,20 @@ async function buildFields(project: string): Promise<{ fields: PropField[]; sdkS
     const info = readProjectInfo(project);
     const sdkStyle = info?.sdkStyle ?? true;
     const baseName = path.basename(project).replace(/\.(cs|vb)proj$/i, '');
+    const multiTarget = sdkStyle && /<TargetFrameworks\b/.test(xml);
+    const targetProperty = sdkStyle
+        ? (multiTarget ? 'TargetFrameworks' : 'TargetFramework')
+        : 'TargetFrameworkVersion';
+    const targetValue = propValue(xml, targetProperty);
 
     // Target-framework choices: current value + every installed SDK. Desktop
     // UI frameworks need the -windows TFM on modern .NET.
     const needsWindows = !!(info?.useWPF || info?.useWinForms);
     const tfmOptions: Array<[string, string]> = [];
-    if (sdkStyle) {
-        const current = propValue(xml, 'TargetFramework');
-        const majors = await installedSdkMajors();
+    if (sdkStyle && !multiTarget) {
+        // SDK discovery launches `dotnet`; keep property viewing/editing
+        // available in Restricted Mode without starting workspace processes.
+        const majors = vscode.workspace.isTrusted ? await installedSdkMajors() : [];
         const seen = new Set<string>();
         const push = (tfm: string) => {
             if (tfm && !seen.has(tfm)) {
@@ -132,16 +187,35 @@ async function buildFields(project: string): Promise<{ fields: PropField[]; sdkS
                 tfmOptions.push([tfm, `${frameworkLabel(tfm)}${/^net(\d+)\.0/.test(tfm) && isLtsDotnet(Number(/^net(\d+)\./.exec(tfm)![1])) ? ' (LTS)' : ''}`]);
             }
         };
-        push(current);
+        push(targetValue);
         for (const major of majors.filter(m => m >= 5)) {
             push(needsWindows ? `net${major}.0-windows` : `net${major}.0`);
         }
-    } else {
-        const current = propValue(xml, 'TargetFrameworkVersion');
-        for (const v of [current, 'v4.8.1', 'v4.8', 'v4.7.2', 'v4.7', 'v4.6.2']) {
+    } else if (!sdkStyle) {
+        for (const v of [targetValue, 'v4.8.1', 'v4.8', 'v4.7.2', 'v4.7', 'v4.6.2']) {
             if (v && !tfmOptions.some(o => o[0] === v)) { tfmOptions.push([v, frameworkLabel(v)]); }
         }
     }
+
+    const targetField: PropField = multiTarget
+        ? {
+            name: targetProperty,
+            label: 'Target frameworks',
+            description: 'The semicolon-separated .NET target frameworks this project builds for.',
+            value: targetValue,
+            kind: 'text',
+            placeholder: 'net8.0-windows;net10.0-windows',
+            section: 'Application'
+        }
+        : {
+            name: targetProperty,
+            label: 'Target framework',
+            description: 'The version of .NET that the application targets.',
+            value: targetValue,
+            kind: 'select',
+            section: 'Application',
+            options: tfmOptions
+        };
 
     const fields: PropField[] = [
         {
@@ -155,12 +229,7 @@ async function buildFields(project: string): Promise<{ fields: PropField[]; sdkS
                 ...(propValue(xml, 'OutputType') === '' ? [['', '(default)'] as [string, string]] : [])
             ]
         },
-        {
-            name: sdkStyle ? 'TargetFramework' : 'TargetFrameworkVersion', label: 'Target framework',
-            description: 'The version of .NET that the application targets.',
-            value: sdkStyle ? propValue(xml, 'TargetFramework') : propValue(xml, 'TargetFrameworkVersion'),
-            kind: 'select', section: 'Application', options: tfmOptions
-        },
+        targetField,
         {
             name: 'AssemblyName', label: 'Assembly name',
             description: 'The name of the output file that will hold the assembly manifest (your .exe name).',
@@ -234,42 +303,27 @@ function xmlEscape(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/**
- * Set/update/remove one property in project XML. Empty value removes the
- * tag so the SDK default applies again (but never removes the target
- * framework — a project must always declare one).
- */
-export function setMsbuildProperty(xml: string, name: string, value: string): string {
-    const existing = new RegExp(`(<${name}>)\\s*[\\s\\S]*?\\s*(</${name}>)`);
-    if (value === '') {
-        if (name === 'TargetFramework' || name === 'TargetFrameworkVersion') { return xml; }
-        // Remove the whole line when the tag sits alone on it.
-        return xml.replace(new RegExp(`[ \\t]*<${name}>[\\s\\S]*?</${name}>[ \\t]*\\r?\\n?`), '');
-    }
-    if (existing.test(xml)) {
-        return xml.replace(existing, `$1${xmlEscape(value)}$2`);
-    }
-    // Insert into the first unconditional <PropertyGroup>.
-    const eol = xml.includes('\r\n') ? '\r\n' : '\n';
-    const group = /<PropertyGroup(?![^>]*Condition)[^>]*>/.exec(xml);
-    if (group) {
-        const at = group.index + group[0].length;
-        return `${xml.slice(0, at)}${eol}    <${name}>${xmlEscape(value)}</${name}>${xml.slice(at)}`;
-    }
-    // No unconditional PropertyGroup at all — add one before </Project>.
-    return xml.replace(/<\/Project>/,
-        `  <PropertyGroup>${eol}    <${name}>${xmlEscape(value)}</${name}>${eol}  </PropertyGroup>${eol}</Project>`);
-}
-
 function saveProperties(project: string, values: Record<string, string>): void {
     let xml = fs.readFileSync(project, 'utf8');
     const before = xml;
+    const targetProperty = /<TargetFrameworks\b/.test(xml)
+        ? 'TargetFrameworks'
+        : /<TargetFramework\b/.test(xml)
+            ? 'TargetFramework'
+            : 'TargetFrameworkVersion';
+    const allowed = new Set([
+        'OutputType', 'TargetFramework', 'TargetFrameworks', 'TargetFrameworkVersion',
+        'AssemblyName', 'RootNamespace', 'StartupObject', 'ApplicationIcon',
+        'ApplicationManifest', 'Version', 'Authors', 'Company', 'Product',
+        'Description', 'Copyright'
+    ]);
     for (const [name, value] of Object.entries(values)) {
-        if (!/^[A-Za-z][A-Za-z0-9]*$/.test(name)) { continue; } // defense in depth
+        if (!allowed.has(name) || typeof value !== 'string' || value.length > 4096) { continue; }
+        if (/^TargetFramework(?:s|Version)?$/.test(name) && name !== targetProperty) { continue; }
         xml = setMsbuildProperty(xml, name, value.trim());
     }
     if (xml !== before) {
-        fs.writeFileSync(project, xml, 'utf8');
+        replaceFileAtomically(project, xml);
     }
 }
 
@@ -278,7 +332,7 @@ function saveProperties(project: string, values: Record<string, string>): void {
 async function buildHtml(project: string): Promise<string> {
     const { fields, sdkStyle } = await buildFields(project);
     const info = readProjectInfo(project);
-    const nonce = Math.random().toString(36).slice(2);
+    const nonce = webviewNonce();
     const json = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
     const ui = info?.useWPF && info?.useWinForms ? 'WPF + Windows Forms'
         : info?.useWPF ? 'WPF' : info?.useWinForms ? 'Windows Forms' : 'None / Console';
@@ -288,8 +342,8 @@ async function buildHtml(project: string): Promise<string> {
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
+      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<style nonce="${nonce}">
     body {
         font-family: var(--vscode-font-family);
         color: var(--vscode-foreground);

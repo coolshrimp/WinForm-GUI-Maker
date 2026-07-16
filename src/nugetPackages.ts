@@ -18,6 +18,11 @@ import * as cp from 'child_process';
 import * as https from 'https';
 import { DotnetTools } from './dotnetTools';
 import { readProjectInfo } from './projectInfo';
+import { compareVersions } from './semver';
+import { webviewNonce } from './webviewSecurity';
+import { decodeXmlEntities } from './xmlText';
+
+export { compareVersions } from './semver';
 
 const SEARCH_URL = 'https://azuresearch-usnc.nuget.org/query';
 
@@ -38,12 +43,24 @@ let currentProject: string | undefined;
 /** Serialize dotnet add/remove operations — parallel restores fight over
  *  the project file and the package cache. */
 let opChain: Promise<void> = Promise.resolve();
+/** Identify the HTML currently loaded in the reused panel and invalidate
+ *  asynchronous responses produced for an older project/view. */
+let viewGeneration = 0;
+let searchGeneration = 0;
+let updatesGeneration = 0;
 
 /** Open the NuGet manager for the working project. */
-export async function openNugetPackages(dotnet: DotnetTools): Promise<void> {
-    const project = await dotnet.findProject();
+export async function openNugetPackages(dotnet: DotnetTools, explicitProject?: string): Promise<void> {
+    const project = explicitProject ?? await dotnet.findProject();
     if (!project) { return; }
+    if (!/\.(cs|vb)proj$/i.test(project) || !fs.existsSync(project)) {
+        vscode.window.showWarningMessage('UI Maker: the selected project no longer exists.');
+        return;
+    }
 
+    viewGeneration++;
+    searchGeneration++;
+    updatesGeneration++;
     currentProject = project;
 
     if (panel) {
@@ -53,22 +70,36 @@ export async function openNugetPackages(dotnet: DotnetTools): Promise<void> {
         return;
     }
 
-    panel = vscode.window.createWebviewPanel(
+    const createdPanel = vscode.window.createWebviewPanel(
         'uimaker.nuget',
         `NuGet — ${path.basename(project)}`,
         vscode.ViewColumn.One,
         { enableScripts: true, retainContextWhenHidden: true }
     );
-    panel.onDidDispose(() => { panel = undefined; currentProject = undefined; });
-    panel.webview.html = buildHtml(project);
+    panel = createdPanel;
+    createdPanel.onDidDispose(() => {
+        if (panel === createdPanel) {
+            panel = undefined;
+            currentProject = undefined;
+            viewGeneration++;
+            searchGeneration++;
+            updatesGeneration++;
+        }
+    });
+    createdPanel.webview.html = buildHtml(project);
 
-    panel.webview.onDidReceiveMessage(async (msg: any) => {
+    createdPanel.webview.onDidReceiveMessage(async (msg: any) => {
         const proj = currentProject;
-        if (!proj || !panel) { return; }
+        const view = viewGeneration;
+        if (!proj || panel !== createdPanel) { return; }
+        const isCurrentView = () => panel === createdPanel && currentProject === proj && viewGeneration === view;
+        const postIfCurrent = (message: unknown) => {
+            if (isCurrentView()) { void createdPanel.webview.postMessage(message); }
+        };
         try {
             switch (msg?.type) {
                 case 'installed': {
-                    void panel.webview.postMessage({
+                    postIfCurrent({
                         type: 'installedResult',
                         packages: readInstalled(proj),
                         canModify: readProjectInfo(proj)?.sdkStyle ?? false
@@ -76,35 +107,70 @@ export async function openNugetPackages(dotnet: DotnetTools): Promise<void> {
                     break;
                 }
                 case 'search': {
+                    const request = ++searchGeneration;
                     const q = String(msg.q ?? '').slice(0, 200);
                     const url = `${SEARCH_URL}?q=${encodeURIComponent(q)}&take=25&prerelease=${msg.prerelease ? 'true' : 'false'}&semVerLevel=2.0.0`;
                     const data = await getJson(url);
-                    void panel.webview.postMessage({ type: 'searchResult', items: toSearchResults(data), q });
+                    if (!isCurrentView() || request !== searchGeneration) { return; }
+                    postIfCurrent({ type: 'searchResult', items: toSearchResults(data), q });
                     break;
                 }
                 case 'updates': {
+                    const request = ++updatesGeneration;
                     const installed = readInstalled(proj);
                     const items: Array<{ id: string; current: string; latest: string }> = [];
-                    // One query per package, but capped and sequential-batched.
-                    for (const p of installed.slice(0, 40)) {
-                        const latest = await latestVersion(p.id).catch(() => undefined);
-                        if (latest && compareVersions(latest, p.version) > 0) {
-                            items.push({ id: p.id, current: p.version, latest });
+                    // Bound both total work and parallel network pressure.
+                    const candidates = installed
+                        .filter(p => /^\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(p.version))
+                        .slice(0, 40);
+                    for (let offset = 0; offset < candidates.length; offset += 6) {
+                        const batch = candidates.slice(offset, offset + 6);
+                        const latestBatch = await Promise.all(batch.map(async p => ({
+                            package: p,
+                            latest: await latestVersion(p.id).catch(() => undefined)
+                        })));
+                        if (!isCurrentView() || request !== updatesGeneration) { return; }
+                        for (const { package: p, latest } of latestBatch) {
+                            if (latest && compareVersions(latest, p.version) > 0) {
+                                items.push({ id: p.id, current: p.version, latest });
+                            }
                         }
                     }
-                    void panel.webview.postMessage({ type: 'updatesResult', items, checked: installed.length });
+                    postIfCurrent({ type: 'updatesResult', items, checked: installed.length });
                     break;
                 }
-                case 'install':
-                    await runPackageOp(proj, ['add', proj, 'package', String(msg.id), ...(msg.version ? ['--version', String(msg.version)] : [])],
-                        `Installing ${msg.id}${msg.version ? ` ${msg.version}` : ''}…`);
+                case 'install': {
+                    const id = validatedPackageId(msg.id);
+                    const version = validatedPackageVersion(msg.version);
+                    const trusted = await ensureTrustedPackageMutation();
+                    if (!isCurrentView()) { return; }
+                    if (!trusted) {
+                        postIfCurrent({ type: 'error', message: 'Package changes are disabled until this workspace is trusted.' });
+                        break;
+                    }
+                    await runPackageOp(
+                        proj,
+                        ['add', proj, 'package', id, ...(version ? ['--version', version] : [])],
+                        `Installing ${id}${version ? ` ${version}` : ''}…`,
+                        createdPanel,
+                        view
+                    );
                     break;
-                case 'uninstall':
-                    await runPackageOp(proj, ['remove', proj, 'package', String(msg.id)], `Removing ${msg.id}…`);
+                }
+                case 'uninstall': {
+                    const id = validatedPackageId(msg.id);
+                    const trusted = await ensureTrustedPackageMutation();
+                    if (!isCurrentView()) { return; }
+                    if (!trusted) {
+                        postIfCurrent({ type: 'error', message: 'Package changes are disabled until this workspace is trusted.' });
+                        break;
+                    }
+                    await runPackageOp(proj, ['remove', proj, 'package', id], `Removing ${id}…`, createdPanel, view);
                     break;
+                }
             }
         } catch (err) {
-            void panel.webview.postMessage({
+            postIfCurrent({
                 type: 'error',
                 message: err instanceof Error ? err.message : String(err)
             });
@@ -114,61 +180,129 @@ export async function openNugetPackages(dotnet: DotnetTools): Promise<void> {
 
 // ------------------------------------------------------------- package I/O
 
+/** Package restore changes project inputs and may execute toolchain behavior.
+ *  Restricted Mode keeps browsing/listing read-only and offers the standard
+ *  Workspace Trust editor before any mutation is attempted. */
+async function ensureTrustedPackageMutation(): Promise<boolean> {
+    if (vscode.workspace.isTrusted) { return true; }
+    const manage = 'Manage Workspace Trust';
+    const choice = await vscode.window.showWarningMessage(
+        'UI Maker: trust this workspace before installing, updating, or removing NuGet packages.',
+        manage
+    );
+    if (choice === manage) {
+        await vscode.commands.executeCommand('workbench.trust.manage');
+    }
+    return false;
+}
+
+/** Accept NuGet identifiers while rejecting option-like or oversized values
+ *  before they are handed to the dotnet CLI. */
+function validatedPackageId(value: unknown): string {
+    const id = typeof value === 'string' ? value.trim() : '';
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/.test(id)) {
+        throw new Error('Invalid NuGet package ID.');
+    }
+    return id;
+}
+
+/** Versions supplied by search results are exact NuGet/SemVer values, not
+ *  arbitrary CLI fragments or version ranges. Empty means latest stable. */
+function validatedPackageVersion(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === '') { return undefined; }
+    const version = typeof value === 'string' ? value.trim() : '';
+    if (!/^[0-9][0-9A-Za-z._+-]{0,99}$/.test(version)) {
+        throw new Error('Invalid NuGet package version.');
+    }
+    return version;
+}
+
 /** PackageReference list from the project (or packages.config for classic). */
 function readInstalled(project: string): InstalledPackage[] {
     const out: InstalledPackage[] = [];
     try {
         const xml = fs.readFileSync(project, 'utf8');
-        // Attribute form: <PackageReference Include="X" Version="1.2.3" />
-        for (const m of xml.matchAll(/<PackageReference\s+[^>]*Include="([^"]+)"[^>]*?(?:\sVersion="([^"]*)")?[^>]*?(?:\/>|>)/g)) {
-            let version = m[2];
-            if (version === undefined) {
-                // Child form: <PackageReference Include="X"><Version>1.2.3</Version>…
-                const block = new RegExp(`<PackageReference\\s+[^>]*Include="${escapeRegExp(m[1])}"[^>]*>([\\s\\S]*?)</PackageReference>`).exec(xml);
-                version = block ? /<Version>\s*([^<]*?)\s*<\/Version>/.exec(block[1])?.[1] ?? '' : '';
-            }
-            out.push({ id: m[1], version: version ?? '' });
+        const attr = (attributes: string, name: string): string | undefined => {
+            const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(attributes);
+            return match ? decodeXmlEntities(match[1] ?? match[2] ?? '') : undefined;
+        };
+        // Attribute order and quote style are irrelevant; child Version and
+        // VersionOverride forms are supported too.
+        for (const m of xml.matchAll(/<PackageReference\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/PackageReference\s*>)/gi)) {
+            const id = attr(m[1], 'Include') ?? attr(m[1], 'Update');
+            if (!id) { continue; }
+            const childVersion = /<(?:Version|VersionOverride)>\s*([^<]*?)\s*<\/(?:Version|VersionOverride)>/i
+                .exec(m[2] ?? '')?.[1];
+            const version = attr(m[1], 'VersionOverride')
+                ?? attr(m[1], 'Version')
+                ?? (childVersion ? decodeXmlEntities(childVersion) : '');
+            out.push({ id, version });
         }
         // Classic projects keep packages in packages.config.
         if (!out.length) {
             const config = path.join(path.dirname(project), 'packages.config');
             if (fs.existsSync(config)) {
                 const cfg = fs.readFileSync(config, 'utf8');
-                for (const m of cfg.matchAll(/<package\s+id="([^"]+)"\s+version="([^"]+)"/g)) {
-                    out.push({ id: m[1], version: m[2] });
+                for (const m of cfg.matchAll(/<package\b([^>]*?)(?:\/\s*>|>)/gi)) {
+                    const id = attr(m[1], 'id');
+                    const version = attr(m[1], 'version');
+                    if (id && version) { out.push({ id, version }); }
                 }
             }
         }
     } catch { /* unreadable project — empty list */ }
-    return out.sort((a, b) => a.id.localeCompare(b.id));
+    const unique = new Map<string, InstalledPackage>();
+    for (const pkg of out) { unique.set(pkg.id.toLowerCase(), pkg); }
+    return [...unique.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Run one dotnet add/remove operation, then push the refreshed list. */
-function runPackageOp(project: string, args: string[], label: string): Promise<void> {
+function runPackageOp(
+    project: string,
+    args: string[],
+    label: string,
+    targetPanel: vscode.WebviewPanel,
+    targetView: number
+): Promise<void> {
+    const isCurrentView = () => panel === targetPanel && currentProject === project && viewGeneration === targetView;
     const info = readProjectInfo(project);
     if (!info?.sdkStyle) {
-        void panel?.webview.postMessage({
-            type: 'error',
-            message: 'Classic (.NET Framework, non-SDK) projects cannot be modified by the dotnet CLI. ' +
-                'Run "UI Maker: Convert Project to SDK Style" (also offered in Project Properties) to enable package management here.'
-        });
+        if (isCurrentView()) {
+            void targetPanel.webview.postMessage({
+                type: 'error',
+                message: 'Classic (.NET Framework, non-SDK) projects cannot be modified by the dotnet CLI. ' +
+                    'Run "UI Maker: Convert Project to SDK Style" (also offered in Project Properties) to enable package management here.'
+            });
+        }
         return Promise.resolve();
     }
-    void panel?.webview.postMessage({ type: 'busy', message: label });
+    if (isCurrentView()) { void targetPanel.webview.postMessage({ type: 'busy', message: label }); }
     opChain = opChain.then(() => new Promise<void>(resolve => {
+        // The operation may have waited behind another restore; re-check trust
+        // at the moment the external process would actually start.
+        if (!vscode.workspace.isTrusted) {
+            if (isCurrentView()) {
+                void targetPanel.webview.postMessage({
+                    type: 'error',
+                    message: 'Package changes are disabled until this workspace is trusted.'
+                });
+            }
+            resolve();
+            return;
+        }
         cp.execFile('dotnet', args, { cwd: path.dirname(project), timeout: 180000 }, (err, stdout, stderr) => {
-            if (currentProject === project && panel) {
+            if (isCurrentView()) {
                 if (err) {
                     const detail = `${stdout ?? ''}\n${stderr ?? ''}`.trim().split(/\r?\n/)
                         .filter(l => /error|warn/i.test(l)).slice(0, 4).join('\n');
-                    void panel.webview.postMessage({
+                    void targetPanel.webview.postMessage({
                         type: 'error',
                         message: `${label.replace('…', '')} failed.${detail ? `\n${detail}` : ' See the terminal for details.'}`
                     });
                 } else {
-                    void panel.webview.postMessage({ type: 'done', message: `${label.replace('…', '')} ✓` });
+                    void targetPanel.webview.postMessage({ type: 'done', message: `${label.replace('…', '')} ✓` });
                 }
-                void panel.webview.postMessage({
+                void targetPanel.webview.postMessage({
                     type: 'installedResult',
                     packages: readInstalled(project),
                     canModify: true
@@ -184,19 +318,34 @@ function runPackageOp(project: string, args: string[], label: string): Promise<v
 
 function getJson(url: string): Promise<any> {
     return new Promise((resolve, reject) => {
+        const maxBytes = 5 * 1024 * 1024;
         const req = https.get(url, { headers: { 'Accept': 'application/json' }, timeout: 15000 }, res => {
             if (res.statusCode !== 200) {
                 res.resume();
                 reject(new Error(`nuget.org returned HTTP ${res.statusCode} — check your internet connection.`));
                 return;
             }
+            const declaredLength = Number(res.headers['content-length'] ?? 0);
+            if (declaredLength > maxBytes) {
+                res.destroy(new Error('nuget.org returned an unexpectedly large response.'));
+                return;
+            }
             let body = '';
+            let bytes = 0;
             res.setEncoding('utf8');
-            res.on('data', d => { body += d; });
+            res.on('data', d => {
+                bytes += Buffer.byteLength(d);
+                if (bytes > maxBytes) {
+                    res.destroy(new Error('nuget.org returned an unexpectedly large response.'));
+                    return;
+                }
+                body += d;
+            });
             res.on('end', () => {
                 try { resolve(JSON.parse(body)); }
                 catch { reject(new Error('nuget.org returned an unreadable response.')); }
             });
+            res.on('error', reject);
         });
         req.on('timeout', () => { req.destroy(new Error('nuget.org did not respond — check your internet connection.')); });
         req.on('error', reject);
@@ -222,40 +371,18 @@ async function latestVersion(id: string): Promise<string | undefined> {
     return hit && String(hit.id).toLowerCase() === id.toLowerCase() ? String(hit.version) : undefined;
 }
 
-/** NuGet-style version compare: dotted numerics, then prerelease tags. */
-export function compareVersions(a: string, b: string): number {
-    const parse = (v: string) => {
-        const [nums, pre] = v.split(/-(.+)/);
-        return { nums: nums.split('.').map(n => parseInt(n, 10) || 0), pre: pre ?? '' };
-    };
-    const pa = parse(a);
-    const pb = parse(b);
-    for (let i = 0; i < Math.max(pa.nums.length, pb.nums.length); i++) {
-        const d = (pa.nums[i] ?? 0) - (pb.nums[i] ?? 0);
-        if (d !== 0) { return d; }
-    }
-    // Release > prerelease; otherwise compare tags lexically.
-    if (!pa.pre && pb.pre) { return 1; }
-    if (pa.pre && !pb.pre) { return -1; }
-    return pa.pre.localeCompare(pb.pre);
-}
-
-function escapeRegExp(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 // ------------------------------------------------------------------ webview
 
 function buildHtml(project: string): string {
-    const nonce = Math.random().toString(36).slice(2);
+    const nonce = webviewNonce();
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
+      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<style nonce="${nonce}">
     body {
         font-family: var(--vscode-font-family);
         color: var(--vscode-foreground);

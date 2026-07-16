@@ -13,13 +13,14 @@
 //
 // Messages to the extension host:
 //   { type: 'ready' }                            webview loaded, send content
-//   { type: 'edit', text }                       replace the document text
+//   { type: 'edit', text, baseText }             replace text iff base matches
 //   { type: 'openCode' }                         open XAML source split view
 //   { type: 'addHandler', handler, event }       create/reveal C# handler stub
 //
 // Messages from the extension host:
 //   { type: 'update', text }                     document text changed
 //   { type: 'config', gridSize, snap, docName }  settings
+//   { type: 'editResult', ok, text?, reason? }   optimistic edit acknowledgement
 
 (function () {
     'use strict';
@@ -40,6 +41,32 @@
 
     const PRES_NS = 'http://schemas.microsoft.com/winfx/2006/xaml/presentation';
     const X_NS = 'http://schemas.microsoft.com/winfx/2006/xaml';
+
+    /** Reserved C# keywords cannot be emitted as generated bare identifiers. */
+    const CSHARP_RESERVED_KEYWORDS = new Set([
+        'abstract', 'as', 'base', 'bool', 'break', 'byte', 'case', 'catch',
+        'char', 'checked', 'class', 'const', 'continue', 'decimal', 'default',
+        'delegate', 'do', 'double', 'else', 'enum', 'event', 'explicit',
+        'extern', 'false', 'finally', 'fixed', 'float', 'for', 'foreach',
+        'goto', 'if', 'implicit', 'in', 'int', 'interface', 'internal', 'is',
+        'lock', 'long', 'namespace', 'new', 'null', 'object', 'operator', 'out',
+        'override', 'params', 'private', 'protected', 'public', 'readonly',
+        'ref', 'return', 'sbyte', 'sealed', 'short', 'sizeof', 'stackalloc',
+        'static', 'string', 'struct', 'switch', 'this', 'throw', 'true', 'try',
+        'typeof', 'uint', 'ulong', 'unchecked', 'unsafe', 'ushort', 'using',
+        'virtual', 'void', 'volatile', 'while'
+    ]);
+
+    function isCSharpIdentifier(value) {
+        return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
+            && !CSHARP_RESERVED_KEYWORDS.has(value);
+    }
+
+    function validateCSharpIdentifier(value, subject) {
+        if (isCSharpIdentifier(value)) { return true; }
+        setStatus(`UI Maker: "${value}" is not a valid ${subject} — use a non-keyword C# identifier.`);
+        return false;
+    }
 
     // -------------------------------------------------------- control catalog
     //
@@ -209,6 +236,17 @@
             if (msg.text === xamlText) { return; } // echo of our own edit
             xamlText = msg.text;
             parseAndRender();
+        } else if (msg.type === 'editResult') {
+            // A text/code edit won the race after the designer built its
+            // optimistic replacement. Restore the host's authoritative text
+            // instead of leaving the preview on a version that was not saved.
+            if (msg.ok === false) {
+                xamlText = typeof msg.text === 'string' ? msg.text : '';
+                parseAndRender();
+                setStatus(msg.reason
+                    ? `UI Maker: ${msg.reason}`
+                    : 'UI Maker: the file changed before the designer edit could be applied; the designer has been refreshed.');
+            }
         } else if (msg.type === 'config') {
             config.gridSize = msg.gridSize ?? config.gridSize;
             config.snap = msg.snap ?? config.snap;
@@ -1430,6 +1468,7 @@
             search.id = 'ff-tool-search';
             search.type = 'text';
             search.placeholder = '🔍 Search Toolbox';
+            search.setAttribute('aria-label', 'Search toolbox');
             search.spellcheck = false;
             search.addEventListener('input', () => filterToolbox(search.value));
             search.addEventListener('keydown', e => e.stopPropagation());
@@ -1441,6 +1480,8 @@
             const item = document.createElement('div');
             item.className = 'ff-tool';
             item.draggable = true;
+            item.tabIndex = 0;
+            item.setAttribute('role', 'button');
             item.dataset.type = type;
             item.title = `Drag onto the form, or double-click to add ${type}`;
             item.innerHTML = `<span class="ff-tool-icon">${def.icon}</span>${type}`;
@@ -1450,6 +1491,13 @@
             });
             // Double-click adds the control at a default spot, like VS.
             item.addEventListener('dblclick', () => addControlDefault(type));
+            item.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    addControlDefault(type);
+                }
+            });
             host.appendChild(item);
         };
         const addSection = label => {
@@ -1749,7 +1797,12 @@
         if (!isWindow) {
             // Name is special: stored as x:Name.
             const nameRow = propRow('Name', getName(el), v => {
-                setName(el, v.trim());
+                const name = v.trim();
+                if (name && !validateCSharpIdentifier(name, 'control name')) {
+                    renderPanel();
+                    return;
+                }
+                setName(el, name);
                 commit();
             });
             if (getName(el)) { nameRow.classList.add('ff-set'); }
@@ -1838,8 +1891,13 @@
         input.placeholder = defaultHandlerName(el, eventName, isWindow);
         input.spellcheck = false;
         input.addEventListener('change', () => {
-            if (input.value.trim() === '') { el.removeAttribute(eventName); }
-            else { el.setAttribute(eventName, input.value.trim()); }
+            const handler = input.value.trim();
+            if (handler && !validateCSharpIdentifier(handler, 'handler name')) {
+                input.value = el.getAttribute(eventName) ?? '';
+                return;
+            }
+            if (handler === '') { el.removeAttribute(eventName); }
+            else { el.setAttribute(eventName, handler); }
             commit();
         });
         input.addEventListener('keydown', e => e.stopPropagation());
@@ -1868,6 +1926,7 @@
 
     function wireEvent(el, eventName, handler, isWindow) {
         const finalName = handler || defaultHandlerName(el, eventName, isWindow);
+        if (!validateCSharpIdentifier(finalName, 'handler name')) { return; }
         el.setAttribute(eventName, finalName);
         commit();
         vscode.postMessage({ type: 'addHandler', handler: finalName, event: eventName });
@@ -1876,18 +1935,14 @@
     function wireDefaultEvent(el) {
         if (el.__wf) {
             const wdef = WF_CONTROLS[el.type] ?? WF_TRAY[el.type];
-            activeTab = 'events';
-            $('ff-tab-props').classList.remove('active');
-            $('ff-tab-events').classList.add('active');
+            switchPanelTab('events');
             wfWireEvent(el, wdef?.defaultEvent ?? 'Click', el.events[wdef?.defaultEvent ?? 'Click'] || '');
             return;
         }
         const def = CONTROLS[el.localName];
         if (!def) { return; }
         // Switch to the events tab so the user sees what happened.
-        activeTab = 'events';
-        $('ff-tab-props').classList.remove('active');
-        $('ff-tab-events').classList.add('active');
+        switchPanelTab('events');
         const existing = el.getAttribute(def.defaultEvent);
         wireEvent(el, def.defaultEvent, existing || '', false);
     }
@@ -1904,10 +1959,53 @@
             setStatus('UI Maker: the document has unparsed changes — fix the XAML in the code view before designing.');
             return;
         }
-        const body = formatElement(xamlDoc.documentElement, 0).trimStart();
-        xamlText = (xmlDeclaration ? `${xmlDeclaration}\n` : '') + body + '\n';
-        vscode.postMessage({ type: 'edit', text: xamlText });
+        const baseText = xamlText;
+        xamlText = formatDocument(xamlDoc);
+        vscode.postMessage({ type: 'edit', text: xamlText, baseText });
         render();
+    }
+
+    /**
+     * Format the root while retaining document-level nodes that are legal
+     * outside it. DOMParser keeps comments and processing instructions as
+     * siblings of documentElement; serializing only the root silently dropped
+     * those nodes on the first designer edit.
+     */
+    function formatDocument(documentNode) {
+        const serializer = new XMLSerializer();
+        const parts = [...documentNode.childNodes].map(node => {
+            if (node === documentNode.documentElement) {
+                return formatElement(node, 0).trimStart();
+            }
+            if (node.nodeType === Node.COMMENT_NODE
+                || node.nodeType === Node.PROCESSING_INSTRUCTION_NODE
+                || node.nodeType === Node.DOCUMENT_TYPE_NODE) {
+                return serializer.serializeToString(node);
+            }
+            return '';
+        }).filter(Boolean);
+        return (xmlDeclaration ? `${xmlDeclaration}\n` : '') + parts.join('\n') + '\n';
+    }
+
+    /** Effective xml:space value, including the nearest ancestor declaration. */
+    function effectiveXmlSpace(node) {
+        for (let el = node; el?.nodeType === Node.ELEMENT_NODE; el = el.parentNode) {
+            const value = el.getAttribute('xml:space');
+            if (value === 'preserve' || value === 'default') { return value; }
+        }
+        return 'default';
+    }
+
+    /**
+     * Text content must stay inline. This includes CDATA, ordinary non-blank
+     * text, and whitespace without a line break (for example the separator
+     * between two Runs). Newline-bearing whitespace is the normal source
+     * indentation that this formatter intentionally normalizes.
+     */
+    function hasSignificantInlineText(node) {
+        return [...node.childNodes].some(child => child.nodeType === Node.CDATA_SECTION_NODE
+            || (child.nodeType === Node.TEXT_NODE
+                && (child.data.trim() !== '' || (child.data !== '' && !/[\r\n]/.test(child.data)))));
     }
 
     function formatElement(node, depth) {
@@ -1928,9 +2026,12 @@
         }
         if (node.nodeType !== Node.ELEMENT_NODE) { return ''; }
 
-        // Whitespace-significant or code-bearing subtrees are emitted exactly
-        // as they stand — reformatting them would change their meaning.
-        if (node.getAttribute?.('xml:space') === 'preserve' || node.nodeName === 'x:Code') {
+        // Whitespace-significant, mixed-text, or code-bearing subtrees are
+        // emitted as one unit — inserting formatter newlines would alter their
+        // logical text. xml:space is inherited unless a descendant resets it.
+        if (effectiveXmlSpace(node) === 'preserve'
+            || hasSignificantInlineText(node)
+            || (node.namespaceURI === X_NS && node.localName === 'Code')) {
             return `\n${pad}${new XMLSerializer().serializeToString(node)}`;
         }
 
@@ -2086,13 +2187,32 @@
 
     let clipboard = null; // { mode: 'wf', items: [{type, props}] } | { mode: 'xaml', xml }
 
+    function wfShallowCloneBlock(control) {
+        if (control.type === 'TabPage') { return 'tab pages'; }
+        if (control.children?.length) { return 'containers with child controls'; }
+        if (control.items?.length) { return 'controls with generated items'; }
+        if (control.columns?.length) { return 'grids with generated columns'; }
+        return '';
+    }
+
+    function wfClipboardSelection() {
+        return [...new Set([...multiSel, selected])]
+            .filter(c => c?.__wf && c !== wfForm);
+    }
+
     function copySelection() {
-        if (!selected) { return; }
+        if (!selected) { return false; }
         if (selected.__wf) {
-            const items = [...multiSel]
+            const controls = wfClipboardSelection();
+            const blocked = controls.find(c => wfShallowCloneBlock(c));
+            if (blocked) {
+                setStatus(`UI Maker: copying ${wfShallowCloneBlock(blocked)} is disabled until deep cloning can preserve their structure.`);
+                return false;
+            }
+            const items = controls
                 .filter(c => c.__wf && c !== wfForm && (WF_CONTROLS[c.type] || WF_TRAY[c.type]))
                 .map(c => ({ type: c.type, props: { ...c.props } }));
-            if (!items.length) { return; }
+            if (!items.length) { return false; }
             clipboard = { mode: 'wf', items };
             setStatus(`UI Maker: copied ${items.length} control${items.length === 1 ? '' : 's'} — Ctrl+V to paste.`);
         } else {
@@ -2100,6 +2220,7 @@
             setStatus(`UI Maker: copied ${selected.localName} — Ctrl+V to paste.`);
         }
         vscode.postMessage({ type: 'setClipboard', data: clipboard });
+        return true;
     }
 
     function pasteClipboard() {
@@ -2110,8 +2231,7 @@
             for (const item of clipboard.items) {
                 if (WF_TRAY[item.type]) { wfAddComponent(item.type); pasted++; continue; }
                 if (!WF_CONTROLS[item.type]) { continue; }
-                wfPasteControl(item);
-                pasted++;
+                if (wfPasteControl(item)) { pasted++; }
             }
             if (pasted) { setStatus(`UI Maker: pasted ${pasted} control${pasted === 1 ? '' : 's'}.`); }
             return;
@@ -2148,12 +2268,21 @@
             if (prop === 'Location' || prop === 'Name' || prop === 'TabIndex') { continue; }
             props.push([prop, code]);
         }
-        wfInsertControl(item.type, name, props, null);
+        return wfInsertControl(item.type, name, props, null);
     }
 
     function cutSelection() {
-        copySelection();
-        deleteSelected();
+        if (selected?.__wf) {
+            const controls = wfClipboardSelection();
+            const unsafe = controls.find(c => wfShallowCloneBlock(c)
+                || (c.parent && c.parent !== wfForm)
+                || Object.keys(c.events ?? {}).length);
+            if (unsafe) {
+                setStatus('UI Maker: Cut was cancelled because the current clipboard cannot preserve this control’s structure, parent, or events.');
+                return;
+            }
+        }
+        if (copySelection()) { deleteSelected(); }
     }
 
     // ============================================================ context menu
@@ -2218,8 +2347,12 @@
     /** Switch the right-hand panel to Properties or Events. */
     function switchPanelTab(tab) {
         activeTab = tab;
-        $('ff-tab-props')?.classList.toggle('active', tab === 'props');
-        $('ff-tab-events')?.classList.toggle('active', tab === 'events');
+        const propsTab = $('ff-tab-props');
+        const eventsTab = $('ff-tab-events');
+        propsTab?.classList.toggle('active', tab === 'props');
+        eventsTab?.classList.toggle('active', tab === 'events');
+        propsTab?.setAttribute('aria-selected', String(tab === 'props'));
+        eventsTab?.setAttribute('aria-selected', String(tab === 'events'));
         renderPanel();
     }
 
@@ -2432,8 +2565,7 @@
         text = wfInsertField(text, 'System.Windows.Forms.TabPage', name);
 
         uiTabs.set(tc.name, pages.length); // activate the new tab
-        selected = { __wf: true, name, type: 'TabPage', props: {}, events: {}, children: [] };
-        multiSel.clear();
+        wfSelectInserted(name, 'TabPage');
         wfApply(text);
         setStatus(`UI Maker: added ${name} to ${tc.name}.`);
     }
@@ -2554,16 +2686,10 @@
     });
 
     $('ff-tab-props').addEventListener('click', () => {
-        activeTab = 'props';
-        $('ff-tab-props').classList.add('active');
-        $('ff-tab-events').classList.remove('active');
-        renderPanel();
+        switchPanelTab('props');
     });
     $('ff-tab-events').addEventListener('click', () => {
-        activeTab = 'events';
-        $('ff-tab-events').classList.add('active');
-        $('ff-tab-props').classList.remove('active');
-        renderPanel();
+        switchPanelTab('events');
     });
 
     // Property grid sort mode: categorized (like VS) or flat alphabetical.
@@ -2610,8 +2736,9 @@
     </Grid>
 </Window>
 `;
+        const baseText = xamlText;
         xamlText = starter;
-        vscode.postMessage({ type: 'edit', text: starter });
+        vscode.postMessage({ type: 'edit', text: starter, baseText });
         parseAndRender();
     }
 
@@ -3145,12 +3272,18 @@
         }
 
         // Controls.AddRange(new Control[] { a, b, ... }) — parent and form level.
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(?:(\w+)\.)?Controls\.AddRange\([^{]*\{([\s\S]*?)\}\)/gm)) {
-            const parent = m[1] ? wfControls.get(m[1]) : wfForm;
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(?:([\w]+(?:\.(?:Panel1|Panel2))?)\.)?Controls\.AddRange\([^{]*\{([\s\S]*?)\}\)/gm)) {
+            const receiver = m[1] ?? '';
+            const [parentName, panelSlot] = receiver.split('.');
+            const parent = receiver ? wfControls.get(parentName) : wfForm;
             if (!parent) { continue; }
             for (const n of m[2].matchAll(/(?:this\.)?(\w+)/g)) {
                 const child = wfControls.get(n[1]);
-                if (child && !child.parent) { parent.children.push(child); child.parent = parent; }
+                if (child && !child.parent) {
+                    parent.children.push(child);
+                    child.parent = parent;
+                    if (panelSlot) { child.panelSlot = panelSlot; }
+                }
             }
         }
 
@@ -4007,9 +4140,27 @@
     /** Push edited text to the document and re-render from it. */
     function wfApply(newText) {
         if (newText === xamlText) { return; }
+        const baseText = xamlText;
         xamlText = newText;
-        vscode.postMessage({ type: 'edit', text: newText });
+        vscode.postMessage({ type: 'edit', text: newText, baseText });
         wfParseAndRender();
+    }
+
+    /**
+     * Select a record that is about to be inserted into Designer.cs. The next
+     * parse swaps this placeholder for the parsed record with the same name;
+     * keeping it in both selection stores prevents an older multi-selection
+     * from being carried across the insertion.
+     */
+    function wfSelectInserted(name, type) {
+        const pending = {
+            __wf: true, name, type, props: {}, events: {}, children: [],
+            columns: [], items: [], parent: null
+        };
+        selected = pending;
+        multiSel.clear();
+        multiSel.add(pending);
+        selectedPath = '';
     }
 
     /** "this.name" or plain "name", matching the file's dialect. */
@@ -4073,6 +4224,10 @@
     function wfWireEvent(el, eventName, handler, openStub = true) {
         const isForm = el === wfForm;
         const finalName = handler || `${isForm ? wfForm.name : el.name}_${eventName}`;
+        if (!validateCSharpIdentifier(finalName, 'handler name')) {
+            renderPanel();
+            return;
+        }
         const et = WF_EVENT_TYPE_OVERRIDES[el.type]?.[eventName]
             ?? WF_EVENT_TYPES[eventName]
             ?? WF_DEFAULT_EVENT_TYPE;
@@ -4197,13 +4352,18 @@
         if (def.text) { props.push(['Text', `"${name}"`]); }
         // Fixed extras VS also writes on drop (e.g. TableLayoutPanel counts).
         for (const [p, code] of def.extra ?? []) { props.push([p, code]); }
-        wfInsertControl(type, name, props, parentName);
+        return wfInsertControl(type, name, props, parentName);
     }
 
     /** Copy of an existing control, offset one grid step, in the same parent. */
     function wfDuplicateControl(src) {
         if (!WF_CONTROLS[src.type]) {
             setStatus(`UI Maker: duplicate is not supported for ${src.type} controls.`);
+            return;
+        }
+        const blocked = wfShallowCloneBlock(src);
+        if (blocked) {
+            setStatus(`UI Maker: duplicating ${blocked} is disabled until deep cloning can preserve their structure.`);
             return;
         }
         const name = wfUniqueName(src.type);
@@ -4218,8 +4378,29 @@
             if (prop === 'Location' || prop === 'Name' || prop === 'TabIndex') { continue; }
             props.push([prop, code]);
         }
-        const parentName = src.parent && src.parent !== wfForm ? src.parent.name : null;
-        wfInsertControl(src.type, name, props, parentName);
+        let parentName = src.parent && src.parent !== wfForm ? src.parent.name : null;
+        if (src.parent?.type === 'SplitContainer' && src.panelSlot) {
+            parentName = `${src.parent.name}.${src.panelSlot}`;
+        }
+        let cell = null;
+        if (src.parent?.type === 'TableLayoutPanel') {
+            const cols = Math.max(1, int(/\d+/.exec(src.parent.props.ColumnCount ?? '')?.[0], 2));
+            const rows = Math.max(1, int(/\d+/.exec(src.parent.props.RowCount ?? '')?.[0], 2));
+            const occupied = new Set(src.parent.children
+                .filter(c => c.cell)
+                .map(c => `${c.cell.col},${c.cell.row}`));
+            const start = src.cell ? src.cell.row * cols + src.cell.col + 1 : 0;
+            for (let offset = 0; offset < rows * cols; offset++) {
+                const index = (start + offset) % (rows * cols);
+                const candidate = { col: index % cols, row: Math.floor(index / cols) };
+                if (!occupied.has(`${candidate.col},${candidate.row}`)) { cell = candidate; break; }
+            }
+            if (!cell) {
+                setStatus(`UI Maker: ${src.parent.name} has no empty cell for the duplicate.`);
+                return;
+            }
+        }
+        if (!wfInsertControl(src.type, name, props, parentName, cell)) { return; }
         setStatus(`UI Maker: duplicated ${src.name} as ${name}.`);
     }
 
@@ -4229,7 +4410,7 @@
      * `props` is an ordered [prop, code] list; code uses qualified names and
      * is rewritten to match the file's dialect.
      */
-    function wfInsertControl(type, name, props, parentName) {
+    function wfInsertControl(type, name, props, parentName, cell = null) {
         const eol = wfEol();
         let text = xamlText;
 
@@ -4241,7 +4422,7 @@
         const suspend = /^[ \t]*(?:(?:[\w\.]+\.)?SuspendLayout\(\);|\(\((?:System\.ComponentModel\.)?ISupportInitialize\))/m.exec(text);
         if (!suspend) {
             setStatus('UI Maker: could not find a place to insert the control.');
-            return;
+            return false;
         }
         text = `${text.slice(0, suspend.index)}${ind}${wfRef(name)} = new ${wfCode(`System.Windows.Forms.${type}`)}();${eol}${text.slice(suspend.index)}`;
 
@@ -4249,7 +4430,7 @@
         const formAnchor = /^[ \t]*(?:this\.)?AutoScaleDimensions\s*=/m.exec(text);
         if (!formAnchor) {
             setStatus('UI Maker: could not find the form section in InitializeComponent.');
-            return;
+            return false;
         }
         // Back up over the "// <formname> //" comment trio if it sits right above.
         let insertAt = formAnchor.index;
@@ -4269,14 +4450,19 @@
         // may be a dotted path like "splitContainer1.Panel1".
         const parentRe = parentName ? reEsc(parentName) : '';
         const parentBase = parentName ? parentName.split('.')[0] : '';
+        const addArgument = cell
+            ? `${wfRef(name)}, ${cell.col}, ${cell.row}`
+            : wfRef(name);
         const addLine = parentName
-            ? `${ind}${wfRef(parentName)}.Controls.Add(${wfRef(name)});`
+            ? `${ind}${wfRef(parentName)}.Controls.Add(${addArgument});`
             : `${ind}${wfStyle.thisPrefix ? 'this.' : ''}Controls.Add(${wfRef(name)});`;
         const firstAdd = parentName
             ? new RegExp(`^[ \\t]*(?:this\\.)?${parentRe}\\.Controls\\.Add\\(`, 'm').exec(text)
             : /^[ \t]*(?:this\.)?Controls\.Add\(/m.exec(text);
+        let added = false;
         if (firstAdd) {
             text = `${text.slice(0, firstAdd.index)}${addLine}${eol}${text.slice(firstAdd.index)}`;
+            added = true;
         } else if (parentName) {
             // Parent has no Controls.Add lines yet — append after its first
             // statement (fall back to the base control's block for panels).
@@ -4285,32 +4471,46 @@
             if (anchor) {
                 const end = anchor.index + anchor[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
+                added = true;
             }
         } else {
             const cs = /^([ \t]*)(?:this\.)?ClientSize\s*=[^\n]*$/m.exec(text);
             if (cs) {
                 const end = cs.index + cs[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
+                added = true;
             }
+        }
+        if (!added) {
+            setStatus('UI Maker: insertion was cancelled because the parent Controls collection could not be updated safely.');
+            return false;
         }
 
         // 4) Field declaration — after the last existing designer field.
         const fieldLine = `        private ${wfCode(`System.Windows.Forms.${type}`)} ${name};`;
         let lastField = null;
         for (const m of text.matchAll(/^[ \t]*private\s+[\w\.<>]+\s+\w+;\s*$/gm)) { lastField = m; }
+        let fieldInserted = false;
         if (lastField) {
             const end = lastField.index + lastField[0].length;
             text = `${text.slice(0, end)}${eol}${fieldLine}${text.slice(end)}`;
+            fieldInserted = true;
         } else {
             const endRegion = /^[ \t]*#endregion[^\n]*$/m.exec(text);
             if (endRegion) {
                 const end = endRegion.index + endRegion[0].length;
                 text = `${text.slice(0, end)}${eol}${eol}${fieldLine}${text.slice(end)}`;
+                fieldInserted = true;
             }
         }
+        if (!fieldInserted) {
+            setStatus('UI Maker: insertion was cancelled because a safe designer-field anchor was not found.');
+            return false;
+        }
 
-        selected = { __wf: true, name, type, props: {}, events: {}, children: [] };
+        wfSelectInserted(name, type);
         wfApply(text);
+        return true;
     }
 
     // ------------------------------------------- wf shared insertion helpers
@@ -4390,8 +4590,7 @@
         }
         text = wfInsertField(t2, qualified, name);
 
-        selected = { __wf: true, name, type, props: {}, events: {}, children: [], items: [] };
-        multiSel.clear();
+        wfSelectInserted(name, type);
         wfApply(text);
         setStatus(`UI Maker: added ${name} to the component tray.`);
     }
@@ -4402,13 +4601,14 @@
         const def = WF_CONTROLS[type];
         const name = wfUniqueName(type);
         const y = type === 'StatusStrip' ? cs.h - def.h : 0;
-        wfInsertControl(type, name, [
+        const inserted = wfInsertControl(type, name, [
             ['Location', `new System.Drawing.Point(0, ${y})`],
             ['Name', `"${name}"`],
             ['Size', `new System.Drawing.Size(${cs.w}, ${def.h})`],
             ['TabIndex', String(wfControls.size)],
             ['Text', `"${name}"`]
         ], null);
+        if (!inserted) { return; }
         if (type === 'MenuStrip') {
             wfApply(wfSetFormLine('MainMenuStrip', wfRef(name)));
         }
@@ -4582,8 +4782,7 @@
         text = wfInsertField(text, 'System.Windows.Forms.TabPage', p1);
         text = wfInsertField(text, 'System.Windows.Forms.TabPage', p2);
 
-        selected = { __wf: true, name: tc, type: 'TabControl', props: {}, events: {}, children: [], items: [] };
-        multiSel.clear();
+        wfSelectInserted(tc, 'TabControl');
         wfApply(text);
     }
 
@@ -4593,10 +4792,94 @@
         return line.replace(/"(?:[^"\\]|\\.)*"/g, s => `"${'_'.repeat(s.length - 2)}"`);
     }
 
+    /** Return the first index after a C# comment/string/character token, or
+     *  `at` when ordinary code begins there. This is deliberately lexical:
+     *  it only exists to keep braces in literals from confusing method bounds. */
+    function wfSkipCSharpToken(source, at) {
+        const n = source.length;
+        if (source.startsWith('//', at)) {
+            const end = source.indexOf('\n', at + 2);
+            return end < 0 ? n : end;
+        }
+        if (source.startsWith('/*', at)) {
+            const end = source.indexOf('*/', at + 2);
+            return end < 0 ? n : end + 2;
+        }
+
+        // C# 11 raw strings, including interpolated raw strings.
+        let quoteAt = at;
+        while (source[quoteAt] === '$') { quoteAt++; }
+        let quoteEnd = quoteAt;
+        while (source[quoteEnd] === '"') { quoteEnd++; }
+        const quoteCount = quoteEnd - quoteAt;
+        if (quoteCount >= 3) {
+            const close = source.indexOf('"'.repeat(quoteCount), quoteEnd);
+            return close < 0 ? n : close + quoteCount;
+        }
+
+        let verbatimPrefix = 0;
+        if (source.startsWith('@"', at)) { verbatimPrefix = 2; }
+        else if (source.startsWith('$@"', at) || source.startsWith('@$"', at)) { verbatimPrefix = 3; }
+        if (verbatimPrefix) {
+            let i = at + verbatimPrefix;
+            while (i < n) {
+                if (source[i] === '"' && source[i + 1] === '"') { i += 2; continue; }
+                if (source[i] === '"') { return i + 1; }
+                i++;
+            }
+            return n;
+        }
+
+        if (source[at] === '"' || (source[at] === '$' && source[at + 1] === '"')) {
+            let i = at + (source[at] === '$' ? 2 : 1);
+            while (i < n && source[i] !== '"' && source[i] !== '\n') {
+                if (source[i] === '\\') { i++; }
+                i++;
+            }
+            return i < n && source[i] === '"' ? i + 1 : i;
+        }
+        if (source[at] === '\'') {
+            let i = at + 1;
+            while (i < n && source[i] !== '\'' && source[i] !== '\n') {
+                if (source[i] === '\\') { i++; }
+                i++;
+            }
+            return i < n && source[i] === '\'' ? i + 1 : i;
+        }
+        return at;
+    }
+
+    /** Bounds of the generated InitializeComponent body, excluding braces. */
+    function wfInitializeComponentBody(source) {
+        const signature = /\b(?:private|protected|internal|public)\s+(?:static\s+)?void\s+InitializeComponent\s*\(\s*\)/g.exec(source);
+        if (!signature) { return null; }
+        let open = -1;
+        for (let i = signature.index + signature[0].length; i < source.length;) {
+            const skipped = wfSkipCSharpToken(source, i);
+            if (skipped !== i) { i = skipped; continue; }
+            if (source[i] === '{') { open = i; break; }
+            if (source[i] === ';') { return null; }
+            i++;
+        }
+        if (open < 0) { return null; }
+        let depth = 1;
+        for (let i = open + 1; i < source.length;) {
+            const skipped = wfSkipCSharpToken(source, i);
+            if (skipped !== i) { i = skipped; continue; }
+            if (source[i] === '{') { depth++; }
+            else if (source[i] === '}' && --depth === 0) {
+                return { start: open + 1, end: i };
+            }
+            i++;
+        }
+        return null;
+    }
+
     /**
-     * Remove every statement referencing `name` from `text`: property
-     * assignments, event wiring, Controls.Add, its comment trio, and the
-     * field declaration. Only real identifier references count — a "name"
+     * Remove generated statements referencing `name` from InitializeComponent
+     * plus its field declaration. User-authored helper methods are deliberately
+     * left alone, matching Visual Studio's designer-delete behavior. Only real
+     * identifier references count — a "name"
      * inside a string literal (e.g. another control's Text or Items) never
      * matches. Shared AddRange lists are PRUNED, not deleted: the doomed
      * control is dropped from the array and its siblings stay registered.
@@ -4604,12 +4887,18 @@
      * character (no \b boundary).
      */
     function wfRemoveControlLines(name, text) {
+        const range = wfInitializeComponentBody(text);
+        if (!range) {
+            setStatus('UI Maker: delete was cancelled because InitializeComponent could not be bounded safely.');
+            return text;
+        }
         const isRef = it => it === name || it === `this.${name}`;
+        let body = text.slice(range.start, range.end);
 
         // AddRange statements first (they can span lines and list several
         // controls). Owned by the doomed control -> remove whole statement;
         // merely listing it -> prune the one item.
-        text = text.replace(
+        body = body.replace(
             /^([ \t]*)((?:this\.)?[\w\.]+)\.AddRange\(\s*(new\s+[\w\.\[\]]+)\s*\{([\s\S]*?)\}\s*\)\s*;[ \t]*(\r?\n)?/gm,
             (all, ind, recv, arrType, body, nl) => {
                 if (isRef(recv) || recv.startsWith(`${name}.`) || recv.startsWith(`this.${name}.`)) { return ''; }
@@ -4621,10 +4910,10 @@
                 return `${ind}${recv}.AddRange(${arrType} { ${kept.join(', ')} });${nl ?? ''}`;
             });
 
-        const lines = text.split('\n');
+        const lines = body.split('\n');
         const keep = [];
-        const ref = new RegExp(`\\b(?:this\\.)?${name}\\b`);
-        const field = new RegExp(`^\\s*private\\s+[\\w\\.<>]+\\s+${name};\\s*$`);
+        const safeName = reEsc(name);
+        const ref = new RegExp(`\\b(?:this\\.)?${safeName}\\b`);
         for (let i = 0; i < lines.length; i++) {
             const t = lines[i].trim();
             // "// name" comment trio above the control's block.
@@ -4635,10 +4924,18 @@
                 i += 1;
                 continue;
             }
-            if (ref.test(wfMaskStrings(lines[i])) || field.test(lines[i])) { continue; }
+            if (ref.test(wfMaskStrings(lines[i]))) { continue; }
             keep.push(lines[i]);
         }
-        return keep.join('\n');
+        const updatedBody = keep.join('\n');
+        text = `${text.slice(0, range.start)}${updatedBody}${text.slice(range.end)}`;
+
+        // Generated fields live outside InitializeComponent. Remove only the
+        // exact simple declaration; never erase user code that merely refers
+        // to the control identifier.
+        const field = new RegExp(
+            `^[ \\t]*private\\s+[\\w\\.:<>?,\\[\\]]+\\s+${safeName}\\s*;[ \\t]*(?:\\r?\\n|$)`, 'gm');
+        return text.replace(field, '');
     }
 
     /** Delete one control (and, for strips, their generated items). */
@@ -4652,6 +4949,8 @@
             names.push(c.name);
             // Deleting a strip also deletes its generated ToolStrip items.
             for (const itemName of (c.items ?? [])) { names.push(itemName); }
+            // DataGridView columns are generated fields with their own blocks.
+            for (const columnName of (c.columns ?? [])) { names.push(columnName); }
             // Deleting a container deletes everything inside it.
             const walk = kids => {
                 for (const k of kids ?? []) { names.push(k.name); walk(k.children); }
@@ -4669,17 +4968,107 @@
     // ----------------------------------------------------------- wf rename
 
     /**
-     * Rename a control: every identifier reference in the Designer.cs (field,
-     * instantiation, property block, comment trio, Name string, event wiring)
-     * plus, via the extension host, the code-behind .cs file. Event handler
-     * names like oldName_Click are left alone — same as Visual Studio.
+     * Rename an identifier in generated C# while copying comments and literals
+     * verbatim. This keeps examples, notes, and user-visible text untouched.
+     */
+    function wfRenameIdentifier(source, oldName, newName) {
+        const idRe = new RegExp(`\\b${oldName}\\b`, 'g');
+        const n = source.length;
+        let out = '';
+        let codeStart = 0;
+        let i = 0;
+
+        const flushCode = end => { out += source.slice(codeStart, end).replace(idRe, newName); };
+        const skipVerbatim = (from, to) => {
+            flushCode(from);
+            out += source.slice(from, to);
+            codeStart = i = to;
+        };
+
+        while (i < n) {
+            const ch = source[i];
+            const two = source.slice(i, i + 2);
+
+            if (two === '//') {
+                let end = source.indexOf('\n', i);
+                if (end < 0) { end = n; }
+                skipVerbatim(i, end);
+                continue;
+            }
+            if (two === '/*') {
+                let end = source.indexOf('*/', i + 2);
+                end = end < 0 ? n : end + 2;
+                skipVerbatim(i, end);
+                continue;
+            }
+
+            // C# 11 raw strings: interpolation '$' characters may precede a
+            // delimiter made from at least three quote characters.
+            if (ch === '$' || ch === '"') {
+                let quoteAt = i;
+                while (source[quoteAt] === '$') { quoteAt++; }
+                let quoteEnd = quoteAt;
+                while (source[quoteEnd] === '"') { quoteEnd++; }
+                const quoteCount = quoteEnd - quoteAt;
+                if (quoteCount >= 3) {
+                    const delimiter = '"'.repeat(quoteCount);
+                    const close = source.indexOf(delimiter, quoteEnd);
+                    skipVerbatim(i, close < 0 ? n : close + quoteCount);
+                    continue;
+                }
+            }
+
+            let verbatimPrefix = 0;
+            if (source.startsWith('@"', i)) { verbatimPrefix = 2; }
+            else if (source.startsWith('$@"', i) || source.startsWith('@$"', i)) { verbatimPrefix = 3; }
+            if (verbatimPrefix) {
+                let j = i + verbatimPrefix;
+                while (j < n) {
+                    if (source[j] === '"' && source[j + 1] === '"') { j += 2; continue; }
+                    if (source[j] === '"') { j++; break; }
+                    j++;
+                }
+                skipVerbatim(i, j);
+                continue;
+            }
+
+            if (ch === '"' || (ch === '$' && source[i + 1] === '"')) {
+                let j = i + (ch === '$' ? 2 : 1);
+                while (j < n && source[j] !== '"' && source[j] !== '\n') {
+                    if (source[j] === '\\') { j++; }
+                    j++;
+                }
+                if (j < n && source[j] === '"') { j++; }
+                skipVerbatim(i, j);
+                continue;
+            }
+
+            if (ch === '\'') {
+                let j = i + 1;
+                while (j < n && source[j] !== '\'' && source[j] !== '\n') {
+                    if (source[j] === '\\') { j++; }
+                    j++;
+                }
+                if (j < n && source[j] === '\'') { j++; }
+                skipVerbatim(i, j);
+                continue;
+            }
+            i++;
+        }
+        flushCode(n);
+        return out;
+    }
+
+    /**
+     * Rename a control's generated-code references and its own Name string,
+     * then ask the host to mirror the identifier change into code-behind.
+     * Handler names like oldName_Click are left alone — same as Visual Studio.
      */
     function wfRenameControl(ctrl, newName) {
         const oldName = ctrl.name;
         newName = newName.trim();
         if (!newName || newName === oldName) { renderPanel(); return; }
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(newName)) {
-            setStatus('UI Maker: control names must be valid C# identifiers.');
+        if (!validateCSharpIdentifier(newName, 'control name')) {
             renderPanel();
             return;
         }
@@ -4689,15 +5078,11 @@
             renderPanel();
             return;
         }
-        // Rename identifier references only — words inside string literals
-        // (another control's Text, list items, …) are user data and stay.
-        const idRe = new RegExp(`\\b${oldName}\\b`, 'g');
-        let text = xamlText.split('\n').map(line =>
-            line.split(/("(?:[^"\\]|\\.)*")/).map((part, i) =>
-                i % 2 === 1 ? part : part.replace(idRe, newName)).join('')
-        ).join('\n');
-        // …except the control's own Name string, which VS keeps in sync.
-        text = text.replace(new RegExp(`(\\bName\\s*=\\s*)"${oldName}"`, 'g'), `$1"${newName}"`);
+        let text = wfRenameIdentifier(xamlText, oldName, newName);
+        // Literals stay untouched except this control's generated Name
+        // assignment, whose receiver was just renamed above.
+        const ownName = new RegExp(`((?:this\\.)?${newName}\\.Name\\s*=\\s*)"${oldName}"`);
+        text = text.replace(ownName, `$1"${newName}"`);
         ctrl.name = newName; // re-parse re-selects by name
         vscode.postMessage({ type: 'renameControl', oldName, newName });
         wfApply(text);

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.11.1
+
+Reliability and VS-parity hardening after the 0.11 project-tools release.
+
+**Designer transactions and XAML safety.**
+* Designer edits now carry the exact source revision they were based on.
+  Split-editor changes, Undo, read-only files, and fast consecutive drags can
+  no longer be overwritten by a stale full-document replacement; rejected
+  edits refresh the canvas from the authoritative document.
+* XAML round-tripping now retains document-level comments/processing
+  instructions/doctype nodes, mixed inline text, inherited
+  `xml:space="preserve"`, CDATA, and namespace-aliased `x:Code`.
+* WinForms insertions reset the primary/multi-selection consistently.
+  Generated-name and handler inputs reject C# keywords; rename skips comments
+  and every ordinary/verbatim/raw literal. When the C# language service is
+  available, a control rename is a real solution-wide symbol rename.
+* WinForms deletion is bounded to `InitializeComponent` plus the exact
+  generated field, so helper-method references are never erased. Cut/copy and
+  Duplicate now fail closed for structural controls they cannot deep-clone;
+  SplitContainer/TableLayout placement and DataGridView-column cleanup are
+  preserved, and incomplete insertions are cancelled before any edit applies.
+
+**Project correctness and safety.**
+* Project Properties and NuGet use project/view generations so late async
+  results can never cross from project A into project B. Multi-target
+  `TargetFrameworks` values are preserved, `$` is literal in MSBuild values,
+  and NuGet prerelease comparison follows SemVer.
+* Run, Debug, and Publish prompt for and remember an active TFM in
+  multi-target projects. Target-path evaluation and output discovery use that
+  same TFM. Task/debug/process lifecycle guards prevent stale completions from
+  launching or stopping the wrong app.
+* Classic-to-SDK conversion now preserves explicit items, metadata,
+  conditions, project/assembly/COM references, and conditional property
+  groups. It fails closed on constructs it cannot prove safe, validates
+  package migrations, preflights backups, and commits through a verified
+  atomic replacement.
+* Generated file pairs and project/resource writes use staged or atomic
+  replacement. Root namespaces and RESX file references decode XML entities,
+  while generated C# identifiers are sanitized and keyword-safe.
+* Restricted Mode is declared and blocks .NET/MSBuild/NuGet/conversion
+  execution. Webviews use cryptographic CSP nonces, and the designer gains
+  keyboard-accessible toolbox items, focus indicators, ARIA state, and a
+  responsive narrow layout.
+
+**Verification.** Added a dependency-free Node regression suite for C# lexical
+rewrites, designer edit conflicts, atomic file sets, XML decoding, SemVer,
+and multi-target project inspection. Use `npm test` or the full `npm run check`.
+
 ## 0.11.0
 
 Project Properties, NuGet manager, classic-project conversion, and a

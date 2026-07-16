@@ -25,6 +25,7 @@ import {
     refAssembliesInstalled, addRefAssembliesHelper, findMsBuild
 } from './projectInfo';
 import { EXCLUDE_GLOB, getWorkingFolder, inExcludedDir, setWorkingFolder } from './workingFolder';
+import { decodeXmlEntities } from './xmlText';
 
 export type RunState = 'idle' | 'running' | 'debugging';
 
@@ -37,12 +38,20 @@ export class DotnetTools implements vscode.Disposable {
     private runExecution: vscode.TaskExecution | undefined;
     /** Direct child process backing Run for classic .NET Framework exes. */
     private runProcess: cp.ChildProcess | undefined;
+    /** Debug session started by this instance (name alone is not unique). */
+    private debugSession: vscode.DebugSession | undefined;
+    /** Completion events can beat executeTask()'s returned Thenable. */
+    private readonly endedTaskProcesses = new WeakMap<vscode.TaskExecution, { exitCode: number | undefined }>();
     private output: vscode.OutputChannel | undefined;
 
     /** Projects already asked about the reference-assemblies helper. */
     private readonly askedRefAssemblies = new Set<string>();
+    /** Active TFM for multi-target Run/Debug/Publish, remembered this session. */
+    private readonly selectedFrameworks = new Map<string, string>();
 
     private _state: RunState = 'idle';
+    /** Invalidates an older async Run/Debug continuation after Stop/restart. */
+    private lifecycleGeneration = 0;
     private readonly stateEmitter = new vscode.EventEmitter<RunState>();
     /** Fires whenever the app starts or stops (running / debugging / idle). */
     public readonly onDidChangeState = this.stateEmitter.event;
@@ -54,17 +63,29 @@ export class DotnetTools implements vscode.Disposable {
     constructor() {
         // Run (task flavor) ends -> back to idle.
         this.disposables.push(vscode.tasks.onDidEndTaskProcess(e => {
+            this.endedTaskProcesses.set(e.execution, { exitCode: e.exitCode });
             if (e.execution === this.runExecution) {
                 this.runExecution = undefined;
-                this.setState('idle');
+                if (!this.runProcess && !this.debugSession) { this.setState('idle'); }
             }
         }));
         // Our debug session starts/ends -> mirror the state.
         this.disposables.push(vscode.debug.onDidStartDebugSession(s => {
-            if (s.name === DEBUG_SESSION_NAME) { this.setState('debugging'); }
+            const generation = s.configuration.__uimakerGeneration;
+            if (s.name === DEBUG_SESSION_NAME && typeof generation === 'number') {
+                if (generation !== this.lifecycleGeneration) {
+                    void vscode.debug.stopDebugging(s);
+                    return;
+                }
+                this.debugSession = s;
+                this.setState('debugging');
+            }
         }));
         this.disposables.push(vscode.debug.onDidTerminateDebugSession(s => {
-            if (s.name === DEBUG_SESSION_NAME) { this.setState('idle'); }
+            if (s === this.debugSession) {
+                this.debugSession = undefined;
+                if (!this.runProcess && !this.runExecution) { this.setState('idle'); }
+            }
         }));
     }
 
@@ -99,6 +120,7 @@ export class DotnetTools implements vscode.Disposable {
     // ------------------------------------------------------------------ Build
 
     async build(): Promise<void> {
+        this.lifecycleGeneration++;
         const project = await this.findProject();
         if (!project) { return; }
         const pre = await this.preflight(project);
@@ -113,21 +135,26 @@ export class DotnetTools implements vscode.Disposable {
     // -------------------------------------------------------------------- Run
 
     async run(): Promise<void> {
+        const generation = ++this.lifecycleGeneration;
         const project = await this.findProject();
-        if (!project) { return; }
-        const pre = await this.preflight(project);
-        if (!pre) { return; }
-        this.stop();
+        if (!project || generation !== this.lifecycleGeneration) { return; }
+        const targetFramework = await this.selectTargetFramework(project, 'run');
+        if (targetFramework === null || generation !== this.lifecycleGeneration) { return; }
+        const pre = await this.preflight(project, targetFramework);
+        if (!pre || generation !== this.lifecycleGeneration) { return; }
+        this.stopCurrent();
 
         // Classic projects: build with MSBuild, then launch the exe directly
         // (dotnet run does not understand non-SDK projects).
         if (pre.msbuild) {
             const code = await this.execTaskAndWait('build', [project, '/p:Configuration=Debug', '/v:m'], pre.msbuild);
+            if (generation !== this.lifecycleGeneration) { return; }
             if (code !== 0) {
                 vscode.window.showErrorMessage('UI Maker: build failed — see the terminal output.');
                 return;
             }
-            const exe = await this.resolveOutputBinary(project, '.exe', pre.msbuild);
+            const exe = await this.resolveOutputBinary(project, '.exe', pre.msbuild, targetFramework);
+            if (generation !== this.lifecycleGeneration) { return; }
             if (!exe) {
                 vscode.window.showErrorMessage('UI Maker: build succeeded but the output .exe was not found.');
                 return;
@@ -145,12 +172,17 @@ export class DotnetTools implements vscode.Disposable {
         // requires elevation" (error 740). Build, then launch the exe through
         // a UAC prompt instead.
         if (this.requiresElevation(project)) {
-            const code = await this.execTaskAndWait('build', ['build', project, '-c', 'Debug']);
+            const code = await this.execTaskAndWait('build', [
+                'build', project, '-c', 'Debug',
+                ...(targetFramework ? ['-f', targetFramework] : [])
+            ]);
+            if (generation !== this.lifecycleGeneration) { return; }
             if (code !== 0) {
                 vscode.window.showErrorMessage('UI Maker: build failed — see the terminal output.');
                 return;
             }
-            const exe = await this.resolveOutputBinary(project, '.exe');
+            const exe = await this.resolveOutputBinary(project, '.exe', undefined, targetFramework);
+            if (generation !== this.lifecycleGeneration) { return; }
             if (exe) {
                 this.launchExeElevated(exe);
                 return;
@@ -160,7 +192,21 @@ export class DotnetTools implements vscode.Disposable {
 
         // `dotnet run` builds first, so a stale binary is never launched.
         // Running it as a task tells us when the app exits (play/stop toggle).
-        this.runExecution = await this.execTask('run', ['run', '--project', project]);
+        const execution = await this.execTask('run', [
+            'run', '--project', project,
+            ...(targetFramework ? ['--framework', targetFramework] : [])
+        ]);
+        if (generation !== this.lifecycleGeneration) {
+            execution.terminate();
+            return;
+        }
+        // A missing executable can produce an end event before executeTask's
+        // Thenable resumes. Do not retain an already-finished execution.
+        if (this.endedTaskProcesses.has(execution)) {
+            this.setState('idle');
+            return;
+        }
+        this.runExecution = execution;
         this.setState('running');
     }
 
@@ -176,7 +222,8 @@ export class DotnetTools implements vscode.Disposable {
         const xml = this.tryRead(project) ?? '';
         // The csproj can point at the manifest; otherwise check the two
         // places Visual Studio puts app.manifest by default.
-        const declared = /<ApplicationManifest>\s*([^<]+?)\s*<\/ApplicationManifest>/.exec(xml)?.[1];
+        const declaredRaw = /<ApplicationManifest>\s*([^<]+?)\s*<\/ApplicationManifest>/.exec(xml)?.[1];
+        const declared = declaredRaw ? decodeXmlEntities(declaredRaw) : undefined;
         const candidates = declared
             ? [path.isAbsolute(declared) ? declared : path.join(dir, declared)]
             : [path.join(dir, 'app.manifest'), path.join(dir, 'Properties', 'app.manifest')];
@@ -207,13 +254,15 @@ export class DotnetTools implements vscode.Disposable {
         child.stderr?.on('data', d => this.output?.append(String(d)));
         child.on('error', err => {
             this.output?.appendLine(`[UI Maker] failed to start: ${err.message}`);
+            if (this.runProcess !== child) { return; }
             this.runProcess = undefined;
-            this.setState('idle');
+            if (!this.runExecution && !this.debugSession) { this.setState('idle'); }
         });
         child.on('exit', code => {
             this.output?.appendLine(`[UI Maker] exited with code ${code ?? 'unknown'}`);
+            if (this.runProcess !== child) { return; }
             this.runProcess = undefined;
-            this.setState('idle');
+            if (!this.runExecution && !this.debugSession) { this.setState('idle'); }
         });
         this.runProcess = child;
         this.setState('running');
@@ -228,55 +277,75 @@ export class DotnetTools implements vscode.Disposable {
         child.stderr?.on('data', d => this.output?.append(String(d)));
         child.on('error', err => {
             this.output?.appendLine(`[UI Maker] failed to start: ${err.message}`);
+            if (this.runProcess !== child) { return; }
             this.runProcess = undefined;
-            this.setState('idle');
+            if (!this.runExecution && !this.debugSession) { this.setState('idle'); }
         });
         child.on('exit', code => {
             this.output?.appendLine(`[UI Maker] exited with code ${code ?? 'unknown'}`);
+            if (this.runProcess !== child) { return; }
             this.runProcess = undefined;
-            this.setState('idle');
+            if (!this.runExecution && !this.debugSession) { this.setState('idle'); }
         });
         this.runProcess = child;
         this.setState('running');
     }
 
     stop(): void {
-        if (vscode.debug.activeDebugSession?.name === DEBUG_SESSION_NAME) {
-            void vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
-        }
+        this.lifecycleGeneration++;
+        this.stopCurrent();
+    }
+
+    /** Stop tracked state without invalidating the operation that requested it. */
+    private stopCurrent(): void {
+        const session = this.debugSession
+            ?? (typeof vscode.debug.activeDebugSession?.configuration.__uimakerGeneration === 'number'
+                ? vscode.debug.activeDebugSession : undefined);
+        this.debugSession = undefined;
+        if (session) { void vscode.debug.stopDebugging(session); }
         this.runExecution?.terminate();
         this.runExecution = undefined;
-        if (this.runProcess) {
-            this.runProcess.kill();
-            this.runProcess = undefined;
-        }
+        const child = this.runProcess;
+        this.runProcess = undefined;
+        child?.kill();
         this.setState('idle');
     }
 
     // ------------------------------------------------------------------ Debug
 
     async debug(): Promise<void> {
+        const generation = ++this.lifecycleGeneration;
         const project = await this.findProject();
-        if (!project) { return; }
-        const pre = await this.preflight(project);
-        if (!pre) { return; }
+        if (!project || generation !== this.lifecycleGeneration) { return; }
+        const targetFramework = await this.selectTargetFramework(project, 'debug');
+        if (targetFramework === null || generation !== this.lifecycleGeneration) { return; }
+        const pre = await this.preflight(project, targetFramework);
+        if (!pre || generation !== this.lifecycleGeneration) { return; }
+        this.stopCurrent();
 
         // Build first; a failed build should surface errors, not a debugger.
         const exitCode = pre.msbuild
             ? await this.execTaskAndWait('build', [project, '/p:Configuration=Debug', '/v:m'], pre.msbuild)
-            : await this.execTaskAndWait('build', ['build', project, '-c', 'Debug']);
+            : await this.execTaskAndWait('build', [
+                'build', project, '-c', 'Debug',
+                ...(targetFramework ? ['-f', targetFramework] : [])
+            ]);
+        if (generation !== this.lifecycleGeneration) { return; }
         if (exitCode !== 0) {
             vscode.window.showErrorMessage('UI Maker: build failed — fix the errors before debugging.');
             return;
         }
 
         const info = readProjectInfo(project);
-        const netFramework = info?.netFramework ?? false;
+        const netFramework = targetFramework
+            ? isNetFrameworkTfm(targetFramework)
+            : info?.netFramework ?? false;
         // .NET Framework apps debug with the 'clr' engine against the .exe;
         // modern .NET uses 'coreclr' against the .dll.
         const program = netFramework
-            ? await this.resolveOutputBinary(project, '.exe', pre.msbuild)
-            : await this.resolveOutputBinary(project, '.dll');
+            ? await this.resolveOutputBinary(project, '.exe', pre.msbuild, targetFramework)
+            : await this.resolveOutputBinary(project, '.dll', pre.msbuild, targetFramework);
+        if (generation !== this.lifecycleGeneration) { return; }
         if (!program) {
             vscode.window.showWarningMessage('UI Maker: could not locate the build output. Launching without the debugger.');
             await this.run();
@@ -298,7 +367,8 @@ export class DotnetTools implements vscode.Disposable {
             program,
             cwd: path.dirname(program),
             console: 'internalConsole',
-            stopAtEntry: false
+            stopAtEntry: false,
+            __uimakerGeneration: generation
         };
 
         // The debug engines come from the C# extension. If it is missing the
@@ -307,12 +377,20 @@ export class DotnetTools implements vscode.Disposable {
             ok => ok,
             () => false
         );
+        if (generation !== this.lifecycleGeneration) {
+            if (this.debugSession?.configuration.__uimakerGeneration === generation) {
+                void vscode.debug.stopDebugging(this.debugSession);
+                this.debugSession = undefined;
+            }
+            return;
+        }
         if (!started) {
             const install = 'Install C# Extension';
             const choice = await vscode.window.showWarningMessage(
                 'UI Maker: debugging needs the C# extension (ms-dotnettools.csharp). The app was launched without the debugger.',
                 install
             );
+            if (generation !== this.lifecycleGeneration) { return; }
             if (choice === install) {
                 void vscode.commands.executeCommand('workbench.extensions.installExtension', 'ms-dotnettools.csharp');
             }
@@ -323,23 +401,26 @@ export class DotnetTools implements vscode.Disposable {
     // ---------------------------------------------------------------- Release
 
     async release(): Promise<void> {
+        const generation = ++this.lifecycleGeneration;
         const project = await this.findProject();
-        if (!project) { return; }
-        const pre = await this.preflight(project);
-        if (!pre) { return; }
+        if (!project || generation !== this.lifecycleGeneration) { return; }
+        const targetFramework = await this.selectTargetFramework(project, 'publish');
+        if (targetFramework === null || generation !== this.lifecycleGeneration) { return; }
+        const pre = await this.preflight(project, targetFramework);
+        if (!pre || generation !== this.lifecycleGeneration) { return; }
 
         let exitCode: number | undefined;
         if (pre.msbuild) {
             exitCode = await this.execTaskAndWait('publish', [project, '/p:Configuration=Release', '/v:m'], pre.msbuild);
         } else {
-            exitCode = await this.execTaskAndWait('publish', this.publishArgs(project));
+            exitCode = await this.execTaskAndWait('publish', this.publishArgs(project, targetFramework));
         }
-        if (exitCode !== 0) { return; }
+        if (exitCode !== 0 || generation !== this.lifecycleGeneration) { return; }
 
         // Point the user at the output folder that was just produced.
         const publishDir = pre.msbuild
             ? this.findReleaseDir(project)
-            : (this.findPublishDir(project) ?? this.findReleaseDir(project));
+            : (this.findPublishDir(project, targetFramework) ?? this.findReleaseDir(project));
         const open = 'Open Output Folder';
         const choice = await vscode.window.showInformationMessage(
             `UI Maker: release build published${publishDir ? ` to ${publishDir}` : ''}.`,
@@ -355,10 +436,11 @@ export class DotnetTools implements vscode.Disposable {
      * single .exe, self-contained runtime, target runtime identifier.
      * (.NET Framework targets ignore them — single-file needs modern .NET.)
      */
-    private publishArgs(project: string): string[] {
+    private publishArgs(project: string, targetFramework?: string): string[] {
         const args = ['publish', project, '-c', 'Release'];
+        if (targetFramework) { args.push('-f', targetFramework); }
         const info = readProjectInfo(project);
-        if (info?.netFramework) { return args; }
+        if (targetFramework ? isNetFrameworkTfm(targetFramework) : info?.netFramework) { return args; }
 
         const cfg = vscode.workspace.getConfiguration('uimaker');
         const singleFile = cfg.get<boolean>('publish.singleFile', false);
@@ -377,6 +459,41 @@ export class DotnetTools implements vscode.Disposable {
         return args;
     }
 
+    /**
+     * Choose the active framework for an SDK project that targets more than
+     * one TFM. The choice is reused for Run/Debug/Publish during this session,
+     * mirroring Visual Studio's active target selector.
+     *
+     * undefined = no explicit TFM is needed; null = user cancelled.
+     */
+    private async selectTargetFramework(
+        project: string,
+        action: 'run' | 'debug' | 'publish'
+    ): Promise<string | undefined | null> {
+        const info = readProjectInfo(project);
+        if (!info?.sdkStyle || info.targetFrameworks.length === 0) { return undefined; }
+        if (info.targetFrameworks.length === 1) { return info.targetFrameworks[0]; }
+
+        const key = path.resolve(project).toLowerCase();
+        const remembered = this.selectedFrameworks.get(key);
+        if (remembered && info.targetFrameworks.includes(remembered)) { return remembered; }
+
+        const picked = await vscode.window.showQuickPick(
+            info.targetFrameworks.map(tfm => ({
+                label: frameworkLabel(tfm),
+                description: tfm,
+                tfm
+            })),
+            {
+                placeHolder: `UI Maker: select the target framework to ${action}`,
+                matchOnDescription: true
+            }
+        );
+        if (!picked) { return null; }
+        this.selectedFrameworks.set(key, picked.tfm);
+        return picked.tfm;
+    }
+
     // ------------------------------------------------------- build protection
 
     /**
@@ -384,7 +501,10 @@ export class DotnetTools implements vscode.Disposable {
      * Returns undefined to abort, `{}` to proceed with the dotnet CLI, or
      * `{ msbuild }` to route the build through Visual Studio's MSBuild.
      */
-    private async preflight(project: string): Promise<{ msbuild?: string } | undefined> {
+    private async preflight(
+        project: string,
+        targetFramework?: string
+    ): Promise<{ msbuild?: string } | undefined> {
         await this.stopLockedInstances(project);
 
         const info = readProjectInfo(project);
@@ -407,7 +527,11 @@ export class DotnetTools implements vscode.Disposable {
 
         // SDK-style project targeting .NET Framework: without the reference
         // assemblies the build dies with MSB3644 — offer the NuGet helper.
-        const tfm = info.targetFrameworks.find(isNetFrameworkTfm);
+        const tfm = targetFramework && isNetFrameworkTfm(targetFramework)
+            ? targetFramework
+            : targetFramework
+                ? undefined
+                : info.targetFrameworks.find(isNetFrameworkTfm);
         if (tfm && !info.hasRefAssembliesHelper && !refAssembliesInstalled(tfm)
             && !this.askedRefAssemblies.has(project)) {
             this.askedRefAssemblies.add(project);
@@ -446,7 +570,7 @@ export class DotnetTools implements vscode.Disposable {
 
         // If we launched the app, just stop it and re-check.
         if (this._state !== 'idle' || this.runProcess || this.runExecution) {
-            this.stop();
+            this.stopCurrent();
             await delay(1000);
             pids = await listProjectProcessIds(exeName, projectDir);
             if (!pids.length) { return; }
@@ -467,7 +591,8 @@ export class DotnetTools implements vscode.Disposable {
     /** The assembly name declared in the project, else the project file name. */
     private assemblyNameOf(project: string): string {
         const xml = this.tryRead(project) ?? '';
-        return /<AssemblyName>\s*([^<]+?)\s*<\/AssemblyName>/.exec(xml)?.[1]
+        const declared = /<AssemblyName>\s*([^<]+?)\s*<\/AssemblyName>/.exec(xml)?.[1];
+        return (declared ? decodeXmlEntities(declared) : undefined)
             ?? path.basename(project).replace(/\.(cs|vb)proj$/i, '');
     }
 
@@ -556,6 +681,8 @@ export class DotnetTools implements vscode.Disposable {
     /** Run a task and resolve with its process exit code. */
     private async execTaskAndWait(name: string, args: string[], executable = 'dotnet'): Promise<number | undefined> {
         const execution = await this.execTask(name, args, executable);
+        const alreadyEnded = this.endedTaskProcesses.get(execution);
+        if (alreadyEnded) { return alreadyEnded.exitCode; }
         return new Promise(resolve => {
             const sub = vscode.tasks.onDidEndTaskProcess(e => {
                 if (e.execution === execution) {
@@ -568,7 +695,7 @@ export class DotnetTools implements vscode.Disposable {
 
     // ------------------------------------------------------- output discovery
 
-    /** project path -> { csproj mtime, evaluated TargetPath } */
+    /** project + selected TFM -> { csproj mtime, evaluated TargetPath } */
     private readonly targetPathCache = new Map<string, { mtime: number; value: string | undefined }>();
 
     /**
@@ -577,8 +704,13 @@ export class DotnetTools implements vscode.Disposable {
      * selected TFM), with the bin-folder scan as fallback for older SDKs
      * and multi-target projects where -getProperty is unavailable.
      */
-    private async resolveOutputBinary(project: string, ext: '.dll' | '.exe', msbuildExe?: string): Promise<string | undefined> {
-        const evaluated = await this.evaluateTargetPath(project, msbuildExe);
+    private async resolveOutputBinary(
+        project: string,
+        ext: '.dll' | '.exe',
+        msbuildExe?: string,
+        targetFramework?: string
+    ): Promise<string | undefined> {
+        const evaluated = await this.evaluateTargetPath(project, msbuildExe, targetFramework);
         if (evaluated) {
             // TargetPath is the primary output (.dll on modern .NET, .exe on
             // .NET Framework) — the sibling extension sits next to it.
@@ -587,24 +719,30 @@ export class DotnetTools implements vscode.Disposable {
                 : evaluated.replace(/\.(dll|exe)$/i, ext);
             if (fs.existsSync(candidate)) { return candidate; }
         }
-        return this.findOutputBinary(project, ext);
+        return this.findOutputBinary(project, ext, targetFramework);
     }
 
     /** MSBuild-evaluated TargetPath (Debug), cached per project file mtime. */
-    private evaluateTargetPath(project: string, msbuildExe?: string): Promise<string | undefined> {
+    private evaluateTargetPath(
+        project: string,
+        msbuildExe?: string,
+        targetFramework?: string
+    ): Promise<string | undefined> {
         let mtime = 0;
         try { mtime = fs.statSync(project).mtimeMs; } catch { /* keep 0 */ }
-        const cached = this.targetPathCache.get(project);
+        const cacheKey = `${project}\0${msbuildExe ?? ''}\0${targetFramework ?? ''}`;
+        const cached = this.targetPathCache.get(cacheKey);
         if (cached && cached.mtime === mtime) { return Promise.resolve(cached.value); }
 
         return new Promise(resolve => {
+            const frameworkArg = targetFramework ? [`-p:TargetFramework=${targetFramework}`] : [];
             const args = msbuildExe
-                ? [project, '-getProperty:TargetPath', '-p:Configuration=Debug', '-nologo']
-                : ['msbuild', project, '-getProperty:TargetPath', '-p:Configuration=Debug', '-nologo'];
+                ? [project, '-getProperty:TargetPath', '-p:Configuration=Debug', ...frameworkArg, '-nologo']
+                : ['msbuild', project, '-getProperty:TargetPath', '-p:Configuration=Debug', ...frameworkArg, '-nologo'];
             cp.execFile(msbuildExe ?? 'dotnet', args, { timeout: 30000, windowsHide: true }, (err, stdout) => {
                 const line = err ? '' : stdout.trim().split(/\r?\n/).pop()?.trim() ?? '';
                 const value = line && path.isAbsolute(line) ? line : undefined;
-                this.targetPathCache.set(project, { mtime, value });
+                this.targetPathCache.set(cacheKey, { mtime, value });
                 resolve(value);
             });
         });
@@ -614,13 +752,17 @@ export class DotnetTools implements vscode.Disposable {
      * Resolve the Debug build output with the given extension: checks
      * bin/Debug/<file> (classic layout) and bin/Debug/<tfm>/<file>.
      */
-    private findOutputBinary(project: string, ext: '.dll' | '.exe'): string | undefined {
+    private findOutputBinary(
+        project: string,
+        ext: '.dll' | '.exe',
+        targetFramework?: string
+    ): string | undefined {
         const dir = path.dirname(project);
         const xml = this.tryRead(project) ?? '';
         const assembly = this.assemblyNameOf(project);
 
         // Prefer the declared target framework, otherwise scan bin/Debug.
-        const tfm =
+        const tfm = targetFramework ??
             /<TargetFramework>\s*([^<]+?)\s*<\/TargetFramework>/.exec(xml)?.[1] ??
             /<TargetFrameworks>\s*([^<;]+)/.exec(xml)?.[1];
 
@@ -643,22 +785,28 @@ export class DotnetTools implements vscode.Disposable {
     }
 
     /** Locate the newest publish folder after `dotnet publish` (handles -r). */
-    private findPublishDir(project: string): string | undefined {
+    private findPublishDir(project: string, targetFramework?: string): string | undefined {
         const releaseDir = path.join(path.dirname(project), 'bin', 'Release');
         const hits: string[] = [];
+        const addPublishDirs = (tfmDir: string) => {
+            const direct = path.join(tfmDir, 'publish');
+            if (fs.existsSync(direct)) { hits.push(direct); }
+            try {
+                for (const rid of fs.readdirSync(tfmDir)) {
+                    const nested = path.join(tfmDir, rid, 'publish');
+                    if (fs.existsSync(nested)) { hits.push(nested); }
+                }
+            } catch { /* not a directory */ }
+        };
         try {
+            if (targetFramework) {
+                addPublishDirs(path.join(releaseDir, targetFramework));
+                if (hits.length) {
+                    return hits.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+                }
+            }
             for (const sub of fs.readdirSync(releaseDir)) {
-                // bin/Release/<tfm>/publish
-                const direct = path.join(releaseDir, sub, 'publish');
-                if (fs.existsSync(direct)) { hits.push(direct); }
-                // bin/Release/<tfm>/<rid>/publish (runtime-specific publishes)
-                const tfmDir = path.join(releaseDir, sub);
-                try {
-                    for (const rid of fs.readdirSync(tfmDir)) {
-                        const nested = path.join(tfmDir, rid, 'publish');
-                        if (fs.existsSync(nested)) { hits.push(nested); }
-                    }
-                } catch { /* not a directory */ }
+                addPublishDirs(path.join(releaseDir, sub));
             }
         } catch {
             return undefined;
@@ -688,20 +836,26 @@ export class DotnetTools implements vscode.Disposable {
  */
 function listProjectProcessIds(imageName: string, projectDir: string): Promise<number[]> {
     return new Promise(resolve => {
+        // Keep the PowerShell source completely static. AssemblyName comes
+        // from the project file and must never be interpolated into a command
+        // string (PowerShell expands `$()` even inside double-quoted text).
         const script =
-            `Get-CimInstance Win32_Process -Filter "Name='${imageName.replace(/'/g, "''")}'" | ` +
-            `ForEach-Object { Write-Output ("$($_.ProcessId)|$($_.ExecutablePath)") }`;
+            'Get-CimInstance Win32_Process | ' +
+            'ForEach-Object { Write-Output ("$($_.ProcessId)|$($_.Name)|$($_.ExecutablePath)") }';
         cp.execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
             { windowsHide: true, timeout: 15000 }, (err, stdout) => {
                 if (err) { resolve([]); return; }
                 const prefix = (projectDir.endsWith(path.sep) ? projectDir : projectDir + path.sep).toLowerCase();
+                const wantedName = imageName.toLowerCase();
                 const pids: number[] = [];
                 for (const line of stdout.split(/\r?\n/)) {
-                    const sep = line.indexOf('|');
-                    if (sep < 1) { continue; }
-                    const pid = Number(line.slice(0, sep).trim());
-                    const exePath = line.slice(sep + 1).trim().toLowerCase();
-                    if (pid && exePath && exePath.startsWith(prefix)) { pids.push(pid); }
+                    const first = line.indexOf('|');
+                    const second = line.indexOf('|', first + 1);
+                    if (first < 1 || second < 0) { continue; }
+                    const pid = Number(line.slice(0, first).trim());
+                    const name = line.slice(first + 1, second).trim().toLowerCase();
+                    const exePath = line.slice(second + 1).trim().toLowerCase();
+                    if (pid && name === wantedName && exePath.startsWith(prefix)) { pids.push(pid); }
                 }
                 resolve(pids);
             });

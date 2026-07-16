@@ -7,9 +7,12 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { randomBytes } from 'crypto';
 import { ensureEventHandler } from './codeBehind';
 import { pickAndImportImage, resolveImages, findProjectDir, ImageKey } from './resources';
 import { projectDirOf, setWorkingFolder } from './workingFolder';
+import { escapeRegExp, isCSharpIdentifier, renameCSharpIdentifier } from './csharpText';
+import { decideDesignerEdit } from './designerSync';
 
 export class DesignerProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'uimaker.designer';
@@ -43,7 +46,8 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         // icons), so the workspace and the form's project folder must be
         // readable by the webview alongside the extension's own media.
         const resourceRoots = [vscode.Uri.joinPath(this.context.extensionUri, 'media')];
-        for (const f of vscode.workspace.workspaceFolders ?? []) { resourceRoots.push(f.uri); }
+        const containingWorkspace = vscode.workspace.getWorkspaceFolder(document.uri);
+        if (containingWorkspace) { resourceRoots.push(containingWorkspace.uri); }
         const projDir = findProjectDir(document.uri.fsPath);
         resourceRoots.push(vscode.Uri.file(projDir ?? path.dirname(document.uri.fsPath)));
 
@@ -54,10 +58,13 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         panel.webview.html = this.buildHtml(panel.webview);
 
         DesignerProvider.activeDocumentUri = document.uri;
+        const initialProjectDir = projectDirOf(document.uri.fsPath);
+        if (initialProjectDir) { setWorkingFolder(initialProjectDir); }
 
-        // Text most recently produced BY the webview. Used to break the echo
-        // loop: when the document change matches it, the webview already has it.
-        let webviewText: string | undefined;
+        // One pending designer edit. It is consumed on the matching document
+        // event; keeping it beyond that event would hide a later Undo that
+        // happens to return to the same text.
+        let pendingWebviewText: string | undefined;
 
         const postUpdate = () => {
             void panel.webview.postMessage({ type: 'update', text: document.getText() });
@@ -76,7 +83,12 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
         subs.push(vscode.workspace.onDidChangeTextDocument(e => {
             if (e.document.uri.toString() !== document.uri.toString()) { return; }
-            if (e.document.getText() === webviewText) { return; } // our own edit
+            const changedText = e.document.getText();
+            if (pendingWebviewText !== undefined && changedText === pendingWebviewText) {
+                pendingWebviewText = undefined;
+                return; // acknowledgement of our own edit
+            }
+            pendingWebviewText = undefined;
             postUpdate();
         }));
 
@@ -94,13 +106,28 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             }
         }));
 
-        subs.push(panel.webview.onDidReceiveMessage(async (msg: any) => {
-            try {
-                await this.handleMessage(msg, document, panel, t => { webviewText = t; });
-            } catch (err) {
-                void vscode.window.showWarningMessage(
-                    `UI Maker: ${err instanceof Error ? err.message : String(err)}`);
-            }
+        // Serialize webview mutations. WorkspaceEdit is asynchronous; without
+        // a queue, a fast drag can apply older full-document text after newer
+        // text and make the canvas/document disagree.
+        let messageQueue = Promise.resolve();
+        subs.push(panel.webview.onDidReceiveMessage((msg: any) => {
+            messageQueue = messageQueue
+                .then(() => this.handleMessage(
+                    msg,
+                    document,
+                    panel,
+                    t => { pendingWebviewText = t; }
+                ))
+                .catch(err => {
+                    pendingWebviewText = undefined;
+                    void panel.webview.postMessage({
+                        type: 'editResult',
+                        ok: false,
+                        text: document.getText()
+                    });
+                    void vscode.window.showWarningMessage(
+                        `UI Maker: ${err instanceof Error ? err.message : String(err)}`);
+                });
         }));
 
         panel.onDidDispose(() => {
@@ -116,7 +143,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         msg: any,
         document: vscode.TextDocument,
         panel: vscode.WebviewPanel,
-        setWebviewText: (t: string) => void
+        setWebviewText: (t: string | undefined) => void
     ): Promise<void> {
         const postConfig = () => {
             const cfg = vscode.workspace.getConfiguration('uimaker');
@@ -149,7 +176,52 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 // mirror the identifier rename into the code-behind .cs file.
                 case 'renameControl': {
                     const { oldName, newName } = msg as { oldName: string; newName: string };
-                    if (!/^[A-Za-z_]\w*$/.test(oldName ?? '') || !/^[A-Za-z_]\w*$/.test(newName ?? '')) { break; }
+                    if (!isCSharpIdentifier(oldName) || !isCSharpIdentifier(newName)) { break; }
+
+                    // Prefer the installed C# language service. This is a real
+                    // symbol rename, so references in other project files and
+                    // interpolated/raw strings follow the control just as they
+                    // do in Visual Studio. The lexical pair-only path below is
+                    // retained for machines without the C# extension.
+                    const designerSource = document.getText();
+                    const declaration = new RegExp(
+                        `\\b(?:private|protected|internal|public)\\s+[\\w.<>,\\[\\]?]+\\s+(${escapeRegExp(oldName)})\\s*;`
+                    ).exec(designerSource);
+                    if (declaration) {
+                        const oldNameOffset = declaration.index + declaration[0].lastIndexOf(oldName);
+                        try {
+                            const semanticEdit = await vscode.commands.executeCommand<vscode.WorkspaceEdit | undefined>(
+                                'vscode.executeDocumentRenameProvider',
+                                document.uri,
+                                document.positionAt(oldNameOffset),
+                                newName
+                            );
+                            if (semanticEdit) {
+                                // C# symbol rename intentionally ignores the
+                                // WinForms designer's generated Name string;
+                                // Visual Studio changes that identity too.
+                                const ownName = new RegExp(
+                                    `\\b(?:this\\.)?${escapeRegExp(oldName)}\\.Name\\s*=\\s*"(${escapeRegExp(oldName)})"`
+                                ).exec(designerSource);
+                                if (ownName) {
+                                    const literalOffset = ownName.index + ownName[0].lastIndexOf(`"${oldName}"`) + 1;
+                                    semanticEdit.replace(
+                                        document.uri,
+                                        new vscode.Range(
+                                            document.positionAt(literalOffset),
+                                            document.positionAt(literalOffset + oldName.length)
+                                        ),
+                                        newName
+                                    );
+                                }
+                                if (await vscode.workspace.applyEdit(semanticEdit)) { break; }
+                            }
+                        } catch {
+                            // Language service absent/not ready — use the safe
+                            // dependency-free fallback below.
+                        }
+                    }
+
                     const codePath = document.uri.fsPath.replace(/\.designer\.cs$/i, '.cs');
                     if (codePath.toLowerCase() === document.uri.fsPath.toLowerCase()) { break; }
                     try {
@@ -157,11 +229,20 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                         const codeDoc = await vscode.workspace.openTextDocument(codeUri);
                         const wasDirty = codeDoc.isDirty;
                         const before = codeDoc.getText();
-                        const after = renameIdentifier(before, oldName, newName);
+                        const after = renameCSharpIdentifier(before, oldName, newName);
                         if (after !== before) {
                             const edit = new vscode.WorkspaceEdit();
-                            edit.replace(codeUri, new vscode.Range(0, 0, codeDoc.lineCount, 0), after);
-                            await vscode.workspace.applyEdit(edit);
+                            edit.replace(
+                                codeUri,
+                                new vscode.Range(codeDoc.positionAt(0), codeDoc.positionAt(before.length)),
+                                after
+                            );
+                            const applied = await vscode.workspace.applyEdit(edit);
+                            if (!applied) {
+                                void vscode.window.showWarningMessage(
+                                    'UI Maker: control references could not be renamed in the code-behind.');
+                                break;
+                            }
                             // Save only what we own: if the user already had
                             // unsaved edits, leave the buffer dirty for them.
                             if (!wasDirty) { await codeDoc.save(); }
@@ -174,18 +255,49 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
                 // Designer produced new XAML — replace the whole document.
                 case 'edit': {
+                    const current = document.getText();
+                    const decision = decideDesignerEdit(current, msg);
+                    if (decision === 'invalid') {
+                        throw new Error('the designer sent an invalid edit transaction');
+                    }
                     const text = msg.text as string;
+                    // Apply only against the source revision the canvas
+                    // rendered. A newer split-editor change always wins.
+                    if (decision === 'conflict') {
+                        setWebviewText(undefined);
+                        void panel.webview.postMessage({
+                            type: 'editResult',
+                            ok: false,
+                            text: current,
+                            reason: 'The source changed before the designer edit could be applied.'
+                        });
+                        break;
+                    }
+                    if (decision === 'noop') {
+                        setWebviewText(undefined);
+                        void panel.webview.postMessage({ type: 'editResult', ok: true, text });
+                        break;
+                    }
                     setWebviewText(text);
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(
                         document.uri,
-                        new vscode.Range(0, 0, document.lineCount, 0),
+                        new vscode.Range(document.positionAt(0), document.positionAt(current.length)),
                         text
                     );
                     const ok = await vscode.workspace.applyEdit(edit);
                     if (!ok) {
+                        setWebviewText(undefined);
+                        void panel.webview.postMessage({
+                            type: 'editResult',
+                            ok: false,
+                            text: document.getText(),
+                            reason: 'The file may be read-only.'
+                        });
                         void vscode.window.showWarningMessage(
                             'UI Maker: the designer edit could not be applied — the file may be read-only.');
+                    } else {
+                        void panel.webview.postMessage({ type: 'editResult', ok: true, text });
                     }
                     break;
                 }
@@ -265,7 +377,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 <body>
     <div id="ff-root">
         <!-- Top toolbar: view + canvas options -->
-        <div id="ff-toolbar">
+        <div id="ff-toolbar" role="toolbar" aria-label="Designer commands">
             <span class="ff-brand">UI Maker</span>
             <button id="ff-btn-code" title="Open XAML source in a split editor">&lt;/&gt; View Code</button>
             <label class="ff-check"><input type="checkbox" id="ff-snap" checked> Snap</label>
@@ -296,14 +408,14 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
         <div id="ff-main">
             <!-- Toolbox: drag controls onto the canvas -->
-            <div id="ff-toolbox">
+            <div id="ff-toolbox" role="region" aria-label="Toolbox">
                 <div class="ff-panel-title">Toolbox</div>
                 <div id="ff-toolbox-items"></div>
             </div>
 
             <!-- Design surface -->
-            <div id="ff-canvas-host">
-                <div id="ff-banner" hidden></div>
+            <div id="ff-canvas-host" role="region" aria-label="Design surface">
+                <div id="ff-banner" role="alert" hidden></div>
                 <div id="ff-window">
                     <div id="ff-titlebar">
                         <span id="ff-title-text">Window</span>
@@ -316,10 +428,10 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             </div>
 
             <!-- Properties / Events -->
-            <div id="ff-props">
-                <div class="ff-tabs">
-                    <button id="ff-tab-props" class="active">Properties</button>
-                    <button id="ff-tab-events">Events</button>
+            <div id="ff-props" role="region" aria-label="Properties and events">
+                <div class="ff-tabs" role="tablist" aria-label="Inspector">
+                    <button id="ff-tab-props" class="active" role="tab" aria-selected="true">Properties</button>
+                    <button id="ff-tab-events" role="tab" aria-selected="false">Events</button>
                 </div>
                 <div id="ff-props-target" class="ff-panel-title"></div>
                 <div id="ff-props-tools">
@@ -331,7 +443,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             </div>
         </div>
 
-        <div id="ff-status">Ready</div>
+        <div id="ff-status" role="status" aria-live="polite">Ready</div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
@@ -345,72 +457,9 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
  * MessageBox.Show("clicked button1") or notes in comments.
  */
 export function renameIdentifier(source: string, oldName: string, newName: string): string {
-    const idRe = new RegExp(`\\b${oldName}\\b`, 'g');
-    const n = source.length;
-    let out = '';
-    let codeStart = 0;   // start of the current plain-code run
-    let i = 0;
-
-    /** Emit source[codeStart..end) with the rename applied. */
-    const flushCode = (end: number) => { out += source.slice(codeStart, end).replace(idRe, newName); };
-    /** Emit source[from..to) verbatim and continue scanning at `to`. */
-    const skipVerbatim = (from: number, to: number) => {
-        flushCode(from);
-        out += source.slice(from, to);
-        codeStart = i = to;
-    };
-
-    while (i < n) {
-        const ch = source[i];
-        const two = source.substr(i, 2);
-        if (two === '//') {                                     // line comment
-            let end = source.indexOf('\n', i);
-            if (end < 0) { end = n; }
-            skipVerbatim(i, end);
-        } else if (two === '/*') {                              // block comment
-            let end = source.indexOf('*/', i + 2);
-            end = end < 0 ? n : end + 2;
-            skipVerbatim(i, end);
-        } else if (two === '@"' || source.substr(i, 3) === '$@"' || source.substr(i, 3) === '@$"') {
-            // Verbatim string: "" is the only escape.
-            const open = i + (ch === '@' ? 2 : 3);
-            let j = open;
-            while (j < n) {
-                if (source[j] === '"' && source[j + 1] === '"') { j += 2; continue; }
-                if (source[j] === '"') { j++; break; }
-                j++;
-            }
-            skipVerbatim(i, j);
-        } else if (ch === '"' || (ch === '$' && source[i + 1] === '"')) {
-            // Regular (possibly interpolated) string with backslash escapes.
-            let j = i + (ch === '$' ? 2 : 1);
-            while (j < n && source[j] !== '"' && source[j] !== '\n') {
-                if (source[j] === '\\') { j++; }
-                j++;
-            }
-            if (j < n && source[j] === '"') { j++; }
-            skipVerbatim(i, j);
-        } else if (ch === '\'') {                               // char literal
-            let j = i + 1;
-            while (j < n && source[j] !== '\'' && source[j] !== '\n') {
-                if (source[j] === '\\') { j++; }
-                j++;
-            }
-            if (j < n && source[j] === '\'') { j++; }
-            skipVerbatim(i, j);
-        } else {
-            i++;
-        }
-    }
-    flushCode(n);
-    return out;
+    return renameCSharpIdentifier(source, oldName, newName);
 }
 
 function makeNonce(): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let out = '';
-    for (let i = 0; i < 32; i++) {
-        out += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return out;
+    return randomBytes(32).toString('base64url');
 }

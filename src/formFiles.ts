@@ -10,9 +10,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { readProjectInfo } from './projectInfo';
 import { DotnetTools } from './dotnetTools';
-
-/** Valid C# type name for a new window/form. */
-const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+import { escapeRegExp, isCSharpIdentifier, sanitizeCSharpNamespace } from './csharpText';
+import { decodeXmlEntities } from './xmlText';
+import { createFilesAtomically, replaceFileAtomically } from './atomicFile';
 
 /**
  * These commands generate C# files. A Visual Basic project would compile
@@ -45,16 +45,15 @@ export async function addXamlWindow(dotnet: DotnetTools): Promise<void> {
     const xamlPath = path.join(dir, `${name}.xaml`);
     const csPath = path.join(dir, `${name}.xaml.cs`);
 
-    fs.writeFileSync(xamlPath,
+    const xamlSource =
         `<Window x:Class="${ns}.${name}"\r\n` +
         `        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\r\n` +
         `        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"\r\n` +
         `        Title="${name}" Width="800" Height="450">\r\n` +
         `    <Grid>\r\n` +
         `    </Grid>\r\n` +
-        `</Window>\r\n`, 'utf8');
-
-    fs.writeFileSync(csPath,
+        `</Window>\r\n`;
+    const codeSource =
         `using System.Windows;\r\n` +
         `\r\n` +
         `namespace ${ns}\r\n` +
@@ -67,7 +66,16 @@ export async function addXamlWindow(dotnet: DotnetTools): Promise<void> {
         `            InitializeComponent();\r\n` +
         `        }\r\n` +
         `    }\r\n` +
-        `}\r\n`, 'utf8');
+        `}\r\n`;
+    try {
+        createFilesAtomically([
+            { target: xamlPath, contents: xamlSource },
+            { target: csPath, contents: codeSource }
+        ]);
+    } catch (err) {
+        vscode.window.showErrorMessage(`UI Maker: could not create the window files — ${err}`);
+        return;
+    }
 
     registerInClassicProject(project, [
         { tag: 'Page', include: relTo(project, xamlPath), generator: 'MSBuild:Compile', subType: 'Designer' },
@@ -93,7 +101,7 @@ export async function addWinForm(dotnet: DotnetTools): Promise<void> {
     const csPath = path.join(dir, `${name}.cs`);
     const designerPath = path.join(dir, `${name}.Designer.cs`);
 
-    fs.writeFileSync(csPath,
+    const codeSource =
         `using System;\r\n` +
         `using System.Windows.Forms;\r\n` +
         `\r\n` +
@@ -106,11 +114,11 @@ export async function addWinForm(dotnet: DotnetTools): Promise<void> {
         `            InitializeComponent();\r\n` +
         `        }\r\n` +
         `    }\r\n` +
-        `}\r\n`, 'utf8');
+        `}\r\n`;
 
     // Classic fully-qualified designer code — compiles on every framework and
     // carries all the anchors the visual designer edits against.
-    fs.writeFileSync(designerPath,
+    const designerSource =
         `namespace ${ns}\r\n` +
         `{\r\n` +
         `    partial class ${name}\r\n` +
@@ -147,7 +155,16 @@ export async function addWinForm(dotnet: DotnetTools): Promise<void> {
         `\r\n` +
         `        #endregion\r\n` +
         `    }\r\n` +
-        `}\r\n`, 'utf8');
+        `}\r\n`;
+    try {
+        createFilesAtomically([
+            { target: csPath, contents: codeSource },
+            { target: designerPath, contents: designerSource }
+        ]);
+    } catch (err) {
+        vscode.window.showErrorMessage(`UI Maker: could not create the form files — ${err}`);
+        return;
+    }
 
     registerInClassicProject(project, [
         { tag: 'Compile', include: relTo(project, csPath), subType: 'Form' },
@@ -164,11 +181,22 @@ export async function addWinForm(dotnet: DotnetTools): Promise<void> {
  */
 export async function duplicateDesignFile(uri: vscode.Uri): Promise<void> {
     const src = uri.fsPath;
+    if (!fs.existsSync(src)) {
+        vscode.window.showErrorMessage('UI Maker: the source file no longer exists.');
+        return;
+    }
     const dir = path.dirname(src);
     const isXaml = /\.xaml$/i.test(src);
     const oldName = isXaml
         ? path.basename(src, path.extname(src))
         : path.basename(src).replace(/\.Designer\.cs$/i, '');
+    const project = projectAbove(dir);
+    if (project && !requireCSharpProject(project, 'Duplicate')) { return; }
+    if (!project && isXaml && fs.existsSync(path.join(dir, `${oldName}.xaml.vb`))) {
+        vscode.window.showWarningMessage(
+            'UI Maker: duplicating Visual Basic WPF code-behind is not supported yet.');
+        return;
+    }
 
     const name = await askName(`${oldName}Copy`, dir, n => isXaml
         ? [path.join(dir, `${n}.xaml`), path.join(dir, `${n}.xaml.cs`)]
@@ -187,23 +215,34 @@ export async function duplicateDesignFile(uri: vscode.Uri): Promise<void> {
             [path.join(dir, `${oldName}.resx`), path.join(dir, `${name}.resx`)]
         ];
 
-    const written: string[] = [];
-    for (const [from, to] of pairs) {
-        if (!fs.existsSync(from)) { continue; }
-        let text = fs.readFileSync(from, 'utf8');
-        if (!/\.resx$/i.test(from)) {
-            text = renameClass(text, oldName, name);
-        }
-        fs.writeFileSync(to, text, 'utf8');
-        written.push(to);
+    const required = isXaml
+        ? pairs.slice(0, /\bx:Class\s*=/.test(fs.readFileSync(src, 'utf8')) ? 2 : 1)
+        : pairs.slice(0, 2);
+    const missing = required.find(([from]) => !fs.existsSync(from));
+    if (missing) {
+        vscode.window.showErrorMessage(
+            `UI Maker: cannot duplicate an incomplete file set — ${path.basename(missing[0])} is missing.`);
+        return;
     }
-    if (!written.length) {
-        vscode.window.showErrorMessage('UI Maker: nothing to duplicate — the source files were not found.');
+
+    // Publish the complete copy set together. A failed read/write or a target
+    // created concurrently cannot leave half of a window/form pair behind.
+    let written: string[] = [];
+    try {
+        const files = pairs.filter(([from]) => fs.existsSync(from)).map(([from, target]) => {
+            let text = fs.readFileSync(from, 'utf8');
+            if (!/\.resx$/i.test(from)) { text = renameClass(text, oldName, name); }
+            return { target, contents: text };
+        });
+        createFilesAtomically(files);
+        written = files.map(file => file.target);
+    } catch (err) {
+        vscode.window.showErrorMessage(
+            `UI Maker: duplication failed; no partial copy was kept. ${err instanceof Error ? err.message : String(err)}`);
         return;
     }
 
     // Register the copies in classic projects.
-    const project = projectAbove(dir);
     if (project) {
         registerInClassicProject(project, isXaml
             ? [
@@ -242,7 +281,9 @@ async function askName(
         prompt: 'Name for the new window/form (also the class name)',
         value: candidate,
         validateInput: v => {
-            if (!NAME_PATTERN.test(v)) { return 'Use letters, digits, and underscores (must not start with a digit).'; }
+            if (!isCSharpIdentifier(v)) {
+                return 'Use a non-keyword C# identifier (letters, digits, and underscores).';
+            }
             const clash = targets(v).find(f => fs.existsSync(f));
             return clash ? `${path.basename(clash)} already exists here.` : undefined;
         }
@@ -254,19 +295,20 @@ async function askName(
  * replacements only — free-form identifiers in user code are left alone.
  */
 function renameClass(text: string, oldName: string, newName: string): string {
+    const old = escapeRegExp(oldName);
     return text
         // class declarations: "partial class Old", "class Old : Form"
-        .replace(new RegExp(`\\bclass\\s+${oldName}\\b`, 'g'), `class ${newName}`)
+        .replace(new RegExp(`\\bclass\\s+${old}\\b`, 'g'), `class ${newName}`)
         // constructor: "public Old("
-        .replace(new RegExp(`\\bpublic\\s+${oldName}\\s*\\(`, 'g'), `public ${newName}(`)
+        .replace(new RegExp(`\\bpublic\\s+${old}\\s*\\(`, 'g'), `public ${newName}(`)
         // resources: "typeof(Old)"
-        .replace(new RegExp(`\\btypeof\\(${oldName}\\)`, 'g'), `typeof(${newName})`)
+        .replace(new RegExp(`\\btypeof\\(${old}\\)`, 'g'), `typeof(${newName})`)
         // designer identity: this.Name = "Old"; / Name = "Old";
-        .replace(new RegExp(`(\\bName\\s*=\\s*)"${oldName}"`, 'g'), `$1"${newName}"`)
+        .replace(new RegExp(`(\\bName\\s*=\\s*)"${old}"`, 'g'), `$1"${newName}"`)
         // XAML: x:Class="Ns.Old"
-        .replace(new RegExp(`(x:Class="[^"]*?)\\b${oldName}"`, 'g'), `$1${newName}"`)
+        .replace(new RegExp(`(x:Class="[^"]*?)\\b${old}"`, 'g'), `$1${newName}"`)
         // XML doc header: "Interaction logic for Old.xaml"
-        .replace(new RegExp(`\\b${oldName}\\.xaml\\b`, 'g'), `${newName}.xaml`);
+        .replace(new RegExp(`\\b${old}\\.xaml\\b`, 'g'), `${newName}.xaml`);
 }
 
 /** Root namespace: csproj RootNamespace, else the sanitized project name. */
@@ -274,11 +316,10 @@ function namespaceFor(project: string): string {
     try {
         const xml = fs.readFileSync(project, 'utf8');
         const root = /<RootNamespace>\s*([^<]+?)\s*<\/RootNamespace>/.exec(xml)?.[1];
-        if (root) { return root; }
+        if (root) { return sanitizeCSharpNamespace(decodeXmlEntities(root)); }
     } catch { /* fall through to the file name */ }
     const base = path.basename(project).replace(/\.(cs|vb)proj$/i, '');
-    const ns = base.replace(/[^A-Za-z0-9_.]/g, '_');
-    return /^[0-9]/.test(ns) ? `_${ns}` : ns;
+    return sanitizeCSharpNamespace(base);
 }
 
 /** Nearest .csproj/.vbproj walking up from `dir`. */
@@ -335,7 +376,7 @@ function registerInClassicProject(project: string, entries: ProjectEntry[]): voi
                 : `    <${e.tag} Include="${xmlEscape(e.include)}" />`;
         }).join(eol);
         xml = xml.replace(/<\/Project>/, `  <ItemGroup>${eol}${body}${eol}  </ItemGroup>${eol}</Project>`);
-        fs.writeFileSync(project, xml, 'utf8');
+        replaceFileAtomically(project, xml);
     } catch {
         vscode.window.showWarningMessage('UI Maker: could not add the new files to the project file — add them manually.');
     }

@@ -119,9 +119,10 @@ Open any `.xaml` window in the UI Maker Designer:
   group, then use the toolbar to align edges, match sizes, or distribute
   evenly. **⇥ Tab Order** overlays TabIndex badges; click controls in
   sequence to re-number them (WinForms).
-- **Rename controls safely** — edit `(Name)` in the grid and every reference
-  in the Designer.cs *and* the code-behind is updated (handler names are
-  kept, like VS).
+- **Rename controls safely** — edit `(Name)` in the grid and, when the C#
+  language service is installed, UI Maker performs a solution-wide symbol
+  rename just like VS (with a safe Designer/code-behind fallback). Handler
+  names and user-visible strings are kept.
 - **Component tray** — Timer, ToolTip, ContextMenuStrip, NotifyIcon,
   BackgroundWorker, ImageList, ErrorProvider, HelpProvider, BindingSource,
   FileSystemWatcher, Process, the file/color/font/folder dialogs, and the
@@ -136,8 +137,9 @@ Open any `.xaml` window in the UI Maker Designer:
   the real layout engine, and TabControl drops with two ready pages.
 - Keyboard support: arrow keys nudge, `Shift`+arrows move by grid, `Delete` removes,
   `Ctrl+D` duplicates, `Ctrl+X`/`Ctrl+C`/`Ctrl+V` cut, copy & paste —
-  including onto a *different* form. `Esc` closes menus and clears the
-  selection.
+  including onto a *different* form. Structural containers/items are guarded
+  from shallow Cut/Duplicate operations until deep cloning can preserve their
+  children. `Esc` closes menus and clears the selection.
 
 ### ↔️ Split Design / Code view
 The **View Code** button opens the raw XAML beside the designer. Edits flow both ways:
@@ -158,6 +160,9 @@ Status-bar buttons (and editor-title shortcuts) drive the .NET CLI for you:
   distribution: **Single File** (one .exe), **Self Contained** (bundles the
   .NET runtime so the target PC needs nothing installed), and the target
   **Runtime** (win-x64 / win-x86 / win-arm64).
+- **Multi-target projects** — Run, Debug, and Publish ask for the active
+  target framework once and reuse it for the session; build/output discovery
+  and the debugger all use that same TFM.
 
 Builds are protected so they work on any dev machine: projects targeting
 .NET Framework without the reference assemblies installed (error MSB3644) get
@@ -245,6 +250,12 @@ npm install
 npm run compile
 ```
 
+Before packaging or submitting a change, run the complete local gate:
+
+```bash
+npm run check
+```
+
 Open the folder in VS Code and press `F5` — an Extension Development Host window
 launches with UI Maker loaded.
 
@@ -315,8 +326,18 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
   cannot be previewed. Newly assigned images always use project resources.
 - Strip *Items* editing covers one level — nested sub-menus and per-item
   icons/events still need the code view (roadmapped).
-- Control rename is textual (word-boundary) in the Designer.cs and code-behind
-  pair — references from *other* files are not updated.
+- Structural WinForms containers can be deleted safely, but deep
+  Cut/Copy/Duplicate of containers, generated menu items, and grid columns is
+  intentionally disabled until every nested object can be cloned losslessly.
+- Without the C# language service, control rename falls back to the
+  Designer.cs/code-behind pair; project-wide references then need a manual rename.
+- C# generation is currently the complete path. VB projects can be scaffolded,
+  built, run, debugged, and published, but Add Window/Form, WinForms design,
+  event-stub generation, resources, App Settings, and classic conversion do
+  not yet generate Visual Basic source.
+- The classic-project converter deliberately stops before writing when it finds
+  custom imports/targets, conditional target frameworks, framework profiles,
+  or package install-script/content semantics it cannot migrate safely.
 - Saving from the designer normalizes the XAML formatting (like most visual designers).
 - The visual preview is an approximation — always confirm with **Run**.
 - Windows-only targets (WPF/WinForms are Windows frameworks).
@@ -331,6 +352,7 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 - [x] MenuStrip / ToolStrip / StatusStrip designers and a component tray (Timer, ToolTip, ContextMenuStrip, dialogs)
 - [x] Multi-select, alignment & distribution tools, tab-order view, copy/paste across forms
 - [x] Docked controls that push each other for space; TabControl and tab-page drops
+- [ ] Full Visual Basic designer/code-generation parity
 - [ ] Sub-menu (nested menu item) designing and item icons
 - [ ] Drag-reordering inside StackPanel / DockPanel children
 - [ ] "Create an Installer" for multi-file releases (Inno Setup script generation)

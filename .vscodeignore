@@ -2,8 +2,10 @@
 .vscode/**
 .gitignore
 src/**
+tests/**
 docs/**
 tsconfig.json
 **/*.map
 node_modules/**
+*.vsix
 readme.txt

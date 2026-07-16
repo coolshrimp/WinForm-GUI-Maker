@@ -21,6 +21,9 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DotnetTools } from './dotnetTools';
+import { isCSharpIdentifier, sanitizeCSharpNamespace } from './csharpText';
+import { webviewNonce } from './webviewSecurity';
+import { decodeXmlEntities } from './xmlText';
 
 /** One row of the settings grid. */
 interface AppSetting {
@@ -49,9 +52,13 @@ let panel: vscode.WebviewPanel | undefined;
 let currentProject: string | undefined;
 
 /** Open the App Settings editor for the current project. */
-export async function openAppSettings(dotnet: DotnetTools): Promise<void> {
-    const project = await dotnet.findProject();
+export async function openAppSettings(dotnet: DotnetTools, explicitProject?: string): Promise<void> {
+    const project = explicitProject ?? await dotnet.findProject();
     if (!project) { return; }
+    if (!/\.(cs|vb)proj$/i.test(project) || !fs.existsSync(project)) {
+        vscode.window.showWarningMessage('UI Maker: the selected project no longer exists.');
+        return;
+    }
     if (/\.vbproj$/i.test(project)) {
         vscode.window.showWarningMessage('UI Maker: the App Settings editor supports C# projects only (for now).');
         return;
@@ -138,21 +145,95 @@ function saveSettings(project: string, settings: AppSetting[]): void {
     // interpolated into generated C#/XML, not just in the page script.
     const seen = new Set<string>();
     for (const s of settings) {
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s.name)) { throw new Error(`"${s.name}" is not a valid setting name`); }
+        if (!isCSharpIdentifier(s.name)) {
+            throw new Error(`"${s.name}" is not a valid non-keyword C# setting name`);
+        }
         if (seen.has(s.name.toLowerCase())) { throw new Error(`duplicate setting name "${s.name}"`); }
         seen.add(s.name.toLowerCase());
         if (!SETTING_TYPES.some(t => t.clr === s.type)) { throw new Error(`unknown setting type "${s.type}"`); }
         s.scope = s.scope === 'Application' ? 'Application' : 'User';
         s.value = String(s.value ?? '');
+        if (s.value && /^(System\.Int32|System\.Int64)$/.test(s.type) && !/^-?\d+$/.test(s.value)) {
+            throw new Error(`"${s.name}" must have a whole-number default`);
+        }
+        if (s.value && s.type === 'System.Double' && !Number.isFinite(Number(s.value))) {
+            throw new Error(`"${s.name}" must have a finite numeric default`);
+        }
+        if (s.type === 'System.Boolean' && !/^(True|False)$/.test(s.value)) {
+            throw new Error(`"${s.name}" must have a True or False default`);
+        }
     }
 
     const propsDir = path.join(path.dirname(project), 'Properties');
     if (!fs.existsSync(propsDir)) { fs.mkdirSync(propsDir, { recursive: true }); }
 
     const ns = `${rootNamespace(project)}.Properties`;
-    fs.writeFileSync(path.join(propsDir, 'Settings.settings'), settingsXml(ns, settings), 'utf8');
-    fs.writeFileSync(path.join(propsDir, 'Settings.Designer.cs'), designerCs(ns, settings), 'utf8');
-    registerSettingsFiles(project);
+    const files = [
+        {
+            target: path.join(propsDir, 'Settings.settings'),
+            contents: settingsXml(ns, settings)
+        },
+        {
+            target: path.join(propsDir, 'Settings.Designer.cs'),
+            contents: designerCs(ns, settings)
+        }
+    ];
+    const registeredProject = settingsProjectRegistration(project);
+    if (registeredProject !== undefined) {
+        files.push({ target: project, contents: registeredProject });
+    }
+    replaceFilesAtomically(files);
+}
+
+/**
+ * Replace a related generated-file set as one transaction. Existing files are
+ * moved aside until every staged file is installed; any failure restores the
+ * complete previous set instead of leaving Settings.settings and its accessor
+ * out of sync.
+ */
+function replaceFilesAtomically(files: Array<{ target: string; contents: string }>): void {
+    const stamp = `${process.pid}.${Date.now()}`;
+    const staged = files.map(file => ({
+        ...file,
+        temp: `${file.target}.${stamp}.tmp`,
+        backup: `${file.target}.${stamp}.bak`,
+        hadOriginal: fs.existsSync(file.target)
+    }));
+    for (const file of staged) {
+        if (fs.existsSync(file.temp) || fs.existsSync(file.backup)) {
+            throw new Error(`temporary save path already exists for ${path.basename(file.target)}`);
+        }
+    }
+
+    const installed: typeof staged = [];
+    try {
+        for (const file of staged) {
+            fs.writeFileSync(file.temp, file.contents, { encoding: 'utf8', flag: 'wx' });
+        }
+        for (const file of staged) {
+            if (file.hadOriginal) { fs.renameSync(file.target, file.backup); }
+        }
+        for (const file of staged) {
+            fs.renameSync(file.temp, file.target);
+            installed.push(file);
+        }
+    } catch (err) {
+        for (const file of installed) {
+            try { if (fs.existsSync(file.target)) { fs.unlinkSync(file.target); } } catch { /* best effort */ }
+        }
+        for (const file of staged) {
+            try {
+                if (fs.existsSync(file.backup)) { fs.renameSync(file.backup, file.target); }
+            } catch { /* best effort */ }
+            try { if (fs.existsSync(file.temp)) { fs.unlinkSync(file.temp); } } catch { /* best effort */ }
+        }
+        throw err;
+    }
+    // The transaction is committed. Backup cleanup is best-effort and must
+    // never trigger rollback after a successfully installed pair.
+    for (const file of staged) {
+        try { if (file.hadOriginal && fs.existsSync(file.backup)) { fs.unlinkSync(file.backup); } } catch { /* harmless */ }
+    }
 }
 
 /** Root namespace: csproj RootNamespace, else the sanitized project name. */
@@ -160,11 +241,10 @@ function rootNamespace(project: string): string {
     try {
         const xml = fs.readFileSync(project, 'utf8');
         const root = /<RootNamespace>\s*([^<]+?)\s*<\/RootNamespace>/.exec(xml)?.[1];
-        if (root) { return root; }
+        if (root) { return sanitizeCSharpNamespace(decodeXmlEntities(root)); }
     } catch { /* fall through to the file name */ }
     const base = path.basename(project).replace(/\.(cs|vb)proj$/i, '');
-    const ns = base.replace(/[^A-Za-z0-9_.]/g, '_');
-    return /^[0-9]/.test(ns) ? `_${ns}` : ns;
+    return sanitizeCSharpNamespace(base);
 }
 
 /** The Settings.settings XML — same shape Visual Studio writes. */
@@ -241,37 +321,34 @@ function designerCs(ns: string, settings: AppSetting[]): string {
  * pair with the same metadata Visual Studio uses. Safe to call repeatedly:
  * does nothing when the entries are already present (or the project globs).
  */
-function registerSettingsFiles(project: string): void {
-    try {
-        let xml = fs.readFileSync(project, 'utf8');
-        if (/<Project\s[^>]*\bSdk\s*=/.test(xml)) { return; }          // SDK-style globs
-        if (xml.includes('Settings.settings')) { return; }             // already registered
-        if (!/<\/Project>/.test(xml)) { return; }
-        const eol = xml.includes('\r\n') ? '\r\n' : '\n';
-        const block =
-            `  <ItemGroup>${eol}` +
-            `    <None Include="Properties\\Settings.settings">${eol}` +
-            `      <Generator>SettingsSingleFileGenerator</Generator>${eol}` +
-            `      <LastGenOutput>Settings.Designer.cs</LastGenOutput>${eol}` +
-            `    </None>${eol}` +
-            `    <Compile Include="Properties\\Settings.Designer.cs">${eol}` +
-            `      <AutoGen>True</AutoGen>${eol}` +
-            `      <DesignTimeSharedInput>True</DesignTimeSharedInput>${eol}` +
-            `      <DependentUpon>Settings.settings</DependentUpon>${eol}` +
-            `    </Compile>${eol}` +
-            `  </ItemGroup>${eol}`;
-        xml = xml.replace(/<\/Project>/, `${block}</Project>`);
-        fs.writeFileSync(project, xml, 'utf8');
-    } catch {
-        vscode.window.showWarningMessage('UI Maker: could not register the settings files in the project — add them manually.');
+function settingsProjectRegistration(project: string): string | undefined {
+    const xml = fs.readFileSync(project, 'utf8');
+    if (/<Project\s[^>]*\bSdk\s*=/.test(xml)) { return undefined; }   // SDK-style globs
+    if (xml.includes('Settings.settings')) { return undefined; }      // already registered
+    if (!/<\/Project>/.test(xml)) {
+        throw new Error('the project XML has no closing Project element');
     }
+    const eol = xml.includes('\r\n') ? '\r\n' : '\n';
+    const block =
+        `  <ItemGroup>${eol}` +
+        `    <None Include="Properties\\Settings.settings">${eol}` +
+        `      <Generator>SettingsSingleFileGenerator</Generator>${eol}` +
+        `      <LastGenOutput>Settings.Designer.cs</LastGenOutput>${eol}` +
+        `    </None>${eol}` +
+        `    <Compile Include="Properties\\Settings.Designer.cs">${eol}` +
+        `      <AutoGen>True</AutoGen>${eol}` +
+        `      <DesignTimeSharedInput>True</DesignTimeSharedInput>${eol}` +
+        `      <DependentUpon>Settings.settings</DependentUpon>${eol}` +
+        `    </Compile>${eol}` +
+        `  </ItemGroup>${eol}`;
+    return xml.replace(/<\/Project>/, `${block}</Project>`);
 }
 
 // ------------------------------------------------------------------ webview
 
 /** The grid editor page. State lives in the webview; Save posts it back. */
 function editorHtml(webview: vscode.Webview, project: string, settings: AppSetting[]): string {
-    const nonce = Math.random().toString(36).slice(2);
+    const nonce = webviewNonce();
     const typeOptions = SETTING_TYPES.map(t => ({ clr: t.clr, label: t.label }));
     // "<" is escaped so a value containing "</script>" cannot break the page.
     const json = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
@@ -280,8 +357,8 @@ function editorHtml(webview: vscode.Webview, project: string, settings: AppSetti
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
+      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<style nonce="${nonce}">
     body {
         font-family: var(--vscode-font-family);
         color: var(--vscode-foreground);
@@ -368,6 +445,9 @@ Properties.Settings.Default.Save();</code></pre>
 <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const TYPES = ${json(typeOptions)};
+    const CSHARP_KEYWORDS = new Set(
+        'abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while'.split(' ')
+    );
     let settings = ${json(settings)};
 
     const tbody = document.querySelector('#grid tbody');
@@ -385,6 +465,13 @@ Properties.Settings.Default.Save();</code></pre>
             name.addEventListener('input', () => { s.name = name.value.trim(); validate(); });
 
             const type = document.createElement('select');
+            if (!TYPES.some(t => t.clr === s.type)) {
+                const unsupported = document.createElement('option');
+                unsupported.value = s.type;
+                unsupported.textContent = 'Unsupported existing type: ' + s.type;
+                unsupported.selected = true;
+                type.appendChild(unsupported);
+            }
             for (const t of TYPES) {
                 const o = document.createElement('option');
                 o.value = t.clr; o.textContent = t.label;
@@ -440,11 +527,14 @@ Properties.Settings.Default.Save();</code></pre>
     function validate() {
         const seen = new Set();
         for (const s of settings) {
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s.name)) {
-                return fail('Setting names must be valid identifiers (letters, digits, underscore; not starting with a digit).');
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s.name) || CSHARP_KEYWORDS.has(s.name)) {
+                return fail('Setting names must be non-keyword C# identifiers.');
             }
             if (seen.has(s.name.toLowerCase())) { return fail('Duplicate setting name: ' + s.name); }
             seen.add(s.name.toLowerCase());
+            if (!TYPES.some(t => t.clr === s.type)) {
+                return fail(s.name + ': choose a supported type before saving.');
+            }
             if (s.value !== '') {
                 if ((s.type === 'System.Int32' || s.type === 'System.Int64') && !/^-?\\d+$/.test(s.value)) {
                     return fail(s.name + ': default must be a whole number.');
