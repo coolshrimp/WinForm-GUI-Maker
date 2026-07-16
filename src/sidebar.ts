@@ -21,6 +21,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DotnetTools } from './dotnetTools';
 import { folderTypeLabel } from './projectInfo';
+import {
+    EXCLUDE_GLOB, getWorkingFolder, onDidChangeWorkingFolder,
+    pickWorkingFolder, workspaceProjectDirs
+} from './workingFolder';
 
 const RECENTS_KEY = 'uimaker.recentProjects';
 const MAX_RECENTS = 10;
@@ -115,10 +119,14 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     public async getChildren(item?: SidebarItem): Promise<SidebarItem[]> {
         if (item) { return item.children ?? []; }
 
+        // A parent folder holding several projects is never listed whole:
+        // every file group scopes to the active working project.
+        const scope = await this.resolveScope();
+
         return [
             new SidebarItem('Actions', {
                 icon: 'zap',
-                children: this.actionItems()
+                children: this.actionItems(scope)
             }),
             new SidebarItem('Recent Projects', {
                 icon: 'history',
@@ -127,27 +135,57 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
             new SidebarItem('XAML Windows', {
                 icon: 'layout',
                 contextValue: 'uimakerXamlGroup',
-                children: await this.designerFileItems('**/*.xaml', 'window', 'gear')
+                children: await this.designerFileItems(scope, '**/*.xaml', 'window', 'gear')
             }),
             new SidebarItem('WinForms Forms', {
                 icon: 'window',
                 contextValue: 'uimakerFormGroup',
-                children: await this.winFormsItems()
+                children: await this.winFormsItems(scope)
             }),
             new SidebarItem('Project Files', {
                 icon: 'files',
-                children: await this.projectFileItems()
+                children: await this.projectFileItems(scope)
             })
         ];
     }
 
+    /**
+     * Where the file lists look:
+     *   dir     — the working project folder (multi-project workspace)
+     *   'all'   — the whole workspace (single project, or none at all)
+     *   'pick'  — multi-project workspace with no working folder chosen yet
+     */
+    private async resolveScope(): Promise<{ mode: 'dir' | 'all' | 'pick'; dir?: string; multi: boolean }> {
+        const dirs = await workspaceProjectDirs();
+        const working = getWorkingFolder();
+        if (dirs.length <= 1) { return { mode: 'all', multi: false }; }
+        if (working && fs.existsSync(working)) { return { mode: 'dir', dir: working, multi: true }; }
+        return { mode: 'pick', multi: true };
+    }
+
+    /** findFiles pattern for the active scope. */
+    private scopedPattern(scope: { mode: string; dir?: string }, glob: string): vscode.GlobPattern {
+        return scope.mode === 'dir' && scope.dir
+            ? new vscode.RelativePattern(vscode.Uri.file(scope.dir), glob)
+            : glob;
+    }
+
+    private static pickHint(): SidebarItem {
+        return new SidebarItem('Multiple projects here — choose a working folder', {
+            icon: 'folder-opened',
+            command: 'uimaker.selectWorkingFolder',
+            tooltip: 'This workspace contains several .NET projects. Pick the one to design, run, and build — the file lists then show only that project.'
+        });
+    }
+
     /** Everything that is not a designable file, grouped by type category. */
-    private async projectFileItems(): Promise<SidebarItem[]> {
+    private async projectFileItems(scope: { mode: string; dir?: string }): Promise<SidebarItem[]> {
         if (!vscode.workspace.workspaceFolders?.length) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
+        if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
         const files = await vscode.workspace.findFiles(
-            '**/*', '**/{bin,obj,node_modules,.git,.vs,packages}/**', 800);
+            this.scopedPattern(scope, '**/*'), EXCLUDE_GLOB, 800);
 
         // contextValue drives the inline add buttons (package.json menus).
         const cats: Record<string, { icon: string; context?: string; files: vscode.Uri[] }> = {
@@ -214,12 +252,35 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     }
 
     /** The command rows; Run and Debug reflect the current run state. */
-    private actionItems(): SidebarItem[] {
+    private actionItems(scope: { mode: string; dir?: string; multi: boolean }): SidebarItem[] {
         const state = this.dotnet.state;
         const running = state === 'running';
         const debugging = state === 'debugging';
 
+        // The working folder every action below targets. Shown first so it is
+        // always clear WHICH project Run/Build/App Settings will touch.
+        const working = scope.mode === 'dir' ? scope.dir : undefined;
+        const workingRow = working
+            ? new SidebarItem(`Working Folder: ${path.basename(working)}`, {
+                icon: 'root-folder-opened',
+                iconColor: 'charts.blue',
+                command: 'uimaker.selectWorkingFolder',
+                description: folderTypeLabel(working) || undefined,
+                tooltip: `${working}\n\nRun, Build, Debug, Release, App Settings, and the file lists all target this project only. Click to switch projects.`,
+                contextValue: 'uimakerWorkingFolder'
+            })
+            : scope.multi
+                ? new SidebarItem('Select Working Folder…', {
+                    icon: 'root-folder',
+                    iconColor: 'charts.yellow',
+                    command: 'uimaker.selectWorkingFolder',
+                    description: 'multiple projects',
+                    tooltip: 'This workspace contains several .NET projects. Pick the one to design, run, and build.'
+                })
+                : undefined;
+
         return [
+            ...(workingRow ? [workingRow] : []),
             new SidebarItem('New .NET Desktop Project', { icon: 'new-folder', command: 'uimaker.newProject', tooltip: 'Scaffold a WPF, Windows Forms, or Console app via dotnet new (C# or Visual Basic)' }),
             new SidebarItem('Build', { icon: 'tools', command: 'uimaker.build', tooltip: 'Build the project (Debug)' }),
             running
@@ -258,12 +319,13 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         });
     }
 
-    /** Every designable .xaml file in the workspace (skips build output). */
-    private async designerFileItems(glob: string, icon: string, appIcon: string): Promise<SidebarItem[]> {
+    /** Every designable .xaml file in scope (skips build output). */
+    private async designerFileItems(scope: { mode: string; dir?: string }, glob: string, icon: string, appIcon: string): Promise<SidebarItem[]> {
         if (!vscode.workspace.workspaceFolders?.length) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
-        const files = await vscode.workspace.findFiles(glob, '**/{bin,obj,node_modules}/**', 200);
+        if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
+        const files = await vscode.workspace.findFiles(this.scopedPattern(scope, glob), EXCLUDE_GLOB, 200);
         if (!files.length) {
             return [new SidebarItem('No matching files in this workspace', { icon: 'info' })];
         }
@@ -286,11 +348,12 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     }
 
     /** WinForms *.Designer.cs files (excluding Settings/Resources codegen). */
-    private async winFormsItems(): Promise<SidebarItem[]> {
+    private async winFormsItems(scope: { mode: string; dir?: string }): Promise<SidebarItem[]> {
         if (!vscode.workspace.workspaceFolders?.length) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
-        const files = await vscode.workspace.findFiles('**/*.Designer.cs', '**/{bin,obj,node_modules}/**', 200);
+        if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
+        const files = await vscode.workspace.findFiles(this.scopedPattern(scope, '**/*.Designer.cs'), EXCLUDE_GLOB, 200);
         const forms = files.filter(uri => {
             const base = path.basename(uri.fsPath).toLowerCase();
             if (base === 'resources.designer.cs' || base === 'settings.designer.cs') { return false; }
@@ -328,6 +391,10 @@ export function registerSidebar(context: vscode.ExtensionContext, dotnet: Dotnet
 
         // Keep the Run/Debug toggle rows in sync with the actual app state.
         dotnet.onDidChangeState(() => sidebar.refresh()),
+
+        // Switch the working project (multi-project parent folders).
+        vscode.commands.registerCommand('uimaker.selectWorkingFolder', () => pickWorkingFolder()),
+        onDidChangeWorkingFolder(() => sidebar.refresh()),
 
         vscode.commands.registerCommand('uimaker.recentOpen', async (p: unknown) => {
             const folder = typeof p === 'string' ? p : (p as SidebarItem)?.projectPath;
@@ -374,11 +441,13 @@ export function registerSidebar(context: vscode.ExtensionContext, dotnet: Dotnet
         context.subscriptions.push(watcher);
     }
 
-    // Remember the current workspace as a recent project when it is a .NET one.
+    // Remember the current workspace as a recent project — but only when it
+    // IS a single project. A parent folder holding many projects is a browsing
+    // location, not a project, and must not autoload into the recents.
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (ws) {
-        void vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 1).then(found => {
-            if (found.length) {
+        void workspaceProjectDirs().then(dirs => {
+            if (dirs.length === 1) {
                 touchRecentProject(ws);
                 sidebar.refresh();
             }

@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.10.0
+
+Toolbox parity, right-click menus, and per-project scoping.
+
+**The WinForms toolbox now mirrors Visual Studio.** New controls:
+CheckedListBox, DomainUpDown, MonthCalendar, HScrollBar, VScrollBar,
+WebBrowser, PropertyGrid, FlowLayoutPanel, TableLayoutPanel (cell grid
+preview, `Controls.Add(child, col, row)` parsing), SplitContainer (Panel1/
+Panel2 parsing, per-panel drops, live splitter preview), and Splitter. New
+tray components: HelpProvider, BindingSource, FileSystemWatcher, Process,
+PrintDialog, PrintDocument, PrintPreviewDialog, PageSetupDialog. Components
+that need extra NuGet packages on modern .NET (SerialPort, EventLog,
+PerformanceCounter, ServiceController, MessageQueue, DirectoryEntry) are
+deliberately excluded so generated code always compiles. The toolbox is
+grouped into VS-style sections (Common Controls, Containers, Menus &
+Toolbars, Data, Components, Dialogs, Printing) with a **search box**, and
+**double-clicking a tool adds it** without dragging. Event wiring knows the
+new delegate types (ItemCheck, DateChanged, SplitterMoved, PrintPage,
+FileSystemWatcher events, scrollbar Scroll, …).
+
+**Right-click context menus, everywhere.** Controls, tab pages, the form,
+and tray components all have VS-style menus: Cut / Copy / Paste / Duplicate /
+Delete, **Bring to Front / Send to Back** (rewrites `Controls.Add` order),
+Select Parent, wire-default-event, View Code, and Properties/Events shortcuts.
+Per-type verbs: **Add Tab / Remove Tab** on TabControls and pages (both
+WinForms and XAML), **Add Item / Edit Items…** on strips, **Edit Items…** on
+ListBox / ComboBox / CheckedListBox / DomainUpDown — items are edited one per
+line and written back as `Items.AddRange(new object[] { … })`, and the list
+previews render them. `Ctrl+X` cut joins the keyboard shortcuts; `Esc` closes
+the menu.
+
+**Working folder — projects stay in their lane.** Opening a parent folder
+that contains many projects no longer lists every project's files or lets a
+build touch the wrong app. All file lists and actions (Run, Build, Debug,
+Release, App Settings) target one **working project**, shown at the top of
+the Actions panel; it follows the file you are editing, is remembered per
+workspace, and can be switched with one click. Multi-project workspaces ask
+you to pick before listing anything, `bin`/`obj`/`packages`/`.vs`/
+`node_modules` are never scanned (no more NuGet `*.Designer.cs` in the forms
+list), and a parent folder is no longer auto-added to Recent Projects.
+
+**No dead designers.** Files with nothing to design — App.xaml, resource
+dictionaries, `Designer.cs` files without `InitializeComponent` — close the
+designer and open straight in the code editor.
+
+**Hardening.** A global error trap keeps the canvas alive and reports issues
+in the status bar instead of dying silently; designer→host messages and
+render passes are guarded; failed workspace edits (read-only files) warn
+instead of vanishing; tab-strip clicks keep the multi-selection consistent;
+stale drag payloads and missing drop anchors are ignored safely.
+
 ## 0.9.0
 
 The "full-fledged app builder" release — every item from the pre-release gap

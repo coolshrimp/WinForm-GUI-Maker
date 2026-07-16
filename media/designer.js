@@ -26,6 +26,16 @@
 
     const vscode = acquireVsCodeApi();
 
+    // Failsafe: an uncaught error must never leave a silently dead designer.
+    // Surface it in the status bar; the document itself is always untouched
+    // until an edit message is posted, so nothing can be corrupted.
+    window.addEventListener('error', e => {
+        try { setStatus(`UI Maker error: ${e.message} — open the code view if the canvas looks wrong.`); } catch { /* status bar missing */ }
+    });
+    window.addEventListener('unhandledrejection', e => {
+        try { setStatus(`UI Maker error: ${e.reason?.message ?? e.reason}`); } catch { /* status bar missing */ }
+    });
+
     // ------------------------------------------------------------- namespaces
 
     const PRES_NS = 'http://schemas.microsoft.com/winfx/2006/xaml/presentation';
@@ -184,6 +194,14 @@
 
     window.addEventListener('message', e => {
         const msg = e.data;
+        try { handleHostMessage(msg); }
+        catch (err) {
+            showBanner(`The designer hit an error rendering this file (${err?.message ?? err}). The document is unchanged.`,
+                '</> View Code', () => vscode.postMessage({ type: 'openCode' }));
+        }
+    });
+
+    function handleHostMessage(msg) {
         if (msg.type === 'update') {
             if (msg.text === xamlText) { return; } // echo of our own edit
             xamlText = msg.text;
@@ -211,7 +229,7 @@
             // Shared clipboard from the host — enables cross-form paste.
             if (msg.data) { clipboard = msg.data; }
         }
-    });
+    }
 
     // ================================================================= parsing
 
@@ -249,11 +267,13 @@
         collectStyles();
         selected = restoreSelection();
 
-        if (windowEl.localName === 'Application') {
+        if (windowEl.localName === 'Application' || windowEl.localName === 'ResourceDictionary') {
+            // Nothing to design — hand the file straight to the text editor.
             contentRoot = layoutRoot = null;
-            showBanner('App.xaml holds application resources, not a visual layout. Open a Window instead.',
+            showBanner(`${config.docName} holds application resources, not a visual layout. Opening the code view…`,
                 '</> View Code', () => vscode.postMessage({ type: 'openCode' }));
             renderEmpty();
+            vscode.postMessage({ type: 'noDesign' });
             return;
         }
 
@@ -760,6 +780,8 @@
                 e.stopPropagation();
                 uiTabs.set(key, i);
                 selected = ti;
+                multiSel.clear();
+                multiSel.add(ti);
                 selectedPath = pathOf(ti);
                 render();
             });
@@ -1369,30 +1391,116 @@
 
     function buildToolbox() {
         const host = $('ff-toolbox-items');
+        if (!host) { return; }
         host.innerHTML = '';
+
+        // Search box: filters tools live; section headers hide when empty.
+        let search = $('ff-tool-search');
+        if (!search) {
+            search = document.createElement('input');
+            search.id = 'ff-tool-search';
+            search.type = 'text';
+            search.placeholder = '🔍 Search Toolbox';
+            search.spellcheck = false;
+            search.addEventListener('input', () => filterToolbox(search.value));
+            search.addEventListener('keydown', e => e.stopPropagation());
+            host.parentNode.insertBefore(search, host);
+        }
+        search.value = '';
+
         const addTool = (type, def) => {
             const item = document.createElement('div');
             item.className = 'ff-tool';
             item.draggable = true;
+            item.dataset.type = type;
+            item.title = `Drag onto the form, or double-click to add ${type}`;
             item.innerHTML = `<span class="ff-tool-icon">${def.icon}</span>${type}`;
             item.addEventListener('dragstart', e => {
                 e.dataTransfer.setData('text/uimaker-control', type);
                 e.dataTransfer.effectAllowed = 'copy';
             });
+            // Double-click adds the control at a default spot, like VS.
+            item.addEventListener('dblclick', () => addControlDefault(type));
             host.appendChild(item);
         };
-        const catalog = docMode === 'winforms' ? WF_CONTROLS : CONTROLS;
-        for (const [type, def] of Object.entries(catalog)) { addTool(type, def); }
-
-        // WinForms: non-visual components live in their own toolbox section;
-        // dropping one anywhere adds it to the component tray.
-        if (docMode === 'winforms') {
+        const addSection = label => {
             const head = document.createElement('div');
             head.className = 'ff-tool-section';
-            head.textContent = 'Components';
+            head.textContent = label;
             host.appendChild(head);
-            for (const [type, def] of Object.entries(WF_TRAY)) { addTool(type, def); }
+        };
+
+        if (docMode === 'winforms') {
+            // VS-style sections, in a fixed order across both catalogs.
+            const sections = ['Common Controls', 'Containers', 'Menus & Toolbars', 'Data',
+                'Components', 'Dialogs', 'Printing'];
+            const all = [...Object.entries(WF_CONTROLS), ...Object.entries(WF_TRAY)];
+            for (const sec of sections) {
+                const tools = all.filter(([, def]) => (def.sec ?? 'Common Controls') === sec);
+                if (!tools.length) { continue; }
+                addSection(sec);
+                for (const [type, def] of tools) { addTool(type, def); }
+            }
+        } else {
+            for (const [type, def] of Object.entries(CONTROLS)) { addTool(type, def); }
         }
+    }
+
+    /** Hide tools that do not match the query; hide headers with no matches. */
+    function filterToolbox(query) {
+        const q = query.trim().toLowerCase();
+        const host = $('ff-toolbox-items');
+        let section = null;
+        let sectionHasHit = false;
+        for (const node of host.children) {
+            if (node.classList.contains('ff-tool-section')) {
+                if (section) { section.hidden = !sectionHasHit; }
+                section = node;
+                sectionHasHit = false;
+                continue;
+            }
+            const hit = !q || (node.dataset.type ?? '').toLowerCase().includes(q);
+            node.hidden = !hit;
+            if (hit) { sectionHasHit = true; }
+        }
+        if (section) { section.hidden = !sectionHasHit; }
+    }
+
+    /** Toolbox double-click: add the control near the top-left, like VS. */
+    function addControlDefault(type) {
+        if (docMode === 'winforms') {
+            if (!wfForm) { return; }
+            if (WF_TRAY[type]) { wfAddComponent(type); return; }
+            if (type === 'MenuStrip' || type === 'ToolStrip' || type === 'StatusStrip') { wfAddStrip(type); return; }
+            if (type === 'TabControl') { wfInsertTabControl(snap(20), snap(20)); return; }
+            // Cascade a little so repeated double-clicks do not stack exactly.
+            const off = snap(12 + (wfControls.size % 8) * config.gridSize);
+            wfAddControl(type, off, off, null);
+            return;
+        }
+        // XAML: synthesize a drop into the layout root at a default margin.
+        if (!xamlDoc || !windowEl || !CONTROLS[type]) { return; }
+        if (!ensureLayoutRoot()) { return; }
+        const def = CONTROLS[type];
+        const el = xamlDoc.createElementNS(PRES_NS, type);
+        setName(el, uniqueName(type));
+        for (const [k, v] of Object.entries(def.attrs)) { el.setAttribute(k, v); }
+        el.setAttribute('Width', String(def.w));
+        el.setAttribute('Height', String(def.h));
+        if (layoutRoot.localName === 'Canvas') {
+            el.setAttribute('Canvas.Left', '20');
+            el.setAttribute('Canvas.Top', '20');
+        } else if (layoutRoot.localName === 'Grid') {
+            el.setAttribute('HorizontalAlignment', 'Left');
+            el.setAttribute('VerticalAlignment', 'Top');
+            el.setAttribute('Margin', '20,20,0,0');
+        }
+        layoutRoot.appendChild(el);
+        selected = el;
+        multiSel.clear();
+        multiSel.add(el);
+        commit();
+        selectedPath = pathOf(el);
     }
 
     surfaceEl.addEventListener('dragover', e => {
@@ -1428,6 +1536,7 @@
         }
 
         const def = CONTROLS[type];
+        if (!def) { return; } // stale drag payload from another mode
         const el = xamlDoc.createElementNS(PRES_NS, type);
         setName(el, uniqueName(type));
         for (const [k, v] of Object.entries(def.attrs)) {
@@ -1809,6 +1918,12 @@
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
             || e.target instanceof HTMLButtonElement || e.target instanceof HTMLTextAreaElement) { return; }
 
+        // Escape always closes an open context menu first.
+        if (e.key === 'Escape' && ctxMenuEl) {
+            hideContextMenu();
+            e.preventDefault();
+            return;
+        }
         // Paste works without a selection.
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
             pasteClipboard();
@@ -1822,6 +1937,9 @@
 
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
             copySelection();
+            e.preventDefault();
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+            cutSelection();
             e.preventDefault();
         } else if (e.key === 'Delete' || e.key === 'Backspace') {
             deleteSelected();
@@ -1977,6 +2095,372 @@
         wfInsertControl(item.type, name, props, null);
     }
 
+    function cutSelection() {
+        copySelection();
+        deleteSelected();
+    }
+
+    // ============================================================ context menu
+    // Right-click menu on the canvas: standard clipboard/z-order commands plus
+    // per-type verbs (Add Tab, Add Item, Edit Items…) like the VS designer.
+
+    let ctxMenuEl = null;
+
+    function hideContextMenu() {
+        if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; }
+    }
+
+    /** items: '—' separators or { label, key?, header?, danger?, disabled?, action }. */
+    function showContextMenu(x, y, items) {
+        hideContextMenu();
+        const menu = document.createElement('div');
+        menu.id = 'ff-ctx';
+        for (const it of items) {
+            if (it === '—') {
+                const sep = document.createElement('div');
+                sep.className = 'ff-ctx-sep';
+                menu.appendChild(sep);
+                continue;
+            }
+            const row = document.createElement('div');
+            row.className = 'ff-ctx-item'
+                + (it.header ? ' header' : '')
+                + (it.disabled ? ' disabled' : '')
+                + (it.danger ? ' danger' : '');
+            const lab = document.createElement('span');
+            lab.className = 'ff-ctx-label';
+            lab.textContent = it.label;
+            row.appendChild(lab);
+            if (it.key) {
+                const key = document.createElement('span');
+                key.className = 'ff-ctx-key';
+                key.textContent = it.key;
+                row.appendChild(key);
+            }
+            if (!it.header && !it.disabled && it.action) {
+                row.addEventListener('click', () => {
+                    hideContextMenu();
+                    try { it.action(); }
+                    catch (err) { setStatus(`UI Maker: ${err?.message ?? err}`); }
+                });
+            }
+            menu.appendChild(row);
+        }
+        document.body.appendChild(menu);
+        // Keep the menu inside the viewport.
+        const r = menu.getBoundingClientRect();
+        menu.style.left = `${Math.max(0, Math.min(x, window.innerWidth - r.width - 4))}px`;
+        menu.style.top = `${Math.max(0, Math.min(y, window.innerHeight - r.height - 4))}px`;
+        ctxMenuEl = menu;
+    }
+
+    document.addEventListener('mousedown', e => {
+        if (ctxMenuEl && !ctxMenuEl.contains(e.target)) { hideContextMenu(); }
+    });
+    window.addEventListener('blur', hideContextMenu);
+
+    /** Switch the right-hand panel to Properties or Events. */
+    function switchPanelTab(tab) {
+        activeTab = tab;
+        $('ff-tab-props')?.classList.toggle('active', tab === 'props');
+        $('ff-tab-events')?.classList.toggle('active', tab === 'events');
+        renderPanel();
+    }
+
+    /** Select the control and focus its Items editor in the property grid. */
+    function editItemsAction(ctrl) {
+        select(ctrl);
+        collapsedCats.delete('Data');
+        switchPanelTab('props');
+        propsBody.querySelector('.ff-items-edit')?.focus();
+    }
+
+    const openCode = () => vscode.postMessage({ type: 'openCode' });
+    const panelEntries = () => ['—',
+        { label: '▤ Properties', action: () => switchPanelTab('props') },
+        { label: '⚡ Events', action: () => switchPanelTab('events') }];
+    const clipboardEntries = () => [
+        { label: 'Cut', key: 'Ctrl+X', action: cutSelection },
+        { label: 'Copy', key: 'Ctrl+C', action: copySelection },
+        { label: 'Paste', key: 'Ctrl+V', disabled: !clipboard, action: pasteClipboard }];
+
+    /** Menu for one WinForms control, tray component, or TabPage. */
+    function wfControlMenu(ctrl) {
+        const isTray = !!WF_TRAY[ctrl.type];
+        const def = WF_CONTROLS[ctrl.type] ?? WF_TRAY[ctrl.type];
+        const items = [{ label: `${ctrl.name} : ${ctrl.type}`, header: true }];
+
+        // Content verbs first, like the VS designer's smart commands.
+        if (ctrl.type === 'TabControl') {
+            const pages = ctrl.children.filter(c => c.type === 'TabPage');
+            const active = pages[Math.min(uiTabs.get(ctrl.name) ?? 0, Math.max(0, pages.length - 1))] ?? null;
+            items.push({ label: 'Add Tab', action: () => wfAddTab(ctrl) });
+            items.push({
+                label: `Remove Tab${active ? ` (${wfString(active.props.Text) ?? active.name})` : ''}`,
+                disabled: !active,
+                action: () => { if (active) { wfRemoveTab(ctrl, active); } }
+            });
+            items.push('—');
+        } else if (ctrl.type === 'TabPage') {
+            const tc = ctrl.parent && ctrl.parent.type === 'TabControl' ? ctrl.parent : null;
+            if (tc) {
+                items.push({ label: 'Add Tab', action: () => wfAddTab(tc) });
+                items.push({ label: 'Remove This Tab', danger: true, action: () => wfRemoveTab(tc, ctrl) });
+                items.push({ label: `Select TabControl (${tc.name})`, action: () => select(tc) });
+                items.push('—');
+            }
+        } else if (WF_STRIP_ITEM_TYPES[ctrl.type]) {
+            items.push({ label: 'Add Item', action: () => wfAddStripItem(ctrl) });
+            items.push({ label: 'Edit Items…', action: () => editItemsAction(ctrl) });
+            items.push('—');
+        } else if (WF_OBJECT_ITEM_TYPES.includes(ctrl.type)) {
+            items.push({ label: 'Edit Items…', action: () => editItemsAction(ctrl) });
+            items.push('—');
+        }
+
+        items.push({ label: `⚡ Handle ${def?.defaultEvent ?? 'Click'}`, action: () => wireDefaultEvent(ctrl) });
+        items.push({ label: '</> View Code', action: openCode });
+        items.push('—');
+        items.push(...clipboardEntries());
+        if (!isTray && ctrl.type !== 'TabPage' && WF_CONTROLS[ctrl.type]) {
+            items.push({ label: 'Duplicate', key: 'Ctrl+D', action: () => wfDuplicateControl(ctrl) });
+        }
+        items.push({ label: 'Delete', key: 'Del', danger: true, action: deleteSelected });
+        if (!isTray && ctrl.type !== 'TabPage') {
+            items.push('—');
+            items.push({ label: 'Bring to Front', action: () => wfReorderZ(ctrl, true) });
+            items.push({ label: 'Send to Back', action: () => wfReorderZ(ctrl, false) });
+        }
+        if (!isTray && ctrl.parent && ctrl.parent !== wfForm) {
+            items.push({ label: `Select Parent (${ctrl.parent.name})`, action: () => select(ctrl.parent) });
+        }
+        items.push(...panelEntries());
+        return items;
+    }
+
+    /** Menu for the form background. */
+    function wfFormMenu() {
+        return [
+            { label: `${wfForm?.name ?? 'Form'} : Form`, header: true },
+            { label: 'Paste', key: 'Ctrl+V', disabled: !clipboard, action: pasteClipboard },
+            { label: '⚡ Handle Load', action: () => wfWireEvent(wfForm, 'Load', wfForm.events?.Load || '') },
+            { label: '</> View Code', action: openCode },
+            ...panelEntries()
+        ];
+    }
+
+    /** Menu for one XAML element. */
+    function xamlControlMenu(el) {
+        const type = el.localName;
+        const items = [{ label: `${getName(el) || type} : ${type}`, header: true }];
+        if (type === 'TabControl') {
+            items.push({ label: 'Add Tab', action: () => xamlAddTab(el) });
+            items.push('—');
+        } else if (type === 'TabItem') {
+            const tc = el.parentNode;
+            if (tc && tc.nodeType === Node.ELEMENT_NODE) {
+                items.push({ label: 'Add Tab', action: () => xamlAddTab(tc) });
+                items.push({ label: 'Remove This Tab', danger: true, action: () => xamlRemoveTab(el) });
+                items.push('—');
+            }
+        }
+        if (CONTROLS[type]) {
+            items.push({ label: `⚡ Handle ${CONTROLS[type].defaultEvent}`, action: () => wireDefaultEvent(el) });
+        }
+        items.push({ label: '</> View Code', action: openCode });
+        items.push('—');
+        items.push(...clipboardEntries());
+        items.push({ label: 'Delete', key: 'Del', danger: true, action: deleteSelected });
+        const p = el.parentNode;
+        if (p && p.nodeType === Node.ELEMENT_NODE && p !== windowEl) {
+            items.push('—');
+            items.push({ label: `Select Parent (${getName(p) || p.localName})`, action: () => select(p) });
+        }
+        items.push(...panelEntries());
+        return items;
+    }
+
+    /** Menu for the empty XAML surface. */
+    function xamlSurfaceMenu() {
+        return [
+            { label: `${windowEl?.localName ?? 'Window'} (${config.docName})`, header: true },
+            { label: 'Paste', key: 'Ctrl+V', disabled: !clipboard, action: pasteClipboard },
+            { label: '</> View Code', action: openCode },
+            ...panelEntries()
+        ];
+    }
+
+    surfaceEl.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Deepest rendered control under the pointer, like the drop targeting.
+        let node = e.target;
+        let hit = null;
+        while (node && node !== surfaceEl) {
+            const h = visuals.find(v => v.div === node);
+            if (h) { hit = h; break; }
+            node = node.parentElement;
+        }
+        if (docMode === 'winforms') {
+            if (!wfForm) { return; }
+            if (hit && hit.el.__wf) {
+                if (!multiSel.has(hit.el)) { select(hit.el); }
+                else { selected = hit.el; drawSelection(); renderPanel(); }
+                showContextMenu(e.clientX, e.clientY, wfControlMenu(hit.el));
+            } else {
+                select(null);
+                showContextMenu(e.clientX, e.clientY, wfFormMenu());
+            }
+            return;
+        }
+        if (!windowEl) { return; }
+        if (hit) {
+            if (!multiSel.has(hit.el)) { select(hit.el); }
+            showContextMenu(e.clientX, e.clientY, xamlControlMenu(hit.el));
+        } else {
+            select(null);
+            showContextMenu(e.clientX, e.clientY, xamlSurfaceMenu());
+        }
+    });
+
+    // Right-click on the window chrome (title bar, edges) → form/window menu.
+    windowBox.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        if (docMode === 'winforms' ? !wfForm : !windowEl) { return; }
+        select(null);
+        showContextMenu(e.clientX, e.clientY, docMode === 'winforms' ? wfFormMenu() : xamlSurfaceMenu());
+    });
+
+    // ---------------------------------------------------- context menu verbs
+
+    /** Append a new TabPage to a WinForms TabControl, like VS's Add Tab. */
+    function wfAddTab(tc) {
+        const eol = wfEol();
+        let text = xamlText;
+        const ind = wfIndent(text);
+        const name = wfUniqueName('TabPage');
+        const ins = wfInsertBeforeSuspend(text,
+            `${ind}${wfRef(name)} = new ${wfCode('System.Windows.Forms.TabPage')}();`);
+        if (!ins) {
+            setStatus('UI Maker: could not find a place to insert the tab page.');
+            return;
+        }
+        text = ins;
+
+        const pages = tc.children.filter(c => c.type === 'TabPage');
+        const size = wfSizeVal(tc.props.Size) ?? { w: 300, h: 200 };
+        text = wfInsertBlockBeforeForm(text, [
+            `${ind}// `,
+            `${ind}// ${name}`,
+            `${ind}// `,
+            `${ind}${wfRef(name)}.Location = new ${wfCode('System.Drawing.Point')}(4, 24);`,
+            `${ind}${wfRef(name)}.Name = "${name}";`,
+            `${ind}${wfRef(name)}.Padding = new ${wfCode('System.Windows.Forms.Padding')}(3);`,
+            `${ind}${wfRef(name)}.Size = new ${wfCode('System.Drawing.Size')}(${Math.max(10, size.w - 8)}, ${Math.max(10, size.h - 28)});`,
+            `${ind}${wfRef(name)}.TabIndex = ${pages.length};`,
+            `${ind}${wfRef(name)}.Text = "${name}";`,
+            `${ind}${wfRef(name)}.UseVisualStyleBackColor = true;`
+        ]) ?? text;
+
+        // tc.Controls.Add(newPage) after the last existing page add (keeps
+        // tab order), else after the TabControl's first statement.
+        const addLine = `${ind}${wfRef(tc.name)}.Controls.Add(${wfRef(name)});`;
+        let last = null;
+        for (const m of text.matchAll(new RegExp(`^[ \\t]*(?:this\\.)?${tc.name}\\.Controls\\.Add\\([^\\n]*$`, 'gm'))) { last = m; }
+        const anchor = last
+            ?? new RegExp(`^([ \\t]*)(?:this\\.)?${tc.name}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
+        if (anchor) {
+            const end = anchor.index + anchor[0].length;
+            text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
+        }
+        text = wfInsertField(text, 'System.Windows.Forms.TabPage', name);
+
+        uiTabs.set(tc.name, pages.length); // activate the new tab
+        selected = { __wf: true, name, type: 'TabPage', props: {}, events: {}, children: [] };
+        multiSel.clear();
+        wfApply(text);
+        setStatus(`UI Maker: added ${name} to ${tc.name}.`);
+    }
+
+    /** Remove one TabPage (and everything on it) from a TabControl. */
+    function wfRemoveTab(tc, page) {
+        wfDeleteControls([page]);
+        uiTabs.set(tc.name, 0);
+        setStatus(`UI Maker: removed ${page.name} from ${tc.name}.`);
+    }
+
+    /** Append one item ("ItemN") to a strip's Items collection. */
+    function wfAddStripItem(strip) {
+        const texts = (strip.items ?? []).map(n => wfString(wfControls.get(n)?.props.Text) ?? n);
+        texts.push(`Item${texts.length + 1}`);
+        wfSetStripItems(strip, texts);
+        setStatus(`UI Maker: added an item to ${strip.name} — use Edit Items… to rename it.`);
+    }
+
+    /**
+     * Move a control's Controls.Add line to the start/end of its container's
+     * add block. First in the collection paints on top (VS: Bring to Front).
+     */
+    function wfReorderZ(ctrl, toFront) {
+        const eol = wfEol();
+        let text = xamlText;
+        const lineRe = new RegExp(
+            `^[ \\t]*((?:this\\.)?[\\w\\.]*?Controls)\\.Add\\((?:this\\.)?${ctrl.name}(?:\\s*,[^)]*)?\\);[ \\t]*\\r?\\n`, 'm');
+        const m = lineRe.exec(text);
+        if (!m) {
+            setStatus('UI Maker: this control is added via AddRange — reorder it in the code view.');
+            return;
+        }
+        const line = m[0];
+        const prefix = m[1];
+        text = text.replace(lineRe, '');
+        const sibRe = new RegExp(`^[ \\t]*${reEsc(prefix)}\\.Add\\([^\\n]*$`, 'gm');
+        let first = null, lastSib = null;
+        for (const s of text.matchAll(sibRe)) { if (!first) { first = s; } lastSib = s; }
+        if (!first) {
+            // Only child — put the line back where the block ends.
+            const rm = /^[ \t]*(?:[\w\.]+\.)?ResumeLayout\(/m.exec(text);
+            text = rm ? `${text.slice(0, rm.index)}${line}${text.slice(rm.index)}` : xamlText;
+            wfApply(text);
+            return;
+        }
+        if (toFront) {
+            text = `${text.slice(0, first.index)}${line}${text.slice(first.index)}`;
+        } else {
+            const end = lastSib.index + lastSib[0].length;
+            text = `${text.slice(0, end)}${eol}${line.replace(/\r?\n$/, '')}${text.slice(end)}`;
+        }
+        wfApply(text);
+        setStatus(`UI Maker: ${ctrl.name} ${toFront ? 'brought to front' : 'sent to back'}.`);
+    }
+
+    /** Append a <TabItem> with an empty Grid to a XAML TabControl. */
+    function xamlAddTab(tc) {
+        if (!xamlDoc) { return; }
+        const count = elementChildren(tc).filter(c => c.localName === 'TabItem').length;
+        const ti = xamlDoc.createElementNS(PRES_NS, 'TabItem');
+        ti.setAttribute('Header', `Tab ${count + 1}`);
+        ti.appendChild(xamlDoc.createElementNS(PRES_NS, 'Grid'));
+        tc.appendChild(ti);
+        uiTabs.set(pathOf(tc), count);
+        selected = ti;
+        multiSel.clear();
+        multiSel.add(ti);
+        commit();
+        selectedPath = pathOf(ti);
+    }
+
+    /** Remove one <TabItem> from its TabControl. */
+    function xamlRemoveTab(ti) {
+        const tc = ti.parentNode;
+        ti.remove();
+        if (tc && tc.nodeType === Node.ELEMENT_NODE) { uiTabs.set(pathOf(tc), 0); }
+        selected = null;
+        multiSel.clear();
+        selectedPath = '';
+        commit();
+    }
+
     // ================================================================ toolbar
 
     $('ff-btn-code').addEventListener('click', () => vscode.postMessage({ type: 'openCode' }));
@@ -2084,33 +2568,57 @@
 
     /** WinForms toolbox: default sizes match the Visual Studio toolbox.
      *  `props` lists only the type-SPECIFIC grid entries — every control also
-     *  gets WF_COMMON_PROPS (layout, colors, behavior, accessibility). */
+     *  gets WF_COMMON_PROPS (layout, colors, behavior, accessibility).
+     *  `sec` groups the toolbox into VS-style sections; `noSize` skips the
+     *  Size line on insert (auto-sizing controls); `extra` adds fixed
+     *  property lines VS also generates on drop. */
     const WF_CONTROLS = {
-        Button:         { icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'TextImageRelation', 'BackgroundImage', 'BackgroundImageLayout', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic', 'AutoEllipsis', 'DialogResult'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
-        Label:          { icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
-        LinkLabel:      { icon: '🔗', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'TextAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis', 'LinkColor'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
-        TextBox:        { icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'PlaceholderText', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'PasswordChar', 'CharacterCasing', 'ScrollBars', 'TextAlign'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
-        CheckBox:       { icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'ThreeState', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
-        RadioButton:    { icon: '◉', w: 95,  h: 19,  text: 'radioButton', props: ['Text', 'Checked', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
-        ComboBox:       { icon: '▾', w: 121, h: 23,  text: '',            props: ['Text', 'DropDownStyle', 'MaxDropDownItems', 'Sorted'], events: ['SelectedIndexChanged', 'TextChanged'], defaultEvent: 'SelectedIndexChanged' },
-        ListBox:        { icon: '≡', w: 120, h: 94,  text: '',            props: ['SelectionMode', 'Sorted', 'MultiColumn'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
-        ListView:       { icon: '☰', w: 160, h: 97,  text: '',            props: ['View', 'FullRowSelect', 'GridLines', 'MultiSelect', 'CheckBoxes'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
-        TreeView:       { icon: '🌲', w: 160, h: 97,  text: '',            props: ['CheckBoxes', 'ShowLines', 'ShowRootLines'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
-        DataGridView:   { icon: '▦', w: 240, h: 150, text: '',            props: ['ReadOnly', 'AllowUserToAddRows', 'AllowUserToDeleteRows', 'MultiSelect', 'RowHeadersVisible'], events: ['CellClick', 'CellValueChanged', 'SelectionChanged'], defaultEvent: 'CellClick' },
-        PictureBox:     { icon: '🖼', w: 100, h: 50,  text: '',            props: ['Image', 'SizeMode', 'BorderStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
-        ProgressBar:    { icon: '▱', w: 100, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Style'], events: ['Click'], defaultEvent: 'Click' },
-        TrackBar:       { icon: '⬌', w: 104, h: 45,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'TickFrequency', 'SmallChange', 'LargeChange', 'Orientation'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
-        NumericUpDown:  { icon: '↕', w: 120, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Increment', 'DecimalPlaces', 'ThousandsSeparator', 'ReadOnly', 'TextAlign'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        DateTimePicker: { icon: '📅', w: 200, h: 23,  text: '',            props: ['Format', 'CustomFormat', 'ShowUpDown'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        MaskedTextBox:  { icon: '#',  w: 100, h: 23,  text: '',            props: ['Text', 'Mask', 'ReadOnly', 'TextAlign'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
-        RichTextBox:    { icon: '¶',  w: 150, h: 96,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'ScrollBars'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
-        GroupBox:       { icon: '⬒', w: 200, h: 100, text: 'groupBox',    props: ['Text', 'FlatStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Enter'], defaultEvent: 'Enter' },
-        Panel:          { icon: '▢', w: 200, h: 100, text: '',            props: ['BorderStyle', 'AutoScroll', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'Paint'], defaultEvent: 'Click' },
-        TabControl:     { icon: '⧉', w: 300, h: 200, text: '',            props: ['SelectedIndex', 'Alignment'], events: ['SelectedIndexChanged'], defaultEvent: 'SelectedIndexChanged' },
-        MenuStrip:      { icon: '☰', w: 0,   h: 24,  text: '',            props: ['Items', 'BackColor'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
-        ToolStrip:      { icon: '🔧', w: 0,   h: 25,  text: '',            props: ['Items', 'BackColor', 'GripStyle'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
-        StatusStrip:    { icon: '▁', w: 0,   h: 22,  text: '',            props: ['Items', 'BackColor', 'SizingGrip'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' }
+        // ---- Common Controls
+        Button:         { sec: 'Common Controls', icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'TextImageRelation', 'BackgroundImage', 'BackgroundImageLayout', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic', 'AutoEllipsis', 'DialogResult'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
+        Label:          { sec: 'Common Controls', icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        LinkLabel:      { sec: 'Common Controls', icon: '🔗', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'TextAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis', 'LinkColor'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
+        TextBox:        { sec: 'Common Controls', icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'PlaceholderText', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'PasswordChar', 'CharacterCasing', 'ScrollBars', 'TextAlign'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
+        MaskedTextBox:  { sec: 'Common Controls', icon: '#',  w: 100, h: 23,  text: '',            props: ['Text', 'Mask', 'ReadOnly', 'TextAlign'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        RichTextBox:    { sec: 'Common Controls', icon: '¶',  w: 150, h: 96,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'ScrollBars'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        CheckBox:       { sec: 'Common Controls', icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'ThreeState', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
+        RadioButton:    { sec: 'Common Controls', icon: '◉', w: 95,  h: 19,  text: 'radioButton', props: ['Text', 'Checked', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
+        CheckedListBox: { sec: 'Common Controls', icon: '☒', w: 120, h: 94,  text: '',            props: ['Items', 'CheckOnClick', 'Sorted', 'ThreeDCheckBoxes'], events: ['SelectedIndexChanged', 'ItemCheck'], defaultEvent: 'SelectedIndexChanged' },
+        ComboBox:       { sec: 'Common Controls', icon: '▾', w: 121, h: 23,  text: '',            props: ['Text', 'Items', 'DropDownStyle', 'MaxDropDownItems', 'Sorted'], events: ['SelectedIndexChanged', 'TextChanged'], defaultEvent: 'SelectedIndexChanged' },
+        DomainUpDown:   { sec: 'Common Controls', icon: '⇅', w: 120, h: 23,  text: '',            props: ['Text', 'Items', 'ReadOnly', 'Sorted', 'Wrap'], events: ['SelectedItemChanged'], defaultEvent: 'SelectedItemChanged' },
+        ListBox:        { sec: 'Common Controls', icon: '≡', w: 120, h: 94,  text: '',            props: ['Items', 'SelectionMode', 'Sorted', 'MultiColumn'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
+        ListView:       { sec: 'Common Controls', icon: '☰', w: 160, h: 97,  text: '',            props: ['View', 'FullRowSelect', 'GridLines', 'MultiSelect', 'CheckBoxes'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
+        TreeView:       { sec: 'Common Controls', icon: '🌲', w: 160, h: 97,  text: '',            props: ['CheckBoxes', 'ShowLines', 'ShowRootLines'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
+        PictureBox:     { sec: 'Common Controls', icon: '🖼', w: 100, h: 50,  text: '',            props: ['Image', 'SizeMode', 'BorderStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        ProgressBar:    { sec: 'Common Controls', icon: '▱', w: 100, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Style'], events: ['Click'], defaultEvent: 'Click' },
+        TrackBar:       { sec: 'Common Controls', icon: '⬌', w: 104, h: 45,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'TickFrequency', 'SmallChange', 'LargeChange', 'Orientation'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
+        NumericUpDown:  { sec: 'Common Controls', icon: '↕', w: 120, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Increment', 'DecimalPlaces', 'ThousandsSeparator', 'ReadOnly', 'TextAlign'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        DateTimePicker: { sec: 'Common Controls', icon: '📅', w: 200, h: 23,  text: '',            props: ['Format', 'CustomFormat', 'ShowUpDown'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        MonthCalendar:  { sec: 'Common Controls', icon: '📆', w: 227, h: 162, text: '', noSize: true, props: ['ShowToday', 'ShowTodayCircle', 'ShowWeekNumbers', 'MaxSelectionCount'], events: ['DateChanged'], defaultEvent: 'DateChanged' },
+        HScrollBar:     { sec: 'Common Controls', icon: '⇔', w: 80,  h: 17,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'SmallChange', 'LargeChange'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
+        VScrollBar:     { sec: 'Common Controls', icon: '⇕', w: 17,  h: 80,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'SmallChange', 'LargeChange'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
+        WebBrowser:     { sec: 'Common Controls', icon: '🌐', w: 250, h: 150, text: '',            props: ['AllowNavigation', 'ScriptErrorsSuppressed'], events: ['DocumentCompleted', 'Navigated'], defaultEvent: 'DocumentCompleted' },
+        PropertyGrid:   { sec: 'Common Controls', icon: '▤', w: 130, h: 130, text: '',            props: ['HelpVisible', 'ToolbarVisible', 'PropertySort'], events: ['PropertyValueChanged'], defaultEvent: 'PropertyValueChanged' },
+        // ---- Containers
+        GroupBox:        { sec: 'Containers', icon: '⬒', w: 200, h: 100, text: 'groupBox',    props: ['Text', 'FlatStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Enter'], defaultEvent: 'Enter' },
+        Panel:           { sec: 'Containers', icon: '▢', w: 200, h: 100, text: '',            props: ['BorderStyle', 'AutoScroll', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'Paint'], defaultEvent: 'Click' },
+        FlowLayoutPanel: { sec: 'Containers', icon: '⠿', w: 200, h: 100, text: '',            props: ['FlowDirection', 'WrapContents', 'AutoScroll', 'BorderStyle'], events: ['Click', 'Paint'], defaultEvent: 'Click' },
+        TableLayoutPanel:{ sec: 'Containers', icon: '▦', w: 200, h: 100, text: '',            props: ['ColumnCount', 'RowCount', 'CellBorderStyle', 'AutoScroll'], events: ['Click', 'Paint'], defaultEvent: 'Click',
+                           extra: [['ColumnCount', '2'], ['RowCount', '2']] },
+        SplitContainer:  { sec: 'Containers', icon: '◫', w: 150, h: 100, text: '',            props: ['Orientation', 'SplitterDistance', 'SplitterWidth', 'IsSplitterFixed', 'BorderStyle'], events: ['SplitterMoved'], defaultEvent: 'SplitterMoved',
+                           extra: [['SplitterDistance', '50']] },
+        Splitter:        { sec: 'Containers', icon: '┃', w: 3,   h: 100, text: '',            props: ['MinExtra', 'MinSize'], events: ['SplitterMoved'], defaultEvent: 'SplitterMoved',
+                           extra: [['TabStop', 'false']] },
+        TabControl:      { sec: 'Containers', icon: '⧉', w: 300, h: 200, text: '',            props: ['SelectedIndex', 'Alignment'], events: ['SelectedIndexChanged'], defaultEvent: 'SelectedIndexChanged' },
+        // ---- Menus & Toolbars
+        MenuStrip:      { sec: 'Menus & Toolbars', icon: '☰', w: 0,   h: 24,  text: '',            props: ['Items', 'BackColor'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
+        ToolStrip:      { sec: 'Menus & Toolbars', icon: '🔧', w: 0,   h: 25,  text: '',            props: ['Items', 'BackColor', 'GripStyle'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
+        StatusStrip:    { sec: 'Menus & Toolbars', icon: '▁', w: 0,   h: 22,  text: '',            props: ['Items', 'BackColor', 'SizingGrip'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
+        // ---- Data
+        DataGridView:   { sec: 'Data', icon: '▦', w: 240, h: 150, text: '',            props: ['ReadOnly', 'AllowUserToAddRows', 'AllowUserToDeleteRows', 'MultiSelect', 'RowHeadersVisible'], events: ['CellClick', 'CellValueChanged', 'SelectionChanged'], defaultEvent: 'CellClick' }
     };
+
+    /** Controls whose Items collection holds plain values ("object[]"). */
+    const WF_OBJECT_ITEM_TYPES = ['ListBox', 'ComboBox', 'CheckedListBox', 'DomainUpDown'];
 
     /**
      * Non-visual components — shown in the component tray below the form,
@@ -2118,18 +2626,29 @@
      * generated constructor takes the components IContainer.
      */
     const WF_TRAY = {
-        Timer:               { icon: '⏱', ctor: 'components', props: ['Interval', 'Enabled'], events: ['Tick'], defaultEvent: 'Tick' },
-        ToolTip:             { icon: '💬', ctor: 'components', props: ['AutomaticDelay', 'InitialDelay', 'ReshowDelay', 'ShowAlways'], events: ['Popup'], defaultEvent: 'Popup' },
-        ContextMenuStrip:    { icon: '≣', ctor: 'components', props: ['Items'], events: ['Opening', 'ItemClicked'], defaultEvent: 'Opening' },
-        NotifyIcon:          { icon: '🔔', ctor: 'components', props: ['Text', 'Icon', 'Visible', 'BalloonTipTitle', 'BalloonTipText'], events: ['Click', 'DoubleClick', 'MouseClick'], defaultEvent: 'DoubleClick' },
-        BackgroundWorker:    { icon: '⚙', ctor: '', ns: 'System.ComponentModel', props: ['WorkerReportsProgress', 'WorkerSupportsCancellation'], events: ['DoWork', 'ProgressChanged', 'RunWorkerCompleted'], defaultEvent: 'DoWork' },
-        ImageList:           { icon: '🖼', ctor: 'components', props: ['ColorDepth', 'TransparentColor'], events: [], defaultEvent: 'Disposed' },
-        ErrorProvider:       { icon: '⚠', ctor: 'components', props: ['BlinkRate'], events: [], defaultEvent: 'Disposed' },
-        OpenFileDialog:      { icon: '📂', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory', 'Multiselect'], events: ['FileOk'], defaultEvent: 'FileOk' },
-        SaveFileDialog:      { icon: '💾', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory'], events: ['FileOk'], defaultEvent: 'FileOk' },
-        FolderBrowserDialog: { icon: '🗂', ctor: '',           props: ['Description', 'SelectedPath'], events: [], defaultEvent: 'HelpRequest' },
-        ColorDialog:         { icon: '🎨', ctor: '',           props: ['AllowFullOpen', 'FullOpen'], events: [], defaultEvent: 'HelpRequest' },
-        FontDialog:          { icon: '🅵', ctor: '',           props: ['ShowColor', 'ShowEffects'], events: [], defaultEvent: 'HelpRequest' }
+        // ---- Components
+        Timer:               { sec: 'Components', icon: '⏱', ctor: 'components', props: ['Interval', 'Enabled'], events: ['Tick'], defaultEvent: 'Tick' },
+        ToolTip:             { sec: 'Components', icon: '💬', ctor: 'components', props: ['AutomaticDelay', 'InitialDelay', 'ReshowDelay', 'ShowAlways'], events: ['Popup'], defaultEvent: 'Popup' },
+        ContextMenuStrip:    { sec: 'Components', icon: '≣', ctor: 'components', props: ['Items'], events: ['Opening', 'ItemClicked'], defaultEvent: 'Opening' },
+        NotifyIcon:          { sec: 'Components', icon: '🔔', ctor: 'components', props: ['Text', 'Icon', 'Visible', 'BalloonTipTitle', 'BalloonTipText'], events: ['Click', 'DoubleClick', 'MouseClick'], defaultEvent: 'DoubleClick' },
+        BackgroundWorker:    { sec: 'Components', icon: '⚙', ctor: '', ns: 'System.ComponentModel', props: ['WorkerReportsProgress', 'WorkerSupportsCancellation'], events: ['DoWork', 'ProgressChanged', 'RunWorkerCompleted'], defaultEvent: 'DoWork' },
+        ImageList:           { sec: 'Components', icon: '🖼', ctor: 'components', props: ['ColorDepth', 'TransparentColor'], events: [], defaultEvent: 'Disposed' },
+        ErrorProvider:       { sec: 'Components', icon: '⚠', ctor: 'components', props: ['BlinkRate'], events: [], defaultEvent: 'Disposed' },
+        HelpProvider:        { sec: 'Components', icon: '❓', ctor: '',           props: ['HelpNamespace'], events: [], defaultEvent: 'Disposed' },
+        BindingSource:       { sec: 'Components', icon: '🔗', ctor: 'components', props: ['DataMember'], events: ['CurrentChanged'], defaultEvent: 'CurrentChanged' },
+        FileSystemWatcher:   { sec: 'Components', icon: '👁', ctor: '', ns: 'System.IO', props: ['Path', 'Filter', 'IncludeSubdirectories', 'EnableRaisingEvents'], events: ['Changed', 'Created', 'Deleted', 'Renamed'], defaultEvent: 'Changed' },
+        Process:             { sec: 'Components', icon: '⚡', ctor: '', ns: 'System.Diagnostics', props: ['EnableRaisingEvents'], events: ['Exited'], defaultEvent: 'Exited' },
+        // ---- Dialogs
+        OpenFileDialog:      { sec: 'Dialogs', icon: '📂', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory', 'Multiselect'], events: ['FileOk'], defaultEvent: 'FileOk' },
+        SaveFileDialog:      { sec: 'Dialogs', icon: '💾', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory'], events: ['FileOk'], defaultEvent: 'FileOk' },
+        FolderBrowserDialog: { sec: 'Dialogs', icon: '🗂', ctor: '',           props: ['Description', 'SelectedPath'], events: [], defaultEvent: 'HelpRequest' },
+        ColorDialog:         { sec: 'Dialogs', icon: '🎨', ctor: '',           props: ['AllowFullOpen', 'FullOpen'], events: [], defaultEvent: 'HelpRequest' },
+        FontDialog:          { sec: 'Dialogs', icon: '🅵', ctor: '',           props: ['ShowColor', 'ShowEffects'], events: [], defaultEvent: 'HelpRequest' },
+        // ---- Printing
+        PrintDialog:         { sec: 'Printing', icon: '🖨', ctor: '',           props: ['AllowSomePages', 'UseEXDialog'], events: [], defaultEvent: 'HelpRequest' },
+        PrintDocument:       { sec: 'Printing', icon: '📄', ctor: '', ns: 'System.Drawing.Printing', props: ['DocumentName'], events: ['PrintPage', 'BeginPrint', 'EndPrint'], defaultEvent: 'PrintPage' },
+        PrintPreviewDialog:  { sec: 'Printing', icon: '🔍', ctor: '',           props: [], events: ['Load'], defaultEvent: 'Load' },
+        PageSetupDialog:     { sec: 'Printing', icon: '📐', ctor: '',           props: ['AllowMargins', 'AllowOrientation', 'AllowPaper'], events: [], defaultEvent: 'HelpRequest' }
     };
 
     /** Item type generated for each strip's Items collection. */
@@ -2160,12 +2679,32 @@
         FileOk:           { handler: 'System.ComponentModel.CancelEventHandler', args: 'System.ComponentModel.CancelEventArgs' },
         DoWork:           { handler: 'System.ComponentModel.DoWorkEventHandler', args: 'System.ComponentModel.DoWorkEventArgs' },
         ProgressChanged:  { handler: 'System.ComponentModel.ProgressChangedEventHandler', args: 'System.ComponentModel.ProgressChangedEventArgs' },
-        RunWorkerCompleted: { handler: 'System.ComponentModel.RunWorkerCompletedEventHandler', args: 'System.ComponentModel.RunWorkerCompletedEventArgs' }
+        RunWorkerCompleted: { handler: 'System.ComponentModel.RunWorkerCompletedEventHandler', args: 'System.ComponentModel.RunWorkerCompletedEventArgs' },
+        ItemCheck:        { handler: 'System.Windows.Forms.ItemCheckEventHandler', args: 'ItemCheckEventArgs' },
+        DateChanged:      { handler: 'System.Windows.Forms.DateRangeEventHandler', args: 'DateRangeEventArgs' },
+        SplitterMoved:    { handler: 'System.Windows.Forms.SplitterEventHandler', args: 'SplitterEventArgs' },
+        PrintPage:        { handler: 'System.Drawing.Printing.PrintPageEventHandler', args: 'System.Drawing.Printing.PrintPageEventArgs' },
+        BeginPrint:       { handler: 'System.Drawing.Printing.PrintEventHandler', args: 'System.Drawing.Printing.PrintEventArgs' },
+        EndPrint:         { handler: 'System.Drawing.Printing.PrintEventHandler', args: 'System.Drawing.Printing.PrintEventArgs' },
+        Changed:          { handler: 'System.IO.FileSystemEventHandler', args: 'System.IO.FileSystemEventArgs' },
+        Created:          { handler: 'System.IO.FileSystemEventHandler', args: 'System.IO.FileSystemEventArgs' },
+        Deleted:          { handler: 'System.IO.FileSystemEventHandler', args: 'System.IO.FileSystemEventArgs' },
+        Renamed:          { handler: 'System.IO.RenamedEventHandler', args: 'System.IO.RenamedEventArgs' },
+        DocumentCompleted: { handler: 'System.Windows.Forms.WebBrowserDocumentCompletedEventHandler', args: 'WebBrowserDocumentCompletedEventArgs' },
+        Navigated:        { handler: 'System.Windows.Forms.WebBrowserNavigatedEventHandler', args: 'WebBrowserNavigatedEventArgs' },
+        PropertyValueChanged: { handler: 'System.Windows.Forms.PropertyValueChangedEventHandler', args: 'PropertyValueChangedEventArgs' }
     };
     const WF_DEFAULT_EVENT_TYPE = { handler: 'System.EventHandler', args: 'EventArgs' };
 
+    /** Per-type overrides where the same event name uses a different delegate. */
+    const WF_EVENT_TYPE_OVERRIDES = {
+        // ScrollBar.Scroll is ScrollEventHandler; TrackBar.Scroll is plain EventHandler.
+        HScrollBar: { Scroll: { handler: 'System.Windows.Forms.ScrollEventHandler', args: 'ScrollEventArgs' } },
+        VScrollBar: { Scroll: { handler: 'System.Windows.Forms.ScrollEventHandler', args: 'ScrollEventArgs' } }
+    };
+
     const WF_FORM_EVENTS = ['Load', 'Shown', 'FormClosing', 'Resize', 'KeyDown'];
-    const WF_CONTAINERS = ['GroupBox', 'Panel', 'TabPage'];
+    const WF_CONTAINERS = ['GroupBox', 'Panel', 'TabPage', 'FlowLayoutPanel', 'TableLayoutPanel', 'SplitContainer'];
 
     // ---------------------------------------------------- wf property catalog
     //
@@ -2198,6 +2737,9 @@
         ImageLayout: ['None', 'Tile', 'Center', 'Stretch', 'Zoom'],
         TabAlignment: ['Top', 'Bottom', 'Left', 'Right'],
         ToolStripGripStyle: ['Hidden', 'Visible'],
+        FlowDirection: ['LeftToRight', 'TopDown', 'RightToLeft', 'BottomUp'],
+        TableLayoutPanelCellBorderStyle: ['None', 'Single', 'Inset', 'InsetDouble', 'Outset', 'OutsetDouble', 'OutsetPartial'],
+        PropertySort: ['NoSort', 'Alphabetical', 'Categorized', 'CategorizedAlphabetical'],
         ColorDepth: ['Depth4Bit', 'Depth8Bit', 'Depth16Bit', 'Depth24Bit', 'Depth32Bit'],
         FormBorderStyle: ['None', 'FixedSingle', 'Fixed3D', 'FixedDialog', 'Sizable', 'FixedToolWindow', 'SizableToolWindow'],
         FormStartPosition: ['Manual', 'CenterScreen', 'WindowsDefaultLocation', 'WindowsDefaultBounds', 'CenterParent'],
@@ -2374,6 +2916,40 @@
         FullOpen:              { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Opens with the custom-colors pane visible.' },
         ShowColor:             { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Shows the color choice in the font dialog.' },
         ShowEffects:           { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Shows underline/strikeout/color options.' },
+        // New-control specifics
+        CheckOnClick:          { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Toggles the check mark on the first click instead of requiring a second click.' },
+        ThreeDCheckBoxes:      { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Draws the check boxes with a 3-D look.' },
+        Wrap:                  { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Wraps around to the first item when scrolling past the last one.' },
+        FlowDirection:         { cat: 'Layout', kind: 'enum', enum: 'FlowDirection', def: 'LeftToRight', desc: 'The direction in which child controls flow.' },
+        WrapContents:          { cat: 'Layout', kind: 'bool', def: 'True', desc: 'Wraps child controls to the next row/column when they no longer fit.' },
+        ColumnCount:           { cat: 'Layout', kind: 'int', def: '0', desc: 'The number of columns in the table layout.' },
+        RowCount:              { cat: 'Layout', kind: 'int', def: '0', desc: 'The number of rows in the table layout.' },
+        CellBorderStyle:       { cat: 'Appearance', kind: 'enum', enum: 'TableLayoutPanelCellBorderStyle', def: 'None', desc: 'The style of the border lines drawn between cells.' },
+        SplitterDistance:      { cat: 'Layout', kind: 'int', def: '50', desc: 'The distance in pixels from the left/top edge to the splitter.' },
+        SplitterWidth:         { cat: 'Layout', kind: 'int', def: '4', desc: 'The thickness of the splitter in pixels.' },
+        IsSplitterFixed:       { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Prevents the user from moving the splitter.' },
+        MinExtra:              { cat: 'Behavior', kind: 'int', def: '25', desc: 'The minimum size of the area left for the other controls.' },
+        MinSize:               { cat: 'Behavior', kind: 'int', def: '25', desc: 'The minimum size of the docked control being resized.' },
+        ShowToday:             { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Shows today’s date at the bottom of the calendar.' },
+        ShowTodayCircle:       { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Circles today’s date on the calendar.' },
+        ShowWeekNumbers:       { cat: 'Appearance', kind: 'bool', def: 'False', desc: 'Shows the week number next to each row of dates.' },
+        MaxSelectionCount:     { cat: 'Behavior', kind: 'int', def: '7', desc: 'The maximum number of days that can be selected at once.' },
+        AllowNavigation:       { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Whether the browser can navigate to another page after the first load.' },
+        ScriptErrorsSuppressed: { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Hides script error dialogs raised by pages.' },
+        HelpVisible:           { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Shows the description pane at the bottom of the grid.' },
+        ToolbarVisible:        { cat: 'Appearance', kind: 'bool', def: 'True', desc: 'Shows the toolbar at the top of the grid.' },
+        PropertySort:          { cat: 'Appearance', kind: 'enum', enum: 'PropertySort', def: 'CategorizedAlphabetical', desc: 'How the grid sorts the displayed properties.' },
+        HelpNamespace:         { cat: 'Behavior', kind: 'string', desc: 'The path to the .chm/.html help file the provider serves.' },
+        DataMember:            { cat: 'Data', kind: 'string', desc: 'The list within the data source this BindingSource binds to.' },
+        Path:                  { cat: 'Behavior', kind: 'string', desc: 'The directory to watch for changes.' },
+        IncludeSubdirectories: { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Also watches all subdirectories of Path.' },
+        EnableRaisingEvents:   { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Whether the component raises its events.' },
+        DocumentName:          { cat: 'Design', kind: 'string', desc: 'The document name shown in the printer queue.' },
+        AllowSomePages:        { cat: 'Behavior', kind: 'bool', def: 'False', desc: 'Enables the page-range radio buttons in the dialog.' },
+        UseEXDialog:           { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Uses the modern Windows print dialog (required on 64-bit).' },
+        AllowMargins:          { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Enables the margins section of the dialog.' },
+        AllowOrientation:      { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Enables the orientation section of the dialog.' },
+        AllowPaper:            { cat: 'Behavior', kind: 'bool', def: 'True', desc: 'Enables the paper size/source section of the dialog.' },
         // Data / Focus / Accessibility
         Tag:                   { cat: 'Data', kind: 'string', desc: 'User-defined data associated with the object.' },
         CausesValidation:      { cat: 'Focus', kind: 'bool', def: 'True', desc: 'Whether the control triggers validation on controls losing focus to it.' },
@@ -2382,8 +2958,15 @@
         AccessibleRole:        { cat: 'Accessibility', kind: 'enum', enum: 'AccessibleRole', def: 'Default', desc: 'The role reported to accessibility client applications.' }
     };
 
+    /** Items editor for controls whose Items hold plain strings (object[]). */
+    const WF_OBJ_ITEMS_DEF = { cat: 'Data', kind: 'items-obj', desc: 'The items of the list, one per line. Lines are written to the Designer.cs as Items.AddRange(new object[] { ... }).' };
+
     /** Per-type descriptor overrides (same property name, different type). */
     const WF_PROP_OVERRIDES = {
+        ListBox:        { Items: WF_OBJ_ITEMS_DEF },
+        ComboBox:       { Items: WF_OBJ_ITEMS_DEF },
+        CheckedListBox: { Items: WF_OBJ_ITEMS_DEF },
+        DomainUpDown:   { Items: WF_OBJ_ITEMS_DEF },
         TextBox:        { TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'HorizontalAlignment', def: 'Left', desc: 'The horizontal alignment of the text.' } },
         MaskedTextBox:  { TextAlign: { cat: 'Appearance', kind: 'enum', enum: 'HorizontalAlignment', def: 'Left', desc: 'The horizontal alignment of the text.' } },
         NumericUpDown:  {
@@ -2426,8 +3009,10 @@
         wfForm = { __wf: true, name: cls ? cls[1] : 'Form', type: 'Form', props: {}, events: {}, children: [] };
 
         if (!/InitializeComponent\s*\(\s*\)[\s\S]*?\{/.test(text)) {
-            showBanner('No InitializeComponent method found — this Designer.cs file has no form layout to design.');
+            // Not a designable form — hand the file straight to the text editor.
+            showBanner('No InitializeComponent method found — this file has no form layout to design. Opening the code view…');
             renderEmpty();
+            vscode.postMessage({ type: 'noDesign' });
             return;
         }
 
@@ -2478,10 +3063,25 @@
         }
 
         // Hierarchy: parent.Controls.Add(child) / Controls.Add(child).
-        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
+        // TableLayoutPanel adds may carry a cell: Controls.Add(child, col, row).
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.Controls\.Add\((?:this\.)?(\w+)(?:\s*,\s*(\d+)\s*,\s*(\d+))?\);/gm)) {
             const parent = wfControls.get(m[1]);
             const child = wfControls.get(m[2]);
-            if (parent && child) { parent.children.push(child); child.parent = parent; }
+            if (parent && child) {
+                parent.children.push(child);
+                child.parent = parent;
+                if (m[3] !== undefined) { child.cell = { col: +m[3], row: +m[4] }; }
+            }
+        }
+        // SplitContainer panels: split.Panel1.Controls.Add(child).
+        for (const m of text.matchAll(/^[ \t]*(?:this\.)?(\w+)\.(Panel1|Panel2)\.Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
+            const parent = wfControls.get(m[1]);
+            const child = wfControls.get(m[3]);
+            if (parent && child) {
+                parent.children.push(child);
+                child.parent = parent;
+                child.panelSlot = m[2];
+            }
         }
         for (const m of text.matchAll(/^[ \t]*(?:this\.)?Controls\.Add\((?:this\.)?(\w+)\);/gm)) {
             const child = wfControls.get(m[1]);
@@ -2505,7 +3105,11 @@
         }
         for (const m of text.matchAll(/(?:this\.)?(\w+)\.Items\.AddRange\([^{]*\{([\s\S]*?)\}\)/g)) {
             const ctrl = wfControls.get(m[1]);
-            if (ctrl) { ctrl.items = [...m[2].matchAll(/(?:this\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n)); }
+            if (!ctrl) { continue; }
+            // Strips reference generated item controls; list controls hold
+            // plain string values — capture whichever the array contains.
+            ctrl.items = [...m[2].matchAll(/(?:this\.)?(\w+)/g)].map(x => x[1]).filter(n => wfControls.has(n));
+            ctrl.strItems = [...m[2].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(x => x[1].replace(/\\(.)/g, '$1'));
         }
 
         // Re-select the records with the same names after the re-parse.
@@ -2605,6 +3209,7 @@
             if (!dock) {
                 if (c.type === 'MenuStrip' || c.type === 'ToolStrip') { dock = 'Top'; }
                 else if (c.type === 'StatusStrip') { dock = 'Bottom'; }
+                else if (c.type === 'Splitter') { dock = 'Left'; } // Splitter docks Left by default
             }
             if (!dock || dock === 'None') { continue; }
             const size = wfSizeVal(c.props.Size) ?? { w: 100, h: 23 };
@@ -2637,6 +3242,12 @@
             chip.addEventListener('dblclick', e => {
                 e.preventDefault();
                 wireDefaultEvent(c);
+            });
+            chip.addEventListener('contextmenu', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                select(c);
+                showContextMenu(e.clientX, e.clientY, wfControlMenu(c));
             });
             tray.appendChild(chip);
         }
@@ -2737,12 +3348,66 @@
                 for (const c of [...ctrl.children].reverse()) { div.appendChild(wfVisual(c, rects.get(c))); }
                 return;
             }
-            case 'Panel': {
+            case 'Panel':
+            case 'FlowLayoutPanel': {
                 div.classList.add('ff-wf-panel');
                 const rects = wfDockRects(ctrl.children, ownSize.w, ownSize.h);
                 for (const c of [...ctrl.children].reverse()) { div.appendChild(wfVisual(c, rects.get(c))); }
                 return;
             }
+            case 'TableLayoutPanel': {
+                div.classList.add('ff-wf-panel');
+                const cols = Math.max(1, int(/\d+/.exec(ctrl.props.ColumnCount ?? '')?.[0], 2));
+                const rows = Math.max(1, int(/\d+/.exec(ctrl.props.RowCount ?? '')?.[0], 2));
+                const cellW = ownSize.w / cols;
+                const cellH = ownSize.h / rows;
+                // Cell borders as background gradients (like the VS designer).
+                div.style.backgroundImage =
+                    'linear-gradient(to right, rgba(120,120,120,0.45) 1px, transparent 1px), ' +
+                    'linear-gradient(to bottom, rgba(120,120,120,0.45) 1px, transparent 1px)';
+                div.style.backgroundSize = `${cellW}px ${cellH}px`;
+                // Children are pinned to their cell; the panel owns the layout.
+                for (const c of [...ctrl.children].reverse()) {
+                    const cell = c.cell ?? { col: 0, row: 0 };
+                    const size = wfSizeVal(c.props.Size) ?? { w: 75, h: 23 };
+                    const v = wfVisual(c, {
+                        x: Math.min(cols - 1, cell.col) * cellW + 3,
+                        y: Math.min(rows - 1, cell.row) * cellH + 3,
+                        w: size.w, h: size.h
+                    });
+                    div.appendChild(v);
+                }
+                return;
+            }
+            case 'SplitContainer': {
+                div.classList.add('ff-wf-panel');
+                const horiz = /Orientation\.Horizontal/.test(ctrl.props.Orientation ?? ''); // Horizontal = stacked panels
+                const dist = Math.max(0, int(/\d+/.exec(ctrl.props.SplitterDistance ?? '')?.[0], 50));
+                const sw = Math.max(1, int(/\d+/.exec(ctrl.props.SplitterWidth ?? '')?.[0], 4));
+                const p1 = document.createElement('div');
+                const p2 = document.createElement('div');
+                p1.className = p2.className = 'ff-wf-splitpanel';
+                if (horiz) {
+                    p1.style.cssText = `left:0;top:0;width:${ownSize.w}px;height:${dist}px`;
+                    p2.style.cssText = `left:0;top:${dist + sw}px;width:${ownSize.w}px;height:${Math.max(0, ownSize.h - dist - sw)}px`;
+                } else {
+                    p1.style.cssText = `left:0;top:0;width:${dist}px;height:${ownSize.h}px`;
+                    p2.style.cssText = `left:${dist + sw}px;top:0;width:${Math.max(0, ownSize.w - dist - sw)}px;height:${ownSize.h}px`;
+                }
+                const kids1 = ctrl.children.filter(c => (c.panelSlot ?? 'Panel1') === 'Panel1');
+                const kids2 = ctrl.children.filter(c => c.panelSlot === 'Panel2');
+                const p1s = horiz ? { w: ownSize.w, h: dist } : { w: dist, h: ownSize.h };
+                const p2s = horiz ? { w: ownSize.w, h: ownSize.h - dist - sw } : { w: ownSize.w - dist - sw, h: ownSize.h };
+                const r1 = wfDockRects(kids1, p1s.w, p1s.h);
+                const r2 = wfDockRects(kids2, p2s.w, p2s.h);
+                for (const c of [...kids1].reverse()) { p1.appendChild(wfVisual(c, r1.get(c))); }
+                for (const c of [...kids2].reverse()) { p2.appendChild(wfVisual(c, r2.get(c))); }
+                div.append(p1, p2);
+                return;
+            }
+            case 'Splitter':
+                div.classList.add('ff-look-splitter');
+                return;
             case 'StatusStrip': {
                 div.classList.add('ff-wf-statusstrip');
                 for (const itemName of ctrl.items) {
@@ -2780,6 +3445,8 @@
                         e.stopPropagation();
                         uiTabs.set(ctrl.name, i);
                         selected = pg;
+                        multiSel.clear();
+                        multiSel.add(pg);
                         render();
                     });
                     strip.appendChild(head);
@@ -2863,12 +3530,46 @@
                 break;
             case 'ComboBox':
                 inner.classList.add('ff-look-input');
-                inner.innerHTML = `${escapeHtml(text)}<span class="ff-combo-arrow">▾</span>`;
+                inner.innerHTML = `${escapeHtml(text || (ctrl.strItems?.[0] ?? ''))}<span class="ff-combo-arrow">▾</span>`;
                 break;
             case 'ListBox':
+                inner.classList.add('ff-look-list');
+                inner.innerHTML = (ctrl.strItems ?? [])
+                    .map(s => `<div class="ff-list-item">${escapeHtml(s)}</div>`).join('');
+                break;
+            case 'CheckedListBox':
+                inner.classList.add('ff-look-list');
+                inner.innerHTML = (ctrl.strItems ?? [])
+                    .map(s => `<div class="ff-list-item">☐ ${escapeHtml(s)}</div>`).join('');
+                break;
             case 'ListView':
             case 'TreeView':
                 inner.classList.add('ff-look-list');
+                break;
+            case 'DomainUpDown':
+                inner.classList.add('ff-look-input');
+                inner.innerHTML = `${escapeHtml(text || (ctrl.strItems?.[0] ?? ''))}<span class="ff-combo-arrow">⇅</span>`;
+                break;
+            case 'MonthCalendar':
+                inner.classList.add('ff-look-list', 'ff-look-calendar');
+                inner.innerHTML = '<div class="ff-cal-head">◀ Month ▶</div>' +
+                    '<div class="ff-cal-grid">' + 'SMTWTFS'.split('').map(d => `<span>${d}</span>`).join('') + '</div>';
+                break;
+            case 'HScrollBar':
+                inner.classList.add('ff-look-scrollbar');
+                inner.innerHTML = '<span class="ff-sb-arrow">◄</span><span class="ff-sb-thumb"></span><span class="ff-sb-arrow">►</span>';
+                break;
+            case 'VScrollBar':
+                inner.classList.add('ff-look-scrollbar', 'ff-look-scrollbar-v');
+                inner.innerHTML = '<span class="ff-sb-arrow">▲</span><span class="ff-sb-thumb"></span><span class="ff-sb-arrow">▼</span>';
+                break;
+            case 'WebBrowser':
+                inner.classList.add('ff-look-list', 'ff-look-web');
+                inner.innerHTML = `<span class="ff-web-glyph">🌐</span>${escapeHtml(ctrl.name)}`;
+                break;
+            case 'PropertyGrid':
+                inner.classList.add('ff-look-list');
+                inner.innerHTML = '<div class="ff-grid-header"><span>Property</span><span>Value</span></div>';
                 break;
             case 'PictureBox':
                 inner.classList.add('ff-look-image');
@@ -3260,9 +3961,11 @@
         return wfStyle.thisPrefix ? `this.${name}` : name;
     }
 
-    /** Strip namespace qualification from generated code on modern-style files. */
+    /** Strip namespace qualification from generated code on modern-style files.
+     *  System.Drawing.Printing stays qualified — it is a sub-namespace, not a
+     *  type, and the WinForms implicit usings do not cover it. */
     function wfCode(code) {
-        return wfStyle.qualified ? code : code.replace(/\bSystem\.(?:Windows\.Forms|Drawing)\./g, '');
+        return wfStyle.qualified ? code : code.replace(/\bSystem\.(?:Windows\.Forms\.|Drawing\.(?!Printing\.))/g, '');
     }
 
     /**
@@ -3314,7 +4017,9 @@
     function wfWireEvent(el, eventName, handler, openStub = true) {
         const isForm = el === wfForm;
         const finalName = handler || `${isForm ? wfForm.name : el.name}_${eventName}`;
-        const et = WF_EVENT_TYPES[eventName] ?? WF_DEFAULT_EVENT_TYPE;
+        const et = WF_EVENT_TYPE_OVERRIDES[el.type]?.[eventName]
+            ?? WF_EVENT_TYPES[eventName]
+            ?? WF_DEFAULT_EVENT_TYPE;
         const lhs = isForm ? wfRef(eventName) : `${wfRef(el.name)}.${eventName}`;
         // Classic files wrap the handler in a delegate; modern ones don't.
         const line = wfStyle.thisPrefix
@@ -3399,22 +4104,43 @@
         }
 
         const r = parentDiv.getBoundingClientRect();
-        const x = snap(Math.max(0, (e.clientX - r.left) / zoom - def.w / 2));
-        const y = snap(Math.max(0, (e.clientY - r.top) / zoom - def.h / 2));
-        wfAddControl(type, x, y, parent ? parent.name : null);
+        let x = snap(Math.max(0, (e.clientX - r.left) / zoom - def.w / 2));
+        let y = snap(Math.max(0, (e.clientY - r.top) / zoom - def.h / 2));
+        let parentName = parent ? parent.name : null;
+
+        // SplitContainer children belong to Panel1/Panel2, never the container
+        // itself (its Controls collection rejects direct adds). Pick the panel
+        // under the pointer; coordinates are relative to that panel.
+        if (parent?.type === 'SplitContainer') {
+            const horiz = /Orientation\.Horizontal/.test(parent.props.Orientation ?? '');
+            const dist = Math.max(0, int(/\d+/.exec(parent.props.SplitterDistance ?? '')?.[0], 50));
+            const sw = Math.max(1, int(/\d+/.exec(parent.props.SplitterWidth ?? '')?.[0], 4));
+            const along = horiz ? y : x;
+            const second = along > dist;
+            parentName = `${parent.name}.${second ? 'Panel2' : 'Panel1'}`;
+            if (second) {
+                if (horiz) { y = Math.max(0, y - dist - sw); }
+                else { x = Math.max(0, x - dist - sw); }
+            }
+        }
+        wfAddControl(type, x, y, parentName);
     }
 
     /** Insert a brand-new control: field, instantiation, block, Controls.Add. */
     function wfAddControl(type, x, y, parentName) {
         const def = WF_CONTROLS[type];
+        if (!def) { return; }
         const name = wfUniqueName(type);
         const props = [
             ['Location', `new System.Drawing.Point(${x}, ${y})`],
             ['Name', `"${name}"`],
-            ['Size', `new System.Drawing.Size(${def.w}, ${def.h})`],
             ['TabIndex', String(wfControls.size)]
         ];
+        // Auto-sizing controls (MonthCalendar) get no Size line, like VS.
+        if (!def.noSize) { props.splice(2, 0, ['Size', `new System.Drawing.Size(${def.w}, ${def.h})`]); }
         if (def.text) { props.push(['Text', `"${name}"`]); }
+        // Fixed extras VS also writes on drop (e.g. TableLayoutPanel counts).
+        for (const [p, code] of def.extra ?? []) { props.push([p, code]); }
         wfInsertControl(type, name, props, parentName);
     }
 
@@ -3483,18 +4209,23 @@
         ];
         text = `${text.slice(0, insertAt)}${blockLines.join(eol)}${eol}${text.slice(insertAt)}`;
 
-        // 3) Controls.Add — into the parent container or the form.
+        // 3) Controls.Add — into the parent container or the form. The parent
+        // may be a dotted path like "splitContainer1.Panel1".
+        const parentRe = parentName ? reEsc(parentName) : '';
+        const parentBase = parentName ? parentName.split('.')[0] : '';
         const addLine = parentName
             ? `${ind}${wfRef(parentName)}.Controls.Add(${wfRef(name)});`
             : `${ind}${wfStyle.thisPrefix ? 'this.' : ''}Controls.Add(${wfRef(name)});`;
         const firstAdd = parentName
-            ? new RegExp(`^[ \\t]*(?:this\\.)?${parentName}\\.Controls\\.Add\\(`, 'm').exec(text)
+            ? new RegExp(`^[ \\t]*(?:this\\.)?${parentRe}\\.Controls\\.Add\\(`, 'm').exec(text)
             : /^[ \t]*(?:this\.)?Controls\.Add\(/m.exec(text);
         if (firstAdd) {
             text = `${text.slice(0, firstAdd.index)}${addLine}${eol}${text.slice(firstAdd.index)}`;
         } else if (parentName) {
-            // Parent has no Controls.Add lines yet — append after its first statement.
-            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${parentName}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
+            // Parent has no Controls.Add lines yet — append after its first
+            // statement (fall back to the base control's block for panels).
+            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${parentRe}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text)
+                ?? new RegExp(`^([ \\t]*)(?:this\\.)?${reEsc(parentBase)}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text);
             if (anchor) {
                 const end = anchor.index + anchor[0].length;
                 text = `${text.slice(0, end)}${eol}${addLine}${text.slice(end)}`;
@@ -3697,6 +4428,31 @@
                 const end = anchor.index + anchor[0].length;
                 text = `${text.slice(0, end)}${eol}${line}${text.slice(end)}`;
             }
+        }
+        wfApply(text);
+    }
+
+    /**
+     * Rewrite a list control's Items.AddRange(new object[] { ... }) call so
+     * it matches `texts` (one string per entry). Empty list removes the call.
+     */
+    function wfSetObjItems(ctrl, texts) {
+        const eol = wfEol();
+        let text = xamlText;
+        const ind = wfIndent(text);
+        const re = new RegExp(`^[ \\t]*(?:this\\.)?${ctrl.name}\\.Items\\.AddRange\\([\\s\\S]*?\\);[ \\t]*\\r?\\n`, 'm');
+        text = text.replace(re, '');
+        if (texts.length) {
+            const arr = texts.map(t => wfQuote(t)).join(', ');
+            const line = `${ind}${wfRef(ctrl.name)}.Items.AddRange(new object[] { ${arr} });`;
+            const anchor = new RegExp(`^([ \\t]*)(?:this\\.)?${ctrl.name}\\.[\\w\\.]+[^\\n]*$`, 'm').exec(text)
+                ?? new RegExp(`^([ \\t]*)(?:this\\.)?${ctrl.name}\\s*=\\s*new\\s[^\\n]*$`, 'm').exec(text);
+            if (!anchor) {
+                setStatus('UI Maker: could not find the control block to write the items.');
+                return;
+            }
+            const end = anchor.index + anchor[0].length;
+            text = `${text.slice(0, end)}${eol}${line}${text.slice(end)}`;
         }
         wfApply(text);
     }
@@ -3945,6 +4701,25 @@
             return { label: prop, cat: def.cat, node: row };
         }
 
+        // Plain-value Items (ListBox, ComboBox, CheckedListBox, DomainUpDown):
+        // one string per line, serialized as Items.AddRange(new object[] {...}).
+        if (def.kind === 'items-obj') {
+            const ta = document.createElement('textarea');
+            ta.className = 'ff-items-edit';
+            ta.rows = Math.max(3, (target.strItems?.length ?? 0) + 1);
+            ta.value = (target.strItems ?? []).join('\n');
+            ta.placeholder = 'One item per line…';
+            ta.spellcheck = false;
+            ta.title = 'Each line becomes one item in the list. Remove a line to delete the item.';
+            ta.addEventListener('change', () => {
+                wfSetObjItems(target, ta.value.split('\n').map(s => s.trim()).filter(Boolean));
+            });
+            ta.addEventListener('keydown', e => e.stopPropagation());
+            row.classList.add('ff-row-tall');
+            row.appendChild(ta);
+            return { label: prop, cat: def.cat, node: row };
+        }
+
         if (def.kind === 'bool' || def.kind === 'enum' || def.kind === 'ref') {
             const values = def.kind === 'bool' ? ['True', 'False']
                 : def.kind === 'ref' ? [...wfControls.values()].filter(c => c.type === (def.refType ?? 'Button')).map(c => c.name)
@@ -4148,6 +4923,11 @@
     /** Collapse XML text runs ("  How to\n   Repair " -> "How to Repair"). */
     function collapse(s) {
         return (s || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /** Escape a literal string for use inside a RegExp. */
+    function reEsc(s) {
+        return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     /** Translate a XAML brush value to CSS ("#AARRGGBB" -> rgba, names pass through). */

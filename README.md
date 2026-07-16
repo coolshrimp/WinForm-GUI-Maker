@@ -37,16 +37,26 @@ the far left) to open the side panel:
 - **Actions** — New Project, Build, Run, Debug, Release, App Settings, Open
   Working Folder, and the built-in Guide, one click away. Run and Debug are
   toggles: a green play button while idle that becomes a red stop button while
-  your app is running.
+  your app is running. The first row shows the **Working Folder** — the one
+  project that Run/Build/Debug/Release/App Settings and every file list
+  target. It follows the file you are editing and is per-project (like SFTP
+  configs), so opening a parent folder full of projects never lets one
+  project's action touch another. Click the row to switch projects.
 - **Recent Projects** — every .NET project you open or create, tagged with its
   type (`WinForms · .NET 8`, `WPF · .NET Framework 4.7.2`, …); click to switch.
   Hover a project for one-click **Open in New Window**, **Open Folder in File
   Explorer**, and **Remove**.
 - **XAML Windows** and **WinForms Forms** — every designable file in the
-  workspace; click one to open it straight in the visual designer. Use the
-  **+** button on a group to add a new window/form, or a row's **Duplicate**
-  action to copy an existing one (new class name, registered in the project,
-  opened in the designer). The lists update automatically as files change.
+  *working project*; click one to open it straight in the visual designer. Use
+  the **+** button on a group to add a new window/form, or a row's
+  **Duplicate** action to copy an existing one (new class name, registered in
+  the project, opened in the designer). The lists update automatically as
+  files change. When the opened folder contains **several** projects, nothing
+  is listed wholesale — the panel asks you to choose a working folder first,
+  and build output / caches (`bin`, `obj`, `packages`, `.vs`, `node_modules`)
+  are never scanned. Files with no visual surface (App.xaml, resource
+  dictionaries, Designer.cs files without `InitializeComponent`) skip the
+  designer and open straight in the code editor.
 - **Project Files** — everything else in the workspace, sorted into
   solution-explorer-style categories: **Code**, **Images & Icons**,
   **Resources**, **Data & Config**, **Project & Solution**, and **Other**,
@@ -60,9 +70,28 @@ the far left) to open the side panel:
 ### 🎨 Visual Designer for XAML
 Open any `.xaml` window in the UI Maker Designer:
 
-- **Toolbox** of common WPF controls — Button, Label, TextBox, TextBlock, CheckBox,
-  RadioButton, ComboBox, ListBox, DataGrid, Image, ProgressBar, Slider, Border,
-  GroupBox, DatePicker.
+- **Toolbox** with a search box and Visual Studio's sections. WPF: Button,
+  Label, TextBox, TextBlock, CheckBox, RadioButton, ComboBox, ListBox,
+  DataGrid, Image, ProgressBar, Slider, Border, GroupBox, DatePicker, and
+  more. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
+  LinkLabel, TextBox, MaskedTextBox, RichTextBox, CheckBox, RadioButton,
+  CheckedListBox, ComboBox, DomainUpDown, ListBox, ListView, TreeView,
+  PictureBox, ProgressBar, TrackBar, NumericUpDown, DateTimePicker,
+  MonthCalendar, HScrollBar, VScrollBar, WebBrowser, PropertyGrid),
+  **Containers** (GroupBox, Panel, FlowLayoutPanel, TableLayoutPanel,
+  SplitContainer, Splitter, TabControl), **Menus & Toolbars**, **Data**
+  (DataGridView, BindingSource), **Components**, **Dialogs**, and
+  **Printing** (PrintDialog, PrintDocument, PrintPreviewDialog,
+  PageSetupDialog). Drag a tool onto the form or **double-click** it to add
+  one at a default spot.
+- **Right-click context menus everywhere** — on any control: Cut / Copy /
+  Paste / Duplicate / Delete, **Bring to Front / Send to Back**, Select
+  Parent, wire the default event, and jump to Properties/Events. Per-type
+  verbs match VS: **Add Tab / Remove Tab** on TabControls and tab pages,
+  **Add Item / Edit Items…** on MenuStrip/ToolStrip/StatusStrip, and **Edit
+  Items…** on ListBox, ComboBox, CheckedListBox, and DomainUpDown (one line
+  per item, written back as `Items.AddRange`). Right-click the form or the
+  component tray for their own menus.
 - **Design canvas** that mimics a real window (title bar, client area) with
   snap-to-grid placement, drag to move, 8-point resize handles — and grips on
   the window's own edges to resize the form/window itself.
@@ -94,16 +123,21 @@ Open any `.xaml` window in the UI Maker Designer:
   in the Designer.cs *and* the code-behind is updated (handler names are
   kept, like VS).
 - **Component tray** — Timer, ToolTip, ContextMenuStrip, NotifyIcon,
-  BackgroundWorker, ImageList, ErrorProvider, and the file/color/font/folder
-  dialogs drop into a tray below the form, VS-style, with their own
-  properties and events (WinForms).
+  BackgroundWorker, ImageList, ErrorProvider, HelpProvider, BindingSource,
+  FileSystemWatcher, Process, the file/color/font/folder dialogs, and the
+  printing components drop into a tray below the form, VS-style, with their
+  own properties and events (WinForms). Components that need extra NuGet
+  packages on modern .NET (SerialPort, EventLog, PerformanceCounter,
+  ServiceController, MessageQueue) are left out on purpose so generated code
+  always compiles.
 - **Menus & status bars** — MenuStrip, ToolStrip, and StatusStrip with an
   *Items* editor (one line per item) that generates the ToolStrip item
   classes in the Designer.cs; docked strips push each other for space like
   the real layout engine, and TabControl drops with two ready pages.
 - Keyboard support: arrow keys nudge, `Shift`+arrows move by grid, `Delete` removes,
-  `Ctrl+D` duplicates, `Ctrl+C`/`Ctrl+V` copy & paste — including onto a
-  *different* form.
+  `Ctrl+D` duplicates, `Ctrl+X`/`Ctrl+C`/`Ctrl+V` cut, copy & paste —
+  including onto a *different* form. `Esc` closes menus and clears the
+  selection.
 
 ### ↔️ Split Design / Code view
 The **View Code** button opens the raw XAML beside the designer. Edits flow both ways:

@@ -18,6 +18,7 @@ import { addXamlWindow, addWinForm, duplicateDesignFile } from './formFiles';
 import { addCsFile, addResourceFiles } from './resources';
 import { openGuide } from './guide';
 import { openAppSettings } from './appSettings';
+import { EXCLUDE_GLOB, getWorkingFolder, initWorkingFolder } from './workingFolder';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
 const statusItems: vscode.StatusBarItem[] = [];
@@ -27,6 +28,11 @@ let debugStatusItem: vscode.StatusBarItem | undefined;
 export function activate(context: vscode.ExtensionContext): void {
     const dotnet = new DotnetTools();
     context.subscriptions.push(dotnet);
+
+    // Track which project folder the user is working in. Everything
+    // project-scoped (run/build, sidebar lists) targets this folder only —
+    // a parent folder full of projects is never operated on as a whole.
+    initWorkingFolder(context);
 
     // --- Visual designer (custom editor) ------------------------------------
     context.subscriptions.push(DesignerProvider.register(context));
@@ -74,14 +80,18 @@ export function activate(context: vscode.ExtensionContext): void {
         // Settings editor for the app being built (Properties.Settings grid).
         vscode.commands.registerCommand('uimaker.appSettings', () => openAppSettings(dotnet)),
 
-        // Show the current project folder in the OS file manager.
+        // Show the current WORKING project folder in the OS file manager
+        // (falls back to the workspace root when no project is active).
         vscode.commands.registerCommand('uimaker.openWorkingFolder', () => {
-            const ws = vscode.workspace.workspaceFolders?.[0]?.uri;
-            if (!ws) {
+            const working = getWorkingFolder();
+            const target = working
+                ? vscode.Uri.file(working)
+                : vscode.workspace.workspaceFolders?.[0]?.uri;
+            if (!target) {
                 vscode.window.showWarningMessage('UI Maker: open a folder first.');
                 return;
             }
-            return vscode.env.openExternal(ws);
+            return vscode.env.openExternal(target);
         }),
 
         // Window/form creation and duplication (sidebar buttons + context menus).
@@ -166,7 +176,7 @@ function updateRunStatusItems(dotnet: DotnetTools): void {
 
 /** Toggle status-bar buttons and the `uimaker.hasProject` context key. */
 async function refreshProjectContext(): Promise<void> {
-    const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 1);
+    const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 1);
     const hasProject = found.length > 0;
     await vscode.commands.executeCommand('setContext', 'uimaker.hasProject', hasProject);
     for (const item of statusItems) {

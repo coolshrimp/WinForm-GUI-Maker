@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { ensureEventHandler } from './codeBehind';
 import { pickAndImportImage, resolveImages, findProjectDir, ImageKey } from './resources';
+import { projectDirOf, setWorkingFolder } from './workingFolder';
 
 export class DesignerProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'uimaker.designer';
@@ -86,11 +87,50 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         subs.push(panel.onDidChangeViewState(() => {
             if (panel.active) {
                 DesignerProvider.activeDocumentUri = document.uri;
+                // The designer is not a text editor, so the working-folder
+                // tracker cannot see it — follow the designed file here.
+                const dir = projectDirOf(document.uri.fsPath);
+                if (dir) { setWorkingFolder(dir); }
             }
         }));
 
         subs.push(panel.webview.onDidReceiveMessage(async (msg: any) => {
-            switch (msg?.type) {
+            try {
+                await this.handleMessage(msg, document, panel, t => { webviewText = t; });
+            } catch (err) {
+                void vscode.window.showWarningMessage(
+                    `UI Maker: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }));
+
+        panel.onDidDispose(() => {
+            if (DesignerProvider.activeDocumentUri?.toString() === document.uri.toString()) {
+                DesignerProvider.activeDocumentUri = undefined;
+            }
+            subs.forEach(d => d.dispose());
+        });
+    }
+
+    /** One designer→host message. Throwing here surfaces a warning toast. */
+    private async handleMessage(
+        msg: any,
+        document: vscode.TextDocument,
+        panel: vscode.WebviewPanel,
+        setWebviewText: (t: string) => void
+    ): Promise<void> {
+        const postConfig = () => {
+            const cfg = vscode.workspace.getConfiguration('uimaker');
+            void panel.webview.postMessage({
+                type: 'config',
+                gridSize: cfg.get<number>('gridSize', 8),
+                snap: cfg.get<boolean>('snapToGrid', true),
+                docName: path.basename(document.uri.fsPath)
+            });
+        };
+        const postUpdate = () => {
+            void panel.webview.postMessage({ type: 'update', text: document.getText() });
+        };
+        switch (msg?.type) {
                 // Webview finished loading — send settings and initial content.
                 case 'ready':
                     postConfig();
@@ -131,14 +171,19 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
                 // Designer produced new XAML — replace the whole document.
                 case 'edit': {
-                    webviewText = msg.text as string;
+                    const text = msg.text as string;
+                    setWebviewText(text);
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(
                         document.uri,
                         new vscode.Range(0, 0, document.lineCount, 0),
-                        webviewText
+                        text
                     );
-                    await vscode.workspace.applyEdit(edit);
+                    const ok = await vscode.workspace.applyEdit(edit);
+                    if (!ok) {
+                        void vscode.window.showWarningMessage(
+                            'UI Maker: the designer edit could not be applied — the file may be read-only.');
+                    }
                     break;
                 }
 
@@ -148,6 +193,16 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                         'vscode.openWith', document.uri, 'default', vscode.ViewColumn.Beside
                     );
                     break;
+
+                // Nothing to design here (App.xaml, resource dictionaries,
+                // Designer.cs without InitializeComponent) — close the
+                // designer tab and show the plain text editor instead.
+                case 'noDesign': {
+                    const column = panel.viewColumn ?? vscode.ViewColumn.Active;
+                    panel.dispose();
+                    await vscode.window.showTextDocument(document.uri, { viewColumn: column, preview: false });
+                    break;
+                }
 
                 // Event wiring: guarantee the C# handler stub exists.
                 case 'addHandler':
@@ -183,15 +238,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     void panel.webview.postMessage({ type: 'images', images });
                     break;
                 }
-            }
-        }));
-
-        panel.onDidDispose(() => {
-            if (DesignerProvider.activeDocumentUri?.toString() === document.uri.toString()) {
-                DesignerProvider.activeDocumentUri = undefined;
-            }
-            subs.forEach(d => d.dispose());
-        });
+        }
     }
 
     /** Static shell page; all designer logic lives in media/designer.js. */

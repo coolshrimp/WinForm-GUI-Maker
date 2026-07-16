@@ -24,6 +24,7 @@ import {
     readProjectInfo, isNetFrameworkTfm, frameworkLabel,
     refAssembliesInstalled, addRefAssembliesHelper, findMsBuild
 } from './projectInfo';
+import { EXCLUDE_GLOB, getWorkingFolder, inExcludedDir, setWorkingFolder } from './workingFolder';
 
 export type RunState = 'idle' | 'running' | 'debugging';
 
@@ -474,7 +475,7 @@ export class DotnetTools implements vscode.Disposable {
      */
     async findProject(): Promise<string | undefined> {
         const active = vscode.window.activeTextEditor?.document.uri ?? DesignerActiveUri();
-        if (active?.scheme === 'file') {
+        if (active?.scheme === 'file' && !inExcludedDir(active.fsPath)) {
             let dir = path.dirname(active.fsPath);
             const stopAt = vscode.workspace.getWorkspaceFolder(active)?.uri.fsPath ?? path.parse(dir).root;
             for (;;) {
@@ -485,7 +486,15 @@ export class DotnetTools implements vscode.Disposable {
             }
         }
 
-        const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 16);
+        // The sidebar's working folder decides in multi-project workspaces —
+        // a parent folder of many projects is never operated on wholesale.
+        const working = getWorkingFolder();
+        if (working) {
+            const hit = this.projectIn(working);
+            if (hit) { return hit; }
+        }
+
+        const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 16);
         if (found.length === 0) {
             const create = 'New Project';
             const choice = await vscode.window.showWarningMessage('UI Maker: no .NET project found in this workspace.', create);
@@ -500,8 +509,9 @@ export class DotnetTools implements vscode.Disposable {
                 description: vscode.workspace.asRelativePath(f),
                 fsPath: f.fsPath
             })),
-            { placeHolder: 'UI Maker: select the project' }
+            { placeHolder: 'UI Maker: select the project (becomes the working folder)' }
         );
+        if (pick) { setWorkingFolder(path.dirname(pick.fsPath)); }
         return pick?.fsPath;
     }
 
