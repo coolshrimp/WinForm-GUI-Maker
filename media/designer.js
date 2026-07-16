@@ -164,6 +164,9 @@
     let docMode = 'xaml';       // 'xaml' (WPF markup) | 'winforms' (*.Designer.cs)
     let xamlText = '';          // last text we parsed or produced
     let xamlDoc = null;         // XMLDocument of the current XAML
+    let modelStale = false;     // document changed but did not parse — canvas
+                                // shows the LAST GOOD state and must not write
+    let xmlDeclaration = '';    // "<?xml …?>" line of the document, if any
     let windowEl = null;        // root element (Window / UserControl / Page)
     let contentRoot = null;     // the window's single content element
     let layoutRoot = null;      // top-level panel used for fallback drops
@@ -241,6 +244,9 @@
         const wantWinForms = /\.designer\.cs$/i.test(config.docName)
             || (/InitializeComponent\s*\(\s*\)/.test(xamlText) && /System\.Windows\.Forms/.test(xamlText));
         if (wantWinForms) {
+            // WinForms edits are surgical rewrites of the CURRENT text (never
+            // a model re-serialization), so the stale latch does not apply.
+            setModelStale(false);
             if (docMode !== 'winforms') { docMode = 'winforms'; buildToolbox(); }
             wfParseAndRender();
             return;
@@ -248,6 +254,7 @@
         if (docMode !== 'xaml') { docMode = 'xaml'; buildToolbox(); }
 
         if (!xamlText.trim()) {
+            setModelStale(false);
             xamlDoc = windowEl = contentRoot = layoutRoot = selected = null;
             showBanner('This file is empty.', 'Insert starter window', insertStarterXaml);
             renderEmpty();
@@ -256,16 +263,26 @@
 
         const parsed = new DOMParser().parseFromString(xamlText, 'text/xml');
         if (parsed.getElementsByTagName('parsererror').length) {
-            // Keep the last good render; just warn.
-            showBanner('The XAML has syntax errors — fix them in the code view.', '</> View Code',
+            // The canvas still shows the previous parse. Serializing that
+            // stale model would overwrite the newer (broken) text, so lock
+            // the canvas read-only until the document parses again.
+            setModelStale(true);
+            showBanner('The XAML has syntax errors — the designer is read-only until they are fixed in the code view.', '</> View Code',
                 () => vscode.postMessage({ type: 'openCode' }));
             return;
         }
+        setModelStale(false);
+        xmlDeclaration = /^\s*<\?xml[^>]*\?>/.exec(xamlText)?.[0].trim() ?? '';
 
         xamlDoc = parsed;
         windowEl = xamlDoc.documentElement;
         collectStyles();
         selected = restoreSelection();
+        // multiSel still points into the OLD DOM — rebuild it around the
+        // restored selection so group actions (delete, align) cannot act on
+        // detached nodes.
+        multiSel.clear();
+        if (selected) { multiSel.add(selected); }
 
         if (windowEl.localName === 'Application' || windowEl.localName === 'ResourceDictionary') {
             // Nothing to design — hand the file straight to the text editor.
@@ -283,6 +300,18 @@
         layoutRoot = contentRoot && DROP_PANELS.includes(contentRoot.localName) ? contentRoot : null;
 
         render();
+    }
+
+    /**
+     * Read-only latch for the design surface. While stale, the canvas keeps
+     * showing the last good parse but every path that could write the
+     * document (commit / wfApply) refuses, so out-of-date markup can never
+     * overwrite newer source text.
+     */
+    function setModelStale(stale) {
+        modelStale = stale;
+        surfaceEl.classList.toggle('ff-stale', stale);
+        windowBox.classList.toggle('ff-stale', stale);
     }
 
     /** Direct element children, excluding property elements like <Grid.RowDefinitions>. */
@@ -1566,6 +1595,8 @@
         target.el.appendChild(el);
 
         selected = el;
+        multiSel.clear();
+        multiSel.add(el);
         selectedPath = null;
         commit();
         selectedPath = pathOf(selected);
@@ -1869,7 +1900,12 @@
      */
     function commit() {
         if (!xamlDoc) { return; }
-        xamlText = formatElement(xamlDoc.documentElement, 0).trimStart() + '\n';
+        if (modelStale) {
+            setStatus('UI Maker: the document has unparsed changes — fix the XAML in the code view before designing.');
+            return;
+        }
+        const body = formatElement(xamlDoc.documentElement, 0).trimStart();
+        xamlText = (xmlDeclaration ? `${xmlDeclaration}\n` : '') + body + '\n';
         vscode.postMessage({ type: 'edit', text: xamlText });
         render();
     }
@@ -1884,7 +1920,19 @@
             const t = node.data.trim();
             return t ? `\n${pad}${escapeXml(t)}` : '';
         }
+        if (node.nodeType === Node.CDATA_SECTION_NODE) {
+            return `\n${pad}<![CDATA[${node.data}]]>`;
+        }
+        if (node.nodeType === Node.PROCESSING_INSTRUCTION_NODE) {
+            return `\n${pad}<?${node.target} ${node.data}?>`;
+        }
         if (node.nodeType !== Node.ELEMENT_NODE) { return ''; }
+
+        // Whitespace-significant or code-bearing subtrees are emitted exactly
+        // as they stand — reformatting them would change their meaning.
+        if (node.getAttribute?.('xml:space') === 'preserve' || node.nodeName === 'x:Code') {
+            return `\n${pad}${new XMLSerializer().serializeToString(node)}`;
+        }
 
         // Attributes: the root element traditionally lists one per line
         // (matching the Visual Studio template layout); children stay inline.
@@ -1902,6 +1950,8 @@
         const children = [...node.childNodes].filter(c =>
             c.nodeType === Node.ELEMENT_NODE ||
             c.nodeType === Node.COMMENT_NODE ||
+            c.nodeType === Node.CDATA_SECTION_NODE ||
+            c.nodeType === Node.PROCESSING_INSTRUCTION_NODE ||
             (c.nodeType === Node.TEXT_NODE && c.data.trim() !== ''));
 
         if (!children.length) {
@@ -1995,6 +2045,8 @@
             }
             selected.parentNode.insertBefore(clone, selected.nextSibling);
             selected = clone;
+            multiSel.clear();
+            multiSel.add(clone);
             commit();
             selectedPath = pathOf(clone);
             e.preventDefault();
@@ -2014,8 +2066,12 @@
             if (doomed.length) { wfDeleteControls(doomed); }
             return;
         }
-        for (const el of [...multiSel]) {
-            if (el.__wf) { continue; }
+        // Deletion targets the multi-selection plus the primary selection,
+        // skipping anything that no longer belongs to the current document
+        // (a stale reference must never trigger a rogue serialize).
+        const doomed = new Set([...multiSel, selected]);
+        for (const el of doomed) {
+            if (!el || el.__wf || el.ownerDocument !== xamlDoc) { continue; }
             el.remove();
         }
         multiSel.clear();
@@ -4531,13 +4587,40 @@
         wfApply(text);
     }
 
+    /** `line` with the contents of its string literals blanked out, so
+     *  identifier matching can never hit text inside quotes. */
+    function wfMaskStrings(line) {
+        return line.replace(/"(?:[^"\\]|\\.)*"/g, s => `"${'_'.repeat(s.length - 2)}"`);
+    }
+
     /**
-     * Remove every line referencing `name` from `text`: property assignments,
-     * event wiring, Controls.Add, its comment trio, and the field declaration.
+     * Remove every statement referencing `name` from `text`: property
+     * assignments, event wiring, Controls.Add, its comment trio, and the
+     * field declaration. Only real identifier references count — a "name"
+     * inside a string literal (e.g. another control's Text or Items) never
+     * matches. Shared AddRange lists are PRUNED, not deleted: the doomed
+     * control is dropped from the array and its siblings stay registered.
      * Handler names like name_Click do not match because "_" is a word
      * character (no \b boundary).
      */
     function wfRemoveControlLines(name, text) {
+        const isRef = it => it === name || it === `this.${name}`;
+
+        // AddRange statements first (they can span lines and list several
+        // controls). Owned by the doomed control -> remove whole statement;
+        // merely listing it -> prune the one item.
+        text = text.replace(
+            /^([ \t]*)((?:this\.)?[\w\.]+)\.AddRange\(\s*(new\s+[\w\.\[\]]+)\s*\{([\s\S]*?)\}\s*\)\s*;[ \t]*(\r?\n)?/gm,
+            (all, ind, recv, arrType, body, nl) => {
+                if (isRef(recv) || recv.startsWith(`${name}.`) || recv.startsWith(`this.${name}.`)) { return ''; }
+                if (body.includes('"')) { return all; } // string arrays: no control refs
+                const items = body.split(',').map(s => s.trim()).filter(Boolean);
+                if (!items.some(isRef)) { return all; }
+                const kept = items.filter(it => !isRef(it));
+                if (!kept.length) { return ''; }
+                return `${ind}${recv}.AddRange(${arrType} { ${kept.join(', ')} });${nl ?? ''}`;
+            });
+
         const lines = text.split('\n');
         const keep = [];
         const ref = new RegExp(`\\b(?:this\\.)?${name}\\b`);
@@ -4552,7 +4635,7 @@
                 i += 1;
                 continue;
             }
-            if (ref.test(lines[i]) || field.test(lines[i])) { continue; }
+            if (ref.test(wfMaskStrings(lines[i])) || field.test(lines[i])) { continue; }
             keep.push(lines[i]);
         }
         return keep.join('\n');
@@ -4606,7 +4689,15 @@
             renderPanel();
             return;
         }
-        const text = xamlText.replace(new RegExp(`\\b${oldName}\\b`, 'g'), newName);
+        // Rename identifier references only — words inside string literals
+        // (another control's Text, list items, …) are user data and stay.
+        const idRe = new RegExp(`\\b${oldName}\\b`, 'g');
+        let text = xamlText.split('\n').map(line =>
+            line.split(/("(?:[^"\\]|\\.)*")/).map((part, i) =>
+                i % 2 === 1 ? part : part.replace(idRe, newName)).join('')
+        ).join('\n');
+        // …except the control's own Name string, which VS keeps in sync.
+        text = text.replace(new RegExp(`(\\bName\\s*=\\s*)"${oldName}"`, 'g'), `$1"${newName}"`);
         ctrl.name = newName; // re-parse re-selects by name
         vscode.postMessage({ type: 'renameControl', oldName, newName });
         wfApply(text);

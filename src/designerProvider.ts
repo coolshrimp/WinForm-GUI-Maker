@@ -155,13 +155,16 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     try {
                         const codeUri = vscode.Uri.file(codePath);
                         const codeDoc = await vscode.workspace.openTextDocument(codeUri);
+                        const wasDirty = codeDoc.isDirty;
                         const before = codeDoc.getText();
-                        const after = before.replace(new RegExp(`\\b${oldName}\\b`, 'g'), newName);
+                        const after = renameIdentifier(before, oldName, newName);
                         if (after !== before) {
                             const edit = new vscode.WorkspaceEdit();
                             edit.replace(codeUri, new vscode.Range(0, 0, codeDoc.lineCount, 0), after);
                             await vscode.workspace.applyEdit(edit);
-                            await codeDoc.save();
+                            // Save only what we own: if the user already had
+                            // unsaved edits, leave the buffer dirty for them.
+                            if (!wasDirty) { await codeDoc.save(); }
                         }
                     } catch {
                         // No code-behind next to this designer file — nothing to update.
@@ -334,6 +337,73 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 </body>
 </html>`;
     }
+}
+
+/**
+ * Rename an identifier in C# source, skipping string/char literals and
+ * comments — a control rename must never rewrite user-visible text like
+ * MessageBox.Show("clicked button1") or notes in comments.
+ */
+export function renameIdentifier(source: string, oldName: string, newName: string): string {
+    const idRe = new RegExp(`\\b${oldName}\\b`, 'g');
+    const n = source.length;
+    let out = '';
+    let codeStart = 0;   // start of the current plain-code run
+    let i = 0;
+
+    /** Emit source[codeStart..end) with the rename applied. */
+    const flushCode = (end: number) => { out += source.slice(codeStart, end).replace(idRe, newName); };
+    /** Emit source[from..to) verbatim and continue scanning at `to`. */
+    const skipVerbatim = (from: number, to: number) => {
+        flushCode(from);
+        out += source.slice(from, to);
+        codeStart = i = to;
+    };
+
+    while (i < n) {
+        const ch = source[i];
+        const two = source.substr(i, 2);
+        if (two === '//') {                                     // line comment
+            let end = source.indexOf('\n', i);
+            if (end < 0) { end = n; }
+            skipVerbatim(i, end);
+        } else if (two === '/*') {                              // block comment
+            let end = source.indexOf('*/', i + 2);
+            end = end < 0 ? n : end + 2;
+            skipVerbatim(i, end);
+        } else if (two === '@"' || source.substr(i, 3) === '$@"' || source.substr(i, 3) === '@$"') {
+            // Verbatim string: "" is the only escape.
+            const open = i + (ch === '@' ? 2 : 3);
+            let j = open;
+            while (j < n) {
+                if (source[j] === '"' && source[j + 1] === '"') { j += 2; continue; }
+                if (source[j] === '"') { j++; break; }
+                j++;
+            }
+            skipVerbatim(i, j);
+        } else if (ch === '"' || (ch === '$' && source[i + 1] === '"')) {
+            // Regular (possibly interpolated) string with backslash escapes.
+            let j = i + (ch === '$' ? 2 : 1);
+            while (j < n && source[j] !== '"' && source[j] !== '\n') {
+                if (source[j] === '\\') { j++; }
+                j++;
+            }
+            if (j < n && source[j] === '"') { j++; }
+            skipVerbatim(i, j);
+        } else if (ch === '\'') {                               // char literal
+            let j = i + 1;
+            while (j < n && source[j] !== '\'' && source[j] !== '\n') {
+                if (source[j] === '\\') { j++; }
+                j++;
+            }
+            if (j < n && source[j] === '\'') { j++; }
+            skipVerbatim(i, j);
+        } else {
+            i++;
+        }
+    }
+    flushCode(n);
+    return out;
 }
 
 function makeNonce(): string {

@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.11.0
+
+Project Properties, NuGet manager, classic-project conversion, and a
+release-hardening pass over every path that writes source files.
+
+**Project Properties page.** Visual Studio's *Application* tab inside VS
+Code: output type, target framework (listing the SDKs actually installed),
+assembly name, default namespace, startup object, icon and manifest with
+Browse… pickers, and package/assembly info (version, authors, product,
+description, copyright). Saving updates the `.csproj` in place; clearing a
+field removes the property so the SDK default applies.
+
+**NuGet package manager.** Browse (nuget.org search with prerelease toggle),
+Installed (with uninstall), and Updates (latest-stable check per package).
+Operations run `dotnet add|remove package` against the working project and
+are serialized so parallel restores can't fight. Classic projects list
+read-only with a pointer to the converter.
+
+**Convert to SDK style.** One command (also a banner button on Project
+Properties) rewrites a classic .NET Framework `.csproj` in the modern SDK
+format — fixing C# Dev Kit's *“project file is in unsupported format”*
+warning. Same TFM, names, icon, manifest, and build events; packages.config
+→ `PackageReference`; framework references become implicit; settings and
+resources keep their designers; the original file survives as
+`.csproj.legacy.bak`.
+
+**Data-loss fixes (designer).**
+* XAML that fails to parse now locks the canvas **read-only** (dimmed, with a
+  banner) instead of leaving the previous model live — a stale model can no
+  longer overwrite newer text on the next designer action.
+* The serializer preserves the XML declaration, CDATA sections, processing
+  instructions, `x:Code`, and `xml:space="preserve"` subtrees.
+* Selection state is rebuilt consistently after drops, duplicates, pastes,
+  and re-parses, so group deletion can never target stale or wrong controls.
+* WinForms **delete** prunes the doomed control out of shared
+  `Controls.AddRange` lists instead of deleting the whole line, and matches
+  identifiers only outside string literals (a ListBox item named like a
+  control no longer vanishes).
+* WinForms **rename** rewrites identifiers only outside strings/comments
+  (plus the `Name = "…"` string, like VS) — user-visible text is untouched;
+  the code-behind mirror does the same and no longer force-saves a file that
+  already had unsaved edits.
+
+**Correctness fixes (project system).**
+* Run/Build/Debug/Release now treat the selected **working folder** as
+  authoritative — switching projects in the sidebar takes effect immediately
+  even while an editor from the previous project has focus.
+* Add Class / Add Image / Add Resource target the working project instead of
+  the first `.csproj` in the workspace.
+* Reopening App Settings for another project rebinds the save handler — it
+  can no longer write project B's settings into project A.
+* Importing a resource preserves every existing RESX entry's declared type
+  when regenerating `Resources.Designer.cs` (ints, colors, custom types no
+  longer come back as Bitmap accessors).
+* The build preflight identifies running app instances by **full executable
+  path** inside the project folder — an unrelated app that shares the .exe
+  name is never offered for kill.
+* Debug/Run locate the output binary via MSBuild's evaluated `TargetPath`
+  (honoring custom output paths and RIDs), falling back to the bin scan.
+* Event-handler stubs: brace matching skips strings/comments (no more stubs
+  inserted inside methods), and handler/args names from the webview are
+  validated before they reach generated C#.
+* WPF event stubs use fully-qualified args types, so they compile in
+  code-behind files that import only `System.Windows`.
+* Add Window/Form refuse Visual Basic projects with a clear message instead
+  of dropping C# files into them.
+* Classic-project XML edits escape paths (`R&D` no longer corrupts the
+  project file).
+
+**Hygiene.** Scaffolding offers the frameworks of the SDKs installed on the
+machine (LTS-labeled) instead of a stale hardcoded list; `@types/vscode` is
+pinned to the 1.85 engine minimum; the lockfile version matches the package
+again.
+
 ## 0.10.0
 
 Toolbox parity, right-click menus, and per-project scoping.

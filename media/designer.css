@@ -259,6 +259,17 @@ html, body {
     overflow: hidden;
 }
 
+/* Document has unparsed changes: the canvas shows the last good state and
+   is locked read-only until the text parses again. */
+#ff-surface.ff-stale {
+    pointer-events: none;
+    opacity: 0.55;
+    filter: grayscale(0.6);
+}
+#ff-window.ff-stale {
+    outline: 2px dashed var(--vscode-editorWarning-foreground, #cca700);
+}
+
 /* ----------------------------------------------------------------- controls */
 
 /* Elements are laid out by their parent's CSS grid/flex approximation of the

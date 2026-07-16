@@ -172,6 +172,37 @@ through a UAC prompt instead of failing with "requires elevation".
 or Console), a language (C# or Visual Basic), a target framework, a name, and
 a folder — then generates a ready-to-run app and offers to open it.
 
+### 🛠️ Project Properties page
+**Project Properties** (side panel → Actions) is Visual Studio's *Application*
+tab inside VS Code: output type, target framework (offering the SDKs actually
+installed on your machine), assembly name, default namespace, startup object,
+application icon and manifest (with Browse… pickers), plus the package/assembly
+info (version, authors, product, description, copyright) for SDK-style
+projects. Changes are written straight into the `.csproj` — an existing
+property is updated in place, a cleared one is removed so the SDK default
+applies again.
+
+Old-format projects get a **Convert to SDK style** button right on this page —
+see below.
+
+### 📦 NuGet package manager
+**NuGet Packages** (side panel → Actions) is the *Manage NuGet Packages*
+window: **Browse** searches nuget.org (with an *include prerelease* toggle),
+**Installed** lists the project's `PackageReference`s with one-click
+uninstall, and **Updates** checks every installed package against the latest
+stable release. Install/update/uninstall run `dotnet add|remove package`, so
+the project file and restore stay consistent.
+
+### ⬆️ Convert classic projects to SDK style
+Old .NET Framework projects use a project format modern tooling can't load —
+C# Dev Kit shows *“The project file is in unsupported format”*. **UI Maker:
+Convert Project to SDK Style** rewrites the `.csproj` as a minimal SDK-style
+project with the same target framework, names, icon, manifest, and build
+events; `packages.config` entries become `PackageReference`s; framework
+references become implicit; `Settings.settings`/`Resources.resx` keep their
+designers. The original file is kept as `<name>.csproj.legacy.bak`, so undoing
+the conversion is a two-file rename.
+
 ### ⚙️ App Settings editor
 **App Settings** (side panel → Actions) is the Visual Studio *Project
 Properties → Settings* page, inside VS Code: a grid of settings your built app
@@ -232,6 +263,9 @@ launches with UI Maker loaded.
 | `UI Maker: Build Release (Publish)` | Publish a Release build (honors the single-exe settings) |
 | `UI Maker: Stop Running App` | Terminate the app started by Run |
 | `UI Maker: App Settings` | Grid editor for the settings your app remembers (`Properties.Settings`) |
+| `UI Maker: Project Properties` | VS-style Application page — output type, framework, assembly name, icon, manifest, version info |
+| `UI Maker: NuGet Packages` | Browse / install / update / remove nuget.org packages for the working project |
+| `UI Maker: Convert Project to SDK Style` | Rewrite a classic .NET Framework `.csproj` in the modern SDK format (backup kept) |
 | `UI Maker: Open Working Folder` | Show the current project folder in File Explorer |
 | `UI Maker: Guide: How to Build an App` | Open the built-in guide (project anatomy, required vs. optional files) |
 

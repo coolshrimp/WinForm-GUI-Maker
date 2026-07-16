@@ -290,6 +290,8 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
                 ? new SidebarItem('Stop Debugging', { icon: 'debug-stop', iconColor: 'charts.red', command: 'uimaker.debugToggle', description: 'debugging', tooltip: 'The debugger is attached — click to stop it' })
                 : new SidebarItem('Debug App', { icon: 'debug-alt', iconColor: 'charts.green', command: 'uimaker.debugToggle', tooltip: 'Build and launch under the debugger' }),
             new SidebarItem('Build Release (Publish)', { icon: 'package', command: 'uimaker.release', tooltip: 'Publish a Release build (honors the single .exe settings — see UI Maker settings)' }),
+            new SidebarItem('Project Properties', { icon: 'gear', command: 'uimaker.projectProperties', tooltip: 'Visual Studio-style project properties — output type, target framework, assembly name, namespace, icon, manifest, version info' }),
+            new SidebarItem('NuGet Packages', { icon: 'archive', command: 'uimaker.nugetPackages', tooltip: 'Browse, install, update, and remove NuGet packages for this project (nuget.org)' }),
             new SidebarItem('App Settings', { icon: 'settings-gear', command: 'uimaker.appSettings', tooltip: 'Define the settings your app remembers (Properties.Settings) — names, types, User/Application scope, defaults' }),
             new SidebarItem('Open Working Folder', { icon: 'folder-opened', command: 'uimaker.openWorkingFolder', tooltip: 'Open the current project folder in File Explorer' }),
             new SidebarItem('Guide — How to Build an App', { icon: 'book', command: 'uimaker.openGuide', tooltip: 'Required and optional project files, what each one is for, and the path from empty folder to shipped .exe' })

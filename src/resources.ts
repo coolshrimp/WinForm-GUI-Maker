@@ -21,6 +21,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getWorkingFolder, pickWorkingFolder } from './workingFolder';
 
 export interface ImportedImage {
     /** Resource name — a valid C# identifier. */
@@ -180,20 +181,58 @@ function resxPath(projDir: string): string {
     return path.join(projDir, 'Properties', 'Resources.resx');
 }
 
+/** One `<data>` entry of a resx, with everything needed to round-trip it. */
+interface ResxEntry {
+    name: string;
+    /** ResXFileRef value ("path;Type, Assembly[;encoding]") or null. */
+    fileRef: string | null;
+    /** The entry's declared type attribute, or null. */
+    typeAttr: string | null;
+    /** The entry's mimetype attribute (binary payloads), or null. */
+    mimeType: string | null;
+    /** Plain inline string entry (no type, no mimetype). */
+    isString: boolean;
+}
+
 /** Every <data name=...> entry in a resx, with its fileref value when present. */
-function parseResxEntries(xml: string): Array<{ name: string; fileRef: string | null; isString: boolean }> {
-    const out: Array<{ name: string; fileRef: string | null; isString: boolean }> = [];
+function parseResxEntries(xml: string): ResxEntry[] {
+    const out: ResxEntry[] = [];
     const re = /<data\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/data>/g;
     for (let m = re.exec(xml); m; m = re.exec(xml)) {
+        const attr = (name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(m![2])?.[1] ?? null;
         const value = /<value>([\s\S]*?)<\/value>/.exec(m[3])?.[1] ?? '';
-        const isFileRef = /ResXFileRef/.test(m[2]);
+        const typeAttr = attr('type');
+        const mimeType = attr('mimetype');
+        const isFileRef = !!typeAttr && /ResXFileRef/.test(typeAttr);
         out.push({
             name: m[1],
             fileRef: isFileRef ? value : null,
-            isString: !isFileRef && !/type=|mimetype=/.test(m[2])
+            typeAttr,
+            mimeType,
+            isString: !isFileRef && !typeAttr && !mimeType
         });
     }
     return out;
+}
+
+/**
+ * The C# type an entry's generated accessor should return. Every declared
+ * type is preserved — an integer, color, or custom resource added by Visual
+ * Studio must never come back as a Bitmap accessor after we regenerate.
+ */
+function accessorTypeFor(e: ResxEntry): string {
+    // File references carry "path;Full.Type, Assembly[;encoding]".
+    const clr = e.fileRef
+        ? (e.fileRef.split(';')[1] ?? '').split(',')[0].trim()
+        : e.typeAttr && !/ResXFileRef/.test(e.typeAttr)
+            ? e.typeAttr.split(',')[0].trim()
+            : '';
+    if (e.isString || clr === 'System.String') { return 'string'; }
+    if (clr === 'System.Byte[]') { return 'byte[]'; }
+    if (/^[A-Za-z_][A-Za-z0-9_.]*(\[\])?$/.test(clr)) { return `global::${clr}`; }
+    // Unknown payload (e.g. BinaryFormatter blob without a usable type):
+    // an object accessor is always correct and always compiles.
+    return 'object';
 }
 
 /**
@@ -240,24 +279,25 @@ function writeResourcesDesigner(projDir: string, rootNs: string): void {
     const ns = `${rootNs}.Properties`;
 
     const props = entries.map(e => {
-        // Text resources (inline strings and .txt filerefs) use GetString.
-        if (e.isString || (e.fileRef && /System\.String,/.test(e.fileRef))) {
+        // Names must stay valid identifiers — anything else would corrupt
+        // the generated class (spaces etc. can appear in hand-edited files).
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.name)) { return ''; }
+        const type = accessorTypeFor(e);
+        // Text resources (inline strings and string filerefs) use GetString.
+        if (type === 'string') {
             return `        internal static string ${e.name} {\r\n` +
                 `            get {\r\n` +
                 `                return ResourceManager.GetString("${e.name}", resourceCulture);\r\n` +
                 `            }\r\n` +
                 `        }`;
         }
-        const type = e.fileRef && /System\.Drawing\.Icon/.test(e.fileRef) ? 'System.Drawing.Icon'
-            : e.fileRef && /System\.Byte\[\]/.test(e.fileRef) ? 'byte[]'
-            : 'System.Drawing.Bitmap';
         return `        internal static ${type} ${e.name} {\r\n` +
             `            get {\r\n` +
             `                object obj = ResourceManager.GetObject("${e.name}", resourceCulture);\r\n` +
             `                return ((${type})(obj));\r\n` +
             `            }\r\n` +
             `        }`;
-    }).join('\r\n\r\n');
+    }).filter(Boolean).join('\r\n\r\n');
 
     const code =
         `//------------------------------------------------------------------------------\r\n` +
@@ -345,7 +385,8 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
                 `      <DependentUpon>Resources.resx</DependentUpon>${eol}` +
                 `    </Compile>${eol}`;
         }
-        const imgEntry = imageRel.split('/').join('\\');
+        const imgEntry = imageRel.split('/').join('\\')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         if (!xml.includes(`"${imgEntry}"`)) {
             block += `    <None Include="${imgEntry}" />${eol}`;
         }
@@ -359,10 +400,23 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
 
 // -------------------------------------------------------- sidebar commands
 
-/** The workspace's project directory (first .csproj found), or null. */
+/**
+ * The project directory sidebar commands operate on: the WORKING folder when
+ * one is set (multi-project workspaces are never guessed at), else the
+ * workspace's single project, else a picker.
+ */
 async function workspaceProjectDir(): Promise<string | null> {
-    const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules}/**', 1);
-    return found.length ? path.dirname(found[0].fsPath) : null;
+    const working = getWorkingFolder();
+    try {
+        if (working && fs.readdirSync(working).some(f => /\.csproj$/i.test(f))) {
+            return working;
+        }
+    } catch { /* folder vanished — fall through to the search */ }
+    const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules,packages,.vs,.git}/**', 2);
+    if (found.length === 1) { return path.dirname(found[0].fsPath); }
+    if (found.length === 0) { return null; }
+    // Several projects and no working folder chosen — ask, don't guess.
+    return (await pickWorkingFolder()) ?? null;
 }
 
 /** Side panel "Add Class" on the Code category: create Name.cs with a stub. */

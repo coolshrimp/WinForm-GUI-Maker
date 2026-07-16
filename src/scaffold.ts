@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
 import { touchRecentProject } from './sidebar';
+import { installedSdkMajors, isLtsDotnet } from './projectInfo';
 
 const execFile = promisify(cp.execFile);
 
@@ -55,13 +56,19 @@ export async function newProject(): Promise<void> {
         return;
     }
 
-    // 3) Target framework --------------------------------------------------------
+    // 3) Target framework ------------------------------------------------------
+    // Offer the frameworks the SDKs on THIS machine can actually build —
+    // a static list goes stale (and .NET 6 is already out of support).
+    const majors = await installedSdkMajors();
+    const offered = (majors.length ? majors : [10, 8]).filter(m => m >= 6);
     const framework = await vscode.window.showQuickPick(
         [
             { label: '$(star) SDK default', description: 'Latest .NET installed on this machine (recommended)', id: '' },
-            { label: '.NET 9', id: 'net9.0' },
-            { label: '.NET 8', description: 'Long-term support', id: 'net8.0' },
-            { label: '.NET 6', description: 'Older LTS', id: 'net6.0' }
+            ...offered.map(m => ({
+                label: `.NET ${m}`,
+                description: isLtsDotnet(m) ? 'Long-term support' : undefined,
+                id: `net${m}.0`
+            }))
         ],
         { placeHolder: 'Choose the target framework' }
     );

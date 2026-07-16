@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer, side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps (WPF & WinForms, C# & VB) inside VS Code.",
-    "version": "0.10.0",
+    "version": "0.11.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "engines": {
@@ -186,6 +186,24 @@
                 "title": "App Settings",
                 "category": "UI Maker",
                 "icon": "$(settings-gear)"
+            },
+            {
+                "command": "uimaker.projectProperties",
+                "title": "Project Properties",
+                "category": "UI Maker",
+                "icon": "$(gear)"
+            },
+            {
+                "command": "uimaker.nugetPackages",
+                "title": "NuGet Packages",
+                "category": "UI Maker",
+                "icon": "$(archive)"
+            },
+            {
+                "command": "uimaker.convertToSdk",
+                "title": "Convert Project to SDK Style (fix 'unsupported format')",
+                "category": "UI Maker",
+                "icon": "$(arrow-up)"
             },
             {
                 "command": "uimaker.openGuide",
@@ -401,7 +419,7 @@
     },
     "devDependencies": {
         "@types/node": "^20.11.0",
-        "@types/vscode": "^1.85.0",
+        "@types/vscode": "1.85.0",
         "typescript": "^5.4.0"
     }
 }

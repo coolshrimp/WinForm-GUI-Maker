@@ -127,7 +127,7 @@ export class DotnetTools implements vscode.Disposable {
                 vscode.window.showErrorMessage('UI Maker: build failed — see the terminal output.');
                 return;
             }
-            const exe = this.findOutputBinary(project, '.exe');
+            const exe = await this.resolveOutputBinary(project, '.exe', pre.msbuild);
             if (!exe) {
                 vscode.window.showErrorMessage('UI Maker: build succeeded but the output .exe was not found.');
                 return;
@@ -150,7 +150,7 @@ export class DotnetTools implements vscode.Disposable {
                 vscode.window.showErrorMessage('UI Maker: build failed — see the terminal output.');
                 return;
             }
-            const exe = this.findOutputBinary(project, '.exe');
+            const exe = await this.resolveOutputBinary(project, '.exe');
             if (exe) {
                 this.launchExeElevated(exe);
                 return;
@@ -275,8 +275,8 @@ export class DotnetTools implements vscode.Disposable {
         // .NET Framework apps debug with the 'clr' engine against the .exe;
         // modern .NET uses 'coreclr' against the .dll.
         const program = netFramework
-            ? this.findOutputBinary(project, '.exe')
-            : this.findOutputBinary(project, '.dll');
+            ? await this.resolveOutputBinary(project, '.exe', pre.msbuild)
+            : await this.resolveOutputBinary(project, '.dll');
         if (!program) {
             vscode.window.showWarningMessage('UI Maker: could not locate the build output. Launching without the debugger.');
             await this.run();
@@ -431,27 +431,31 @@ export class DotnetTools implements vscode.Disposable {
 
     /**
      * A still-running instance of the app locks the output .exe and makes the
-     * build fail after long MSB3026 retries. Detect instances by image name
-     * before building: stop our own launch outright, ask about foreign ones.
+     * build fail after long MSB3026 retries. Detect instances before
+     * building: stop our own launch outright, ask about foreign ones.
+     * Processes are matched by FULL EXECUTABLE PATH under this project's
+     * folder — an unrelated app that merely shares the .exe name is never
+     * touched.
      */
     private async stopLockedInstances(project: string): Promise<void> {
         if (process.platform !== 'win32') { return; }
         const exeName = `${this.assemblyNameOf(project)}.exe`;
-        let pids = await listProcessIds(exeName);
+        const projectDir = path.dirname(project);
+        let pids = await listProjectProcessIds(exeName, projectDir);
         if (!pids.length) { return; }
 
         // If we launched the app, just stop it and re-check.
         if (this._state !== 'idle' || this.runProcess || this.runExecution) {
             this.stop();
             await delay(1000);
-            pids = await listProcessIds(exeName);
+            pids = await listProjectProcessIds(exeName, projectDir);
             if (!pids.length) { return; }
         }
 
         const stopIt = 'Stop It and Continue';
         const anyway = 'Build Anyway';
         const choice = await vscode.window.showWarningMessage(
-            `UI Maker: ${exeName} is still running (PID ${pids.join(', ')}) and locks the build output. Stop it before building?`,
+            `UI Maker: ${exeName} (from this project's output folder) is still running (PID ${pids.join(', ')}) and locks the build output. Stop it before building?`,
             stopIt, anyway
         );
         if (choice === stopIt) {
@@ -470,10 +474,20 @@ export class DotnetTools implements vscode.Disposable {
     // ------------------------------------------------------- project location
 
     /**
-     * Locate the project to operate on: walk up from the active editor's file,
-     * then fall back to a workspace search (with a picker if several exist).
+     * Locate the project to operate on. The WORKING FOLDER is authoritative:
+     * it already follows the active editor, and when the user explicitly
+     * switches projects in the sidebar, every command must follow that switch
+     * immediately — even while an editor from the previous project still has
+     * focus. Files outside any project fall back to walking up from the
+     * active editor, then to a workspace search (with a picker).
      */
     async findProject(): Promise<string | undefined> {
+        const working = getWorkingFolder();
+        if (working) {
+            const hit = this.projectIn(working);
+            if (hit) { return hit; }
+        }
+
         const active = vscode.window.activeTextEditor?.document.uri ?? DesignerActiveUri();
         if (active?.scheme === 'file' && !inExcludedDir(active.fsPath)) {
             let dir = path.dirname(active.fsPath);
@@ -484,14 +498,6 @@ export class DotnetTools implements vscode.Disposable {
                 if (dir === stopAt || path.dirname(dir) === dir) { break; }
                 dir = path.dirname(dir);
             }
-        }
-
-        // The sidebar's working folder decides in multi-project workspaces —
-        // a parent folder of many projects is never operated on wholesale.
-        const working = getWorkingFolder();
-        if (working) {
-            const hit = this.projectIn(working);
-            if (hit) { return hit; }
         }
 
         const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 16);
@@ -561,6 +567,48 @@ export class DotnetTools implements vscode.Disposable {
     }
 
     // ------------------------------------------------------- output discovery
+
+    /** project path -> { csproj mtime, evaluated TargetPath } */
+    private readonly targetPathCache = new Map<string, { mtime: number; value: string | undefined }>();
+
+    /**
+     * The Debug output binary, resolved the reliable way first: MSBuild
+     * evaluates TargetPath (honoring custom output paths, RIDs, and the
+     * selected TFM), with the bin-folder scan as fallback for older SDKs
+     * and multi-target projects where -getProperty is unavailable.
+     */
+    private async resolveOutputBinary(project: string, ext: '.dll' | '.exe', msbuildExe?: string): Promise<string | undefined> {
+        const evaluated = await this.evaluateTargetPath(project, msbuildExe);
+        if (evaluated) {
+            // TargetPath is the primary output (.dll on modern .NET, .exe on
+            // .NET Framework) — the sibling extension sits next to it.
+            const candidate = evaluated.toLowerCase().endsWith(ext)
+                ? evaluated
+                : evaluated.replace(/\.(dll|exe)$/i, ext);
+            if (fs.existsSync(candidate)) { return candidate; }
+        }
+        return this.findOutputBinary(project, ext);
+    }
+
+    /** MSBuild-evaluated TargetPath (Debug), cached per project file mtime. */
+    private evaluateTargetPath(project: string, msbuildExe?: string): Promise<string | undefined> {
+        let mtime = 0;
+        try { mtime = fs.statSync(project).mtimeMs; } catch { /* keep 0 */ }
+        const cached = this.targetPathCache.get(project);
+        if (cached && cached.mtime === mtime) { return Promise.resolve(cached.value); }
+
+        return new Promise(resolve => {
+            const args = msbuildExe
+                ? [project, '-getProperty:TargetPath', '-p:Configuration=Debug', '-nologo']
+                : ['msbuild', project, '-getProperty:TargetPath', '-p:Configuration=Debug', '-nologo'];
+            cp.execFile(msbuildExe ?? 'dotnet', args, { timeout: 30000, windowsHide: true }, (err, stdout) => {
+                const line = err ? '' : stdout.trim().split(/\r?\n/).pop()?.trim() ?? '';
+                const value = line && path.isAbsolute(line) ? line : undefined;
+                this.targetPathCache.set(project, { mtime, value });
+                resolve(value);
+            });
+        });
+    }
 
     /**
      * Resolve the Debug build output with the given extension: checks
@@ -633,18 +681,30 @@ export class DotnetTools implements vscode.Disposable {
     }
 }
 
-/** PIDs of all running processes with the given image name (Windows). */
-function listProcessIds(imageName: string): Promise<number[]> {
+/**
+ * PIDs of running processes whose image name matches AND whose executable
+ * path sits inside `projectDir` (Windows). Processes whose path cannot be
+ * read (e.g. elevated) are excluded — never kill what cannot be verified.
+ */
+function listProjectProcessIds(imageName: string, projectDir: string): Promise<number[]> {
     return new Promise(resolve => {
-        cp.execFile('tasklist', ['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH'], (err, stdout) => {
-            if (err) { resolve([]); return; }
-            const pids: number[] = [];
-            for (const line of stdout.split(/\r?\n/)) {
-                const m = /^"[^"]+","(\d+)"/.exec(line.trim());
-                if (m) { pids.push(Number(m[1])); }
-            }
-            resolve(pids);
-        });
+        const script =
+            `Get-CimInstance Win32_Process -Filter "Name='${imageName.replace(/'/g, "''")}'" | ` +
+            `ForEach-Object { Write-Output ("$($_.ProcessId)|$($_.ExecutablePath)") }`;
+        cp.execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
+            { windowsHide: true, timeout: 15000 }, (err, stdout) => {
+                if (err) { resolve([]); return; }
+                const prefix = (projectDir.endsWith(path.sep) ? projectDir : projectDir + path.sep).toLowerCase();
+                const pids: number[] = [];
+                for (const line of stdout.split(/\r?\n/)) {
+                    const sep = line.indexOf('|');
+                    if (sep < 1) { continue; }
+                    const pid = Number(line.slice(0, sep).trim());
+                    const exePath = line.slice(sep + 1).trim().toLowerCase();
+                    if (pid && exePath && exePath.startsWith(prefix)) { pids.push(pid); }
+                }
+                resolve(pids);
+            });
     });
 }
 

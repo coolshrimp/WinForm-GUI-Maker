@@ -174,6 +174,35 @@ export function addRefAssembliesHelper(project: string): boolean {
 }
 
 /**
+ * Major versions of the .NET SDKs installed on this machine (from
+ * `dotnet --list-sdks`), newest first. Cached per session; empty on failure
+ * (no dotnet on PATH) so callers can fall back to a static list.
+ */
+let sdkMajorsCache: number[] | undefined;
+
+export function installedSdkMajors(): Promise<number[]> {
+    if (sdkMajorsCache) { return Promise.resolve(sdkMajorsCache); }
+    return new Promise(resolve => {
+        cp.execFile('dotnet', ['--list-sdks'], { timeout: 10000 }, (err, stdout) => {
+            const majors = new Set<number>();
+            if (!err) {
+                for (const line of stdout.split(/\r?\n/)) {
+                    const m = /^(\d+)\./.exec(line.trim());
+                    if (m) { majors.add(Number(m[1])); }
+                }
+            }
+            sdkMajorsCache = [...majors].sort((a, b) => b - a);
+            resolve(sdkMajorsCache);
+        });
+    });
+}
+
+/** Even-numbered .NET releases are LTS (8, 10, 12, …); odd ones are STS. */
+export function isLtsDotnet(major: number): boolean {
+    return major >= 8 && major % 2 === 0;
+}
+
+/**
  * Locate Visual Studio's MSBuild.exe with vswhere (needed for classic
  * non-SDK projects, which the dotnet CLI cannot build). Cached per session.
  */

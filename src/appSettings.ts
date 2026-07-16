@@ -43,6 +43,10 @@ const SETTING_TYPES: Array<{ clr: string; cs: string; label: string }> = [
 ];
 
 let panel: vscode.WebviewPanel | undefined;
+/** Project currently loaded in the (reused) panel. The save listener reads
+ *  this — never a captured value — so showing project B can never write
+ *  its settings into project A's files. */
+let currentProject: string | undefined;
 
 /** Open the App Settings editor for the current project. */
 export async function openAppSettings(dotnet: DotnetTools): Promise<void> {
@@ -56,8 +60,11 @@ export async function openAppSettings(dotnet: DotnetTools): Promise<void> {
     const settingsPath = path.join(path.dirname(project), 'Properties', 'Settings.settings');
     const existing = fs.existsSync(settingsPath) ? parseSettingsFile(fs.readFileSync(settingsPath, 'utf8')) : [];
 
+    currentProject = project;
+
     if (panel) {
         // Refresh the existing panel with the current project's settings.
+        panel.title = `App Settings — ${path.basename(path.dirname(project))}`;
         panel.webview.html = editorHtml(panel.webview, project, existing);
         panel.reveal();
         return;
@@ -65,17 +72,19 @@ export async function openAppSettings(dotnet: DotnetTools): Promise<void> {
 
     panel = vscode.window.createWebviewPanel(
         'uimaker.appSettings',
-        'App Settings',
+        `App Settings — ${path.basename(path.dirname(project))}`,
         vscode.ViewColumn.One,
         { enableScripts: true }
     );
-    panel.onDidDispose(() => { panel = undefined; });
+    panel.onDidDispose(() => { panel = undefined; currentProject = undefined; });
     panel.webview.html = editorHtml(panel.webview, project, existing);
 
     panel.webview.onDidReceiveMessage((msg: { type: string; settings?: AppSetting[] }) => {
+        const proj = currentProject;
+        if (!proj) { return; }
         if (msg.type === 'save' && msg.settings) {
             try {
-                saveSettings(project, msg.settings);
+                saveSettings(proj, msg.settings);
                 vscode.window.showInformationMessage(
                     `UI Maker: saved ${msg.settings.length} setting${msg.settings.length === 1 ? '' : 's'} — use Properties.Settings.Default in your code.`);
             } catch (err) {
@@ -125,6 +134,18 @@ export function parseSettingsFile(xml: string): AppSetting[] {
 
 /** Write Settings.settings + Settings.Designer.cs and register them in classic projects. */
 function saveSettings(project: string, settings: AppSetting[]): void {
+    // The webview is untrusted input — re-validate everything that gets
+    // interpolated into generated C#/XML, not just in the page script.
+    const seen = new Set<string>();
+    for (const s of settings) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s.name)) { throw new Error(`"${s.name}" is not a valid setting name`); }
+        if (seen.has(s.name.toLowerCase())) { throw new Error(`duplicate setting name "${s.name}"`); }
+        seen.add(s.name.toLowerCase());
+        if (!SETTING_TYPES.some(t => t.clr === s.type)) { throw new Error(`unknown setting type "${s.type}"`); }
+        s.scope = s.scope === 'Application' ? 'Application' : 'User';
+        s.value = String(s.value ?? '');
+    }
+
     const propsDir = path.join(path.dirname(project), 'Properties');
     if (!fs.existsSync(propsDir)) { fs.mkdirSync(propsDir, { recursive: true }); }
 

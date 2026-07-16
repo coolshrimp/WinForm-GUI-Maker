@@ -14,12 +14,27 @@ import { DotnetTools } from './dotnetTools';
 /** Valid C# type name for a new window/form. */
 const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * These commands generate C# files. A Visual Basic project would compile
+ * none of them — refuse clearly instead of dropping broken files in.
+ */
+function requireCSharpProject(project: string, what: string): boolean {
+    if (/\.vbproj$/i.test(project)) {
+        vscode.window.showWarningMessage(
+            `UI Maker: ${what} generates C# files, but ${path.basename(project)} is a Visual Basic project. ` +
+            'VB file generation is not supported yet — add the files in Visual Studio, then design them here.');
+        return false;
+    }
+    return true;
+}
+
 // ------------------------------------------------------------------ commands
 
 /** Create a new WPF Window (<Name>.xaml + <Name>.xaml.cs). */
 export async function addXamlWindow(dotnet: DotnetTools): Promise<void> {
     const project = await dotnet.findProject();
     if (!project) { return; }
+    if (!requireCSharpProject(project, 'Add Window')) { return; }
     const dir = path.dirname(project);
 
     const name = await askName('NewWindow', dir, n =>
@@ -67,6 +82,7 @@ export async function addXamlWindow(dotnet: DotnetTools): Promise<void> {
 export async function addWinForm(dotnet: DotnetTools): Promise<void> {
     const project = await dotnet.findProject();
     if (!project) { return; }
+    if (!requireCSharpProject(project, 'Add Form')) { return; }
     const dir = path.dirname(project);
 
     const name = await askName('NewForm', dir, n =>
@@ -291,6 +307,12 @@ interface ProjectEntry {
     generator?: string;
 }
 
+/** Escape a value for use inside an XML attribute or text node — a valid
+ *  directory name like "R&D" must not corrupt the project file. */
+function xmlEscape(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 /**
  * Classic (non-SDK) projects list every source file explicitly; append an
  * ItemGroup with the new entries. SDK-style projects glob and need nothing.
@@ -304,13 +326,13 @@ function registerInClassicProject(project: string, entries: ProjectEntry[]): voi
         const eol = xml.includes('\r\n') ? '\r\n' : '\n';
         const body = entries.map(e => {
             const children = [
-                e.generator ? `      <Generator>${e.generator}</Generator>` : '',
-                e.subType ? `      <SubType>${e.subType}</SubType>` : '',
-                e.dependentUpon ? `      <DependentUpon>${e.dependentUpon}</DependentUpon>` : ''
+                e.generator ? `      <Generator>${xmlEscape(e.generator)}</Generator>` : '',
+                e.subType ? `      <SubType>${xmlEscape(e.subType)}</SubType>` : '',
+                e.dependentUpon ? `      <DependentUpon>${xmlEscape(e.dependentUpon)}</DependentUpon>` : ''
             ].filter(Boolean);
             return children.length
-                ? `    <${e.tag} Include="${e.include}">${eol}${children.join(eol)}${eol}    </${e.tag}>`
-                : `    <${e.tag} Include="${e.include}" />`;
+                ? `    <${e.tag} Include="${xmlEscape(e.include)}">${eol}${children.join(eol)}${eol}    </${e.tag}>`
+                : `    <${e.tag} Include="${xmlEscape(e.include)}" />`;
         }).join(eol);
         xml = xml.replace(/<\/Project>/, `  <ItemGroup>${eol}${body}${eol}  </ItemGroup>${eol}</Project>`);
         fs.writeFileSync(project, xml, 'utf8');

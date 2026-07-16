@@ -18,6 +18,9 @@ import { addXamlWindow, addWinForm, duplicateDesignFile } from './formFiles';
 import { addCsFile, addResourceFiles } from './resources';
 import { openGuide } from './guide';
 import { openAppSettings } from './appSettings';
+import { openProjectProperties } from './projectProperties';
+import { openNugetPackages } from './nugetPackages';
+import { convertToSdkStyle } from './convertToSdk';
 import { EXCLUDE_GLOB, getWorkingFolder, initWorkingFolder } from './workingFolder';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
@@ -79,6 +82,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Settings editor for the app being built (Properties.Settings grid).
         vscode.commands.registerCommand('uimaker.appSettings', () => openAppSettings(dotnet)),
+
+        // Visual Studio-style project property page and NuGet manager.
+        vscode.commands.registerCommand('uimaker.projectProperties', () => openProjectProperties(dotnet)),
+        vscode.commands.registerCommand('uimaker.nugetPackages', () => openNugetPackages(dotnet)),
+
+        // Classic .NET Framework project -> modern SDK format (fixes the
+        // C# Dev Kit "project file is in unsupported format" warning).
+        vscode.commands.registerCommand('uimaker.convertToSdk', () => convertToSdkStyle(dotnet)),
 
         // Show the current WORKING project folder in the OS file manager
         // (falls back to the workspace root when no project is active).
