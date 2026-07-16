@@ -1,8 +1,8 @@
 {
     "name": "formforge",
     "displayName": "UI Maker — .NET UI Designer",
-    "description": "Visual drag-and-drop designer, side panel, build/run/debug/release buttons, and project scaffolding for .NET desktop apps (WPF & WinForms) inside VS Code.",
-    "version": "0.4.0",
+    "description": "Visual drag-and-drop designer, side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps (WPF & WinForms, C# & VB) inside VS Code.",
+    "version": "0.5.0",
     "publisher": "formforge",
     "license": "MIT",
     "engines": {
@@ -111,6 +111,36 @@
                 "icon": "$(debug-stop)"
             },
             {
+                "command": "formforge.runToggle",
+                "title": "Run / Stop App",
+                "category": "UI Maker",
+                "icon": "$(play)"
+            },
+            {
+                "command": "formforge.debugToggle",
+                "title": "Debug / Stop Debugging",
+                "category": "UI Maker",
+                "icon": "$(debug-alt)"
+            },
+            {
+                "command": "formforge.addWindow",
+                "title": "New WPF Window",
+                "category": "UI Maker",
+                "icon": "$(add)"
+            },
+            {
+                "command": "formforge.addForm",
+                "title": "New WinForms Form",
+                "category": "UI Maker",
+                "icon": "$(add)"
+            },
+            {
+                "command": "formforge.duplicateDesignFile",
+                "title": "Duplicate",
+                "category": "UI Maker",
+                "icon": "$(copy)"
+            },
+            {
                 "command": "formforge.refreshSidebar",
                 "title": "Refresh",
                 "category": "UI Maker",
@@ -159,13 +189,13 @@
                     "group": "navigation@1"
                 },
                 {
-                    "command": "formforge.run",
-                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|csproj)$/",
+                    "command": "formforge.runToggle",
+                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|vb|csproj|vbproj)$/",
                     "group": "navigation@2"
                 },
                 {
-                    "command": "formforge.debug",
-                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|csproj)$/",
+                    "command": "formforge.debugToggle",
+                    "when": "formforge.hasProject && resourceExtname =~ /\\.(xaml|cs|vb|csproj|vbproj)$/",
                     "group": "navigation@3"
                 }
             ],
@@ -186,6 +216,36 @@
                     "command": "formforge.recentRemove",
                     "when": "view == formforge.sidebar && viewItem == uimakerRecent",
                     "group": "inline@2"
+                },
+                {
+                    "command": "formforge.addWindow",
+                    "when": "view == formforge.sidebar && viewItem == uimakerXamlGroup",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "formforge.addWindow",
+                    "when": "view == formforge.sidebar && viewItem == uimakerXamlGroup",
+                    "group": "1_create@1"
+                },
+                {
+                    "command": "formforge.addForm",
+                    "when": "view == formforge.sidebar && viewItem == uimakerFormGroup",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "formforge.addForm",
+                    "when": "view == formforge.sidebar && viewItem == uimakerFormGroup",
+                    "group": "1_create@1"
+                },
+                {
+                    "command": "formforge.duplicateDesignFile",
+                    "when": "view == formforge.sidebar && viewItem =~ /^uimaker(Xaml|Form)$/",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "formforge.duplicateDesignFile",
+                    "when": "view == formforge.sidebar && viewItem =~ /^uimaker(Xaml|Form)$/",
+                    "group": "1_create@1"
                 }
             ],
             "commandPalette": [
@@ -212,6 +272,10 @@
                 {
                     "command": "formforge.recentRemove",
                     "when": "false"
+                },
+                {
+                    "command": "formforge.duplicateDesignFile",
+                    "when": "false"
                 }
             ]
         },
@@ -229,6 +293,26 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Snap control positions and sizes to the grid."
+                },
+                "formforge.publish.singleFile": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Build Release (Publish) produces a single .exe (PublishSingleFile). Applies to modern .NET projects; .NET Framework projects ignore it."
+                },
+                "formforge.publish.selfContained": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Bundle the .NET runtime into the publish output so the app runs on machines without .NET installed (larger output)."
+                },
+                "formforge.publish.runtime": {
+                    "type": "string",
+                    "default": "win-x64",
+                    "enum": [
+                        "win-x64",
+                        "win-x86",
+                        "win-arm64"
+                    ],
+                    "description": "Target runtime used for single-file or self-contained publishing."
                 }
             }
         }

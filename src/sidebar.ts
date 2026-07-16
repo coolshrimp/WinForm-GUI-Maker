@@ -1,11 +1,13 @@
 // UI Maker — activity-bar side panel.
 //
 // A single tree view with four groups:
-//   * Actions          — the project commands (new / build / run / debug / ...)
-//   * Recent Projects  — .NET projects seen before; click to switch the window
-//                        to that folder (like a recent-workspaces list)
-//   * XAML Windows     — every .xaml file in the workspace
-//   * WinForms Forms   — every Form's *.Designer.cs in the workspace
+//   * Actions          — the project commands. Run and Debug are play/stop
+//                        toggles: a green play button while idle that turns
+//                        into a red stop button while the app is running.
+//   * Recent Projects  — .NET projects seen before, tagged with their type
+//                        (WinForms/WPF + framework); click to switch over.
+//   * XAML Windows     — every .xaml file in the workspace (+ add/duplicate)
+//   * WinForms Forms   — every Form's *.Designer.cs (+ add/duplicate)
 //
 // Clicking a file opens it straight in the visual designer. The lists refresh
 // automatically when matching files are created, deleted, or renamed.
@@ -13,6 +15,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { DotnetTools } from './dotnetTools';
+import { folderTypeLabel } from './projectInfo';
 
 const RECENTS_KEY = 'uimaker.recentProjects';
 const MAX_RECENTS = 10;
@@ -47,14 +51,18 @@ function removeRecent(folder: string): void {
 }
 
 /** One row in the side panel. */
-class SidebarItem extends vscode.TreeItem {
+export class SidebarItem extends vscode.TreeItem {
     public children: SidebarItem[] | undefined;
     public projectPath: string | undefined;
+    /** File behind a designable-file row (used by duplicate/open commands). */
+    public designUri: vscode.Uri | undefined;
 
     constructor(
         label: string,
         options: {
             icon?: string;
+            /** Theme color id for the icon, e.g. 'charts.green'. */
+            iconColor?: string;
             command?: string;
             args?: unknown[];
             tooltip?: string;
@@ -66,7 +74,12 @@ class SidebarItem extends vscode.TreeItem {
         super(label, options.children
             ? vscode.TreeItemCollapsibleState.Expanded
             : vscode.TreeItemCollapsibleState.None);
-        if (options.icon) { this.iconPath = new vscode.ThemeIcon(options.icon); }
+        if (options.icon) {
+            this.iconPath = new vscode.ThemeIcon(
+                options.icon,
+                options.iconColor ? new vscode.ThemeColor(options.iconColor) : undefined
+            );
+        }
         if (options.command) {
             this.command = { command: options.command, title: label, arguments: options.args };
         }
@@ -80,6 +93,8 @@ class SidebarItem extends vscode.TreeItem {
 export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     private readonly changed = new vscode.EventEmitter<SidebarItem | undefined>();
     public readonly onDidChangeTreeData = this.changed.event;
+
+    constructor(private readonly dotnet: DotnetTools) { }
 
     public refresh(): void {
         this.changed.fire(undefined);
@@ -95,14 +110,7 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         return [
             new SidebarItem('Actions', {
                 icon: 'zap',
-                children: [
-                    new SidebarItem('New .NET Desktop Project', { icon: 'new-folder', command: 'formforge.newProject', tooltip: 'Scaffold a WPF or Windows Forms app via dotnet new' }),
-                    new SidebarItem('Build', { icon: 'tools', command: 'formforge.build', tooltip: 'dotnet build (Debug)' }),
-                    new SidebarItem('Run App', { icon: 'play', command: 'formforge.run', tooltip: 'Build and launch the app' }),
-                    new SidebarItem('Debug App', { icon: 'debug-alt', command: 'formforge.debug', tooltip: 'Build and launch under the debugger' }),
-                    new SidebarItem('Build Release (Publish)', { icon: 'package', command: 'formforge.release', tooltip: 'dotnet publish -c Release' }),
-                    new SidebarItem('Stop Running App', { icon: 'debug-stop', command: 'formforge.stop', tooltip: 'Terminate the app started by Run' })
-                ]
+                children: this.actionItems()
             }),
             new SidebarItem('Recent Projects', {
                 icon: 'history',
@@ -110,12 +118,33 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
             }),
             new SidebarItem('XAML Windows', {
                 icon: 'layout',
+                contextValue: 'uimakerXamlGroup',
                 children: await this.designerFileItems('**/*.xaml', 'window', 'gear')
             }),
             new SidebarItem('WinForms Forms', {
                 icon: 'window',
+                contextValue: 'uimakerFormGroup',
                 children: await this.winFormsItems()
             })
+        ];
+    }
+
+    /** The command rows; Run and Debug reflect the current run state. */
+    private actionItems(): SidebarItem[] {
+        const state = this.dotnet.state;
+        const running = state === 'running';
+        const debugging = state === 'debugging';
+
+        return [
+            new SidebarItem('New .NET Desktop Project', { icon: 'new-folder', command: 'formforge.newProject', tooltip: 'Scaffold a WPF, Windows Forms, or Console app via dotnet new (C# or Visual Basic)' }),
+            new SidebarItem('Build', { icon: 'tools', command: 'formforge.build', tooltip: 'Build the project (Debug)' }),
+            running
+                ? new SidebarItem('Stop App', { icon: 'debug-stop', iconColor: 'charts.red', command: 'formforge.runToggle', description: 'running', tooltip: 'The app is running — click to stop it' })
+                : new SidebarItem('Run App', { icon: 'play', iconColor: 'charts.green', command: 'formforge.runToggle', tooltip: 'Build and launch the app' }),
+            debugging
+                ? new SidebarItem('Stop Debugging', { icon: 'debug-stop', iconColor: 'charts.red', command: 'formforge.debugToggle', description: 'debugging', tooltip: 'The debugger is attached — click to stop it' })
+                : new SidebarItem('Debug App', { icon: 'debug-alt', iconColor: 'charts.green', command: 'formforge.debugToggle', tooltip: 'Build and launch under the debugger' }),
+            new SidebarItem('Build Release (Publish)', { icon: 'package', command: 'formforge.release', tooltip: 'Publish a Release build (honors the single .exe settings — see UI Maker settings)' })
         ];
     }
 
@@ -128,12 +157,13 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         }
         return recents.map(r => {
             const isActive = r.path.toLowerCase() === active;
+            const type = folderTypeLabel(r.path);
             const item = new SidebarItem(path.basename(r.path), {
                 icon: isActive ? 'folder-active' : 'folder',
                 command: isActive ? undefined : 'formforge.recentOpen',
                 args: [r.path],
-                description: isActive ? 'current' : undefined,
-                tooltip: `${r.path}\nClick to open this project in the current window`,
+                description: isActive ? (type ? `current · ${type}` : 'current') : (type || undefined),
+                tooltip: `${r.path}${type ? `\n${type}` : ''}\nClick to open this project in the current window`,
                 contextValue: 'uimakerRecent'
             });
             item.projectPath = r.path;
@@ -154,13 +184,17 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         return files.map(uri => {
             const rel = vscode.workspace.asRelativePath(uri);
             const dir = path.dirname(rel);
-            return new SidebarItem(path.basename(uri.fsPath), {
-                icon: uri.fsPath.toLowerCase().endsWith('app.xaml') ? appIcon : icon,
+            const isApp = uri.fsPath.toLowerCase().endsWith('app.xaml');
+            const item = new SidebarItem(path.basename(uri.fsPath), {
+                icon: isApp ? appIcon : icon,
                 command: 'formforge.openDesigner',
                 args: [uri],
                 description: dir === '.' ? undefined : dir,
-                tooltip: `Open ${rel} in the designer`
+                tooltip: `Open ${rel} in the designer`,
+                contextValue: isApp ? undefined : 'uimakerXaml'
             });
+            item.designUri = uri;
+            return item;
         });
     }
 
@@ -182,25 +216,31 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
         return forms.map(uri => {
             const rel = vscode.workspace.asRelativePath(uri);
             const dir = path.dirname(rel);
-            return new SidebarItem(path.basename(uri.fsPath), {
+            const item = new SidebarItem(path.basename(uri.fsPath), {
                 icon: 'window',
                 command: 'formforge.openDesigner',
                 args: [uri],
                 description: dir === '.' ? undefined : dir,
-                tooltip: `Open ${rel} in the designer`
+                tooltip: `Open ${rel} in the designer`,
+                contextValue: 'uimakerForm'
             });
+            item.designUri = uri;
+            return item;
         });
     }
 }
 
 /** Wire the side panel into the extension: view, commands, watchers, recents. */
-export function registerSidebar(context: vscode.ExtensionContext): void {
+export function registerSidebar(context: vscode.ExtensionContext, dotnet: DotnetTools): UiMakerSidebar {
     extContext = context;
-    const sidebar = new UiMakerSidebar();
+    const sidebar = new UiMakerSidebar(dotnet);
 
     context.subscriptions.push(
         vscode.window.createTreeView('formforge.sidebar', { treeDataProvider: sidebar }),
         vscode.commands.registerCommand('formforge.refreshSidebar', () => sidebar.refresh()),
+
+        // Keep the Run/Debug toggle rows in sync with the actual app state.
+        dotnet.onDidChangeState(() => sidebar.refresh()),
 
         vscode.commands.registerCommand('formforge.recentOpen', async (p: unknown) => {
             const folder = typeof p === 'string' ? p : (p as SidebarItem)?.projectPath;
@@ -232,7 +272,7 @@ export function registerSidebar(context: vscode.ExtensionContext): void {
     );
 
     // Keep the file lists in sync with the workspace.
-    for (const glob of ['**/*.xaml', '**/*.Designer.cs']) {
+    for (const glob of ['**/*.xaml', '**/*.Designer.cs', '**/*.{csproj,vbproj}']) {
         const watcher = vscode.workspace.createFileSystemWatcher(glob);
         watcher.onDidCreate(() => sidebar.refresh());
         watcher.onDidDelete(() => sidebar.refresh());
@@ -242,11 +282,13 @@ export function registerSidebar(context: vscode.ExtensionContext): void {
     // Remember the current workspace as a recent project when it is a .NET one.
     const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (ws) {
-        void vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules}/**', 1).then(found => {
+        void vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 1).then(found => {
             if (found.length) {
                 touchRecentProject(ws);
                 sidebar.refresh();
             }
         });
     }
+
+    return sidebar;
 }

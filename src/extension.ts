@@ -1,10 +1,12 @@
 // UI Maker — extension entry point.
 //
 // Responsibilities:
-//   * Register the visual designer (custom editor for *.xaml files).
+//   * Register the visual designer (custom editor for *.xaml / *.Designer.cs).
 //   * Register the UI Maker activity-bar side panel.
-//   * Register the Build / Run / Debug / Release / Stop commands.
-//   * Show status-bar buttons whenever the workspace contains a .csproj.
+//   * Register the Build / Run / Debug / Release commands. Run and Debug are
+//     play/stop toggles that follow the app state (green play <-> red stop).
+//   * Register window/form creation and duplication commands.
+//   * Show status-bar buttons whenever the workspace contains a .NET project.
 //   * Register the "New .NET Desktop Project" scaffolding command.
 
 import * as vscode from 'vscode';
@@ -12,19 +14,22 @@ import { DesignerProvider } from './designerProvider';
 import { DotnetTools } from './dotnetTools';
 import { newProject } from './scaffold';
 import { registerSidebar } from './sidebar';
+import { addXamlWindow, addWinForm, duplicateDesignFile } from './formFiles';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
 const statusItems: vscode.StatusBarItem[] = [];
+let runStatusItem: vscode.StatusBarItem | undefined;
+let debugStatusItem: vscode.StatusBarItem | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
     const dotnet = new DotnetTools();
     context.subscriptions.push(dotnet);
 
-    // --- Visual designer (custom editor for .xaml) -------------------------
+    // --- Visual designer (custom editor) ------------------------------------
     context.subscriptions.push(DesignerProvider.register(context));
 
     // --- Activity-bar side panel --------------------------------------------
-    registerSidebar(context);
+    registerSidebar(context, dotnet);
 
     // --- Commands -----------------------------------------------------------
     context.subscriptions.push(
@@ -41,7 +46,7 @@ export function activate(context: vscode.ExtensionContext): void {
             return vscode.commands.executeCommand('vscode.openWith', target, DesignerProvider.viewType);
         }),
 
-        // Open the raw XAML text editor next to the designer (split view).
+        // Open the raw source text editor next to the designer (split view).
         vscode.commands.registerCommand('formforge.openCodeBeside', (uri?: vscode.Uri) => {
             const target = uri ?? DesignerProvider.activeDocumentUri;
             if (!target) {
@@ -56,16 +61,29 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('formforge.run', () => dotnet.run()),
         vscode.commands.registerCommand('formforge.debug', () => dotnet.debug()),
         vscode.commands.registerCommand('formforge.release', () => dotnet.release()),
-        vscode.commands.registerCommand('formforge.stop', () => dotnet.stop())
+        vscode.commands.registerCommand('formforge.stop', () => dotnet.stop()),
+        vscode.commands.registerCommand('formforge.runToggle', () => dotnet.runToggle()),
+        vscode.commands.registerCommand('formforge.debugToggle', () => dotnet.debugToggle()),
+
+        // Window/form creation and duplication (sidebar buttons + context menus).
+        vscode.commands.registerCommand('formforge.addWindow', () => addXamlWindow(dotnet)),
+        vscode.commands.registerCommand('formforge.addForm', () => addWinForm(dotnet)),
+        vscode.commands.registerCommand('formforge.duplicateDesignFile', (item?: { designUri?: vscode.Uri } | vscode.Uri) => {
+            const uri = item instanceof vscode.Uri ? item : item?.designUri;
+            if (!uri) { return; }
+            return duplicateDesignFile(uri);
+        })
     );
 
     // --- Status bar buttons -------------------------------------------------
     createStatusItems(context);
+    context.subscriptions.push(dotnet.onDidChangeState(() => updateRunStatusItems(dotnet)));
+    updateRunStatusItems(dotnet);
 
     // Show the buttons only when the workspace actually contains a .NET project,
     // and keep watching in case one is created or removed later.
     void refreshProjectContext();
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*.csproj');
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{csproj,vbproj}');
     watcher.onDidCreate(() => refreshProjectContext());
     watcher.onDidDelete(() => refreshProjectContext());
     context.subscriptions.push(watcher);
@@ -78,11 +96,10 @@ export function deactivate(): void {
 /** Build the row of status-bar buttons (right-to-left priority ordering). */
 function createStatusItems(context: vscode.ExtensionContext): void {
     const defs: Array<[string, string, string]> = [
-        ['formforge.build',   '$(tools) Build',      'UI Maker: dotnet build'],
-        ['formforge.run',     '$(play) Run',         'UI Maker: build and launch the app'],
-        ['formforge.debug',   '$(debug-alt) Debug',  'UI Maker: build and debug the app'],
-        ['formforge.release', '$(package) Release',  'UI Maker: dotnet publish -c Release'],
-        ['formforge.stop',    '$(debug-stop)',       'UI Maker: stop the running app']
+        ['formforge.build',       '$(tools) Build',     'UI Maker: build the project'],
+        ['formforge.runToggle',   '$(play) Run',        'UI Maker: build and launch the app'],
+        ['formforge.debugToggle', '$(debug-alt) Debug', 'UI Maker: build and debug the app'],
+        ['formforge.release',     '$(package) Release', 'UI Maker: publish a Release build']
     ];
     let priority = 100;
     for (const [command, text, tooltip] of defs) {
@@ -92,12 +109,40 @@ function createStatusItems(context: vscode.ExtensionContext): void {
         item.tooltip = tooltip;
         statusItems.push(item);
         context.subscriptions.push(item);
+        if (command === 'formforge.runToggle') { runStatusItem = item; }
+        if (command === 'formforge.debugToggle') { debugStatusItem = item; }
+    }
+}
+
+/** Flip the Run/Debug status-bar buttons between play and stop looks. */
+function updateRunStatusItems(dotnet: DotnetTools): void {
+    if (runStatusItem) {
+        if (dotnet.state === 'running') {
+            runStatusItem.text = '$(debug-stop) Stop';
+            runStatusItem.tooltip = 'UI Maker: the app is running — click to stop it';
+            runStatusItem.color = new vscode.ThemeColor('charts.red');
+        } else {
+            runStatusItem.text = '$(play) Run';
+            runStatusItem.tooltip = 'UI Maker: build and launch the app';
+            runStatusItem.color = new vscode.ThemeColor('charts.green');
+        }
+    }
+    if (debugStatusItem) {
+        if (dotnet.state === 'debugging') {
+            debugStatusItem.text = '$(debug-stop) Stop Debug';
+            debugStatusItem.tooltip = 'UI Maker: the debugger is attached — click to stop it';
+            debugStatusItem.color = new vscode.ThemeColor('charts.red');
+        } else {
+            debugStatusItem.text = '$(debug-alt) Debug';
+            debugStatusItem.tooltip = 'UI Maker: build and debug the app';
+            debugStatusItem.color = undefined;
+        }
     }
 }
 
 /** Toggle status-bar buttons and the `formforge.hasProject` context key. */
 async function refreshProjectContext(): Promise<void> {
-    const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules}/**', 1);
+    const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 1);
     const hasProject = found.length > 0;
     await vscode.commands.executeCommand('setContext', 'formforge.hasProject', hasProject);
     for (const item of statusItems) {
