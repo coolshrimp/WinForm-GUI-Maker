@@ -24,7 +24,8 @@ UI Maker closes that gap:
 | Wiring events by hand | Events panel — one click writes the handler stub into the code-behind |
 | Switching between design and markup | Split view: designer on one side, live XAML source on the other |
 | CLI-only build workflow | Build / Run / Debug / Release buttons in the status bar and editor title |
-| Starting a new app | "New .NET Desktop Project" command scaffolds WPF or WinForms via `dotnet new` |
+| Starting a new app | "New .NET Desktop Project" scaffolds WPF, WinForms, or Console apps (C# or VB) via `dotnet new` |
+| "Works on my machine" builds | Detects missing .NET Framework reference assemblies (MSB3644) and offers the fix; classic projects build through Visual Studio's MSBuild automatically |
 
 ## Features
 
@@ -32,10 +33,16 @@ UI Maker closes that gap:
 Click the **UI Maker icon in the activity bar** (the window-with-controls glyph on
 the far left) to open the side panel:
 
-- **Actions** — New Project, Build, Run, Debug, Release, and Stop, one click away.
-- **XAML Windows** — every `.xaml` file in the workspace; click one to open it
-  straight in the visual designer. The list updates automatically as files are
-  added, renamed, or removed.
+- **Actions** — New Project, Build, Run, Debug, and Release, one click away.
+  Run and Debug are toggles: a green play button while idle that becomes a red
+  stop button while your app is running.
+- **Recent Projects** — every .NET project you open or create, tagged with its
+  type (`WinForms · .NET 8`, `WPF · .NET Framework 4.7.2`, …); click to switch.
+- **XAML Windows** and **WinForms Forms** — every designable file in the
+  workspace; click one to open it straight in the visual designer. Use the
+  **+** button on a group to add a new window/form, or a row's **Duplicate**
+  action to copy an existing one (new class name, registered in the project,
+  opened in the designer). The lists update automatically as files change.
 
 ### 🎨 Visual Designer for XAML
 Open any `.xaml` window in the UI Maker Designer:
@@ -59,17 +66,29 @@ change the markup and the canvas refreshes; move a control and the markup update
 ### 🔨 Build, Run, Debug, Release buttons
 Status-bar buttons (and editor-title shortcuts) drive the .NET CLI for you:
 
-- **Build** — `dotnet build` with errors reported in the Problems panel.
-- **Run** — builds and launches your app in a dedicated terminal.
-- **Debug** — builds, then attaches the .NET debugger (uses the
+- **Build** — builds with errors reported in the Problems panel.
+- **Run** — builds and launches your app; the button turns into a red **Stop**
+  while it runs and flips back when the app exits.
+- **Debug** — builds, then attaches the right .NET debugger (`coreclr` for
+  modern .NET, `clr` for .NET Framework — uses the
   [C# extension](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csharp)
   when installed; falls back to plain run otherwise).
-- **Release** — `dotnet publish -c Release`, then jumps you to the publish folder.
-- **Stop** — kills the running app.
+- **Release** — publishes a Release build, then jumps you to the output folder.
+  Settings under **UI Maker › Publish** turn this into a real installer-free
+  distribution: **Single File** (one .exe), **Self Contained** (bundles the
+  .NET runtime so the target PC needs nothing installed), and the target
+  **Runtime** (win-x64 / win-x86 / win-arm64).
+
+Builds are protected so they work on any dev machine: projects targeting
+.NET Framework without the reference assemblies installed (error MSB3644) get
+an offer to add the `Microsoft.NETFramework.ReferenceAssemblies` build helper,
+and classic non-SDK projects are built with Visual Studio's MSBuild (found via
+vswhere) since the `dotnet` CLI cannot load them.
 
 ### 🚀 Project scaffolding
-`UI Maker: New .NET Desktop Project` asks for a template (WPF or Windows Forms),
-a name, and a folder — then generates a ready-to-run app and offers to open it.
+`UI Maker: New .NET Desktop Project` asks for a template (WPF, Windows Forms,
+or Console), a language (C# or Visual Basic), a target framework, a name, and
+a folder — then generates a ready-to-run app and offers to open it.
 
 ## Getting started
 
@@ -99,13 +118,15 @@ launches with UI Maker loaded.
 
 | Command | What it does |
 |---|---|
-| `UI Maker: New .NET Desktop Project` | Scaffold a WPF or WinForms app via `dotnet new` |
+| `UI Maker: New .NET Desktop Project` | Scaffold a WPF, WinForms, or Console app (C#/VB) via `dotnet new` |
+| `UI Maker: New WPF Window` | Add a `.xaml` + code-behind pair to the project |
+| `UI Maker: New WinForms Form` | Add a Form (`.cs` + `.Designer.cs`) to the project |
 | `UI Maker: Open in Designer` | Open the current `.xaml` file in the visual designer |
 | `UI Maker: View XAML Source (Beside)` | Split view — XAML text editor next to the designer |
-| `UI Maker: Build` | `dotnet build` (Debug configuration) |
-| `UI Maker: Run App` | Build and launch the app |
-| `UI Maker: Debug App` | Build and launch under the debugger |
-| `UI Maker: Build Release (Publish)` | `dotnet publish -c Release` |
+| `UI Maker: Build` | Build (Debug configuration) |
+| `UI Maker: Run / Stop App` | Build and launch the app, or stop it if running |
+| `UI Maker: Debug / Stop Debugging` | Build and debug the app, or stop the session |
+| `UI Maker: Build Release (Publish)` | Publish a Release build (honors the single-exe settings) |
 | `UI Maker: Stop Running App` | Terminate the app started by Run |
 
 ## Settings
@@ -157,7 +178,7 @@ the affected `this.control.Prop = …;` statements change, so diffs stay clean.
 
 - [x] Windows Forms visual designer (`*.Designer.cs` round-tripping)
 - [x] Nested layout rendering (StackPanel / DockPanel / Grid rows & columns / TabControl)
-- [ ] WinForms Anchor/Dock-aware preview and control renaming
+- [ ] WinForms Anchor-aware preview (Dock is previewed) and control renaming
 - [ ] Drag-reordering inside StackPanel / DockPanel children
 - [ ] Alignment & distribution tools, multi-select
 - [ ] Style/resource editing and live theme preview
