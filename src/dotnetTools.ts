@@ -1,21 +1,98 @@
 // UI Maker — thin wrappers around the .NET CLI.
 //
 // Build and Release run as VS Code Tasks so compiler errors land in the
-// Problems panel (via the $msCompile problem matcher). Run uses a dedicated
-// terminal so app output streams live and the process can be stopped.
-// Debug builds first, then starts a `coreclr` debug session against the
-// output assembly (requires the C# extension; falls back to plain Run).
+// Problems panel (via the $msCompile problem matcher). Run executes as a task
+// too, which is how the extension knows when the app exits — the Run button
+// is a play/stop toggle and `onDidChangeState` lets the sidebar and status
+// bar mirror the current state. Debug builds first, then starts a debug
+// session against the output assembly (requires the C# extension).
+//
+// Protections for "works on any dev machine":
+//   * SDK-style projects that target .NET Framework build fine with the
+//     dotnet CLI **if** the reference assemblies exist; when they don't
+//     (error MSB3644), the user is offered the
+//     Microsoft.NETFramework.ReferenceAssemblies NuGet helper.
+//   * Classic non-SDK projects cannot be built by the dotnet CLI at all;
+//     those are routed to Visual Studio's MSBuild.exe (found via vswhere)
+//     and the built .exe is launched directly.
 
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as cp from 'child_process';
+import {
+    readProjectInfo, isNetFrameworkTfm, frameworkLabel,
+    refAssembliesInstalled, addRefAssembliesHelper, findMsBuild
+} from './projectInfo';
+
+export type RunState = 'idle' | 'running' | 'debugging';
+
+const DEBUG_SESSION_NAME = 'UI Maker: Debug';
 
 export class DotnetTools implements vscode.Disposable {
-    /** Terminal used by Run; recreated on every launch so Stop is reliable. */
-    private runTerminal: vscode.Terminal | undefined;
+    private readonly disposables: vscode.Disposable[] = [];
+
+    /** Task execution backing Run (dotnet run), when that path is used. */
+    private runExecution: vscode.TaskExecution | undefined;
+    /** Direct child process backing Run for classic .NET Framework exes. */
+    private runProcess: cp.ChildProcess | undefined;
+    private output: vscode.OutputChannel | undefined;
+
+    /** Projects already asked about the reference-assemblies helper. */
+    private readonly askedRefAssemblies = new Set<string>();
+
+    private _state: RunState = 'idle';
+    private readonly stateEmitter = new vscode.EventEmitter<RunState>();
+    /** Fires whenever the app starts or stops (running / debugging / idle). */
+    public readonly onDidChangeState = this.stateEmitter.event;
+
+    public get state(): RunState {
+        return this._state;
+    }
+
+    constructor() {
+        // Run (task flavor) ends -> back to idle.
+        this.disposables.push(vscode.tasks.onDidEndTaskProcess(e => {
+            if (e.execution === this.runExecution) {
+                this.runExecution = undefined;
+                this.setState('idle');
+            }
+        }));
+        // Our debug session starts/ends -> mirror the state.
+        this.disposables.push(vscode.debug.onDidStartDebugSession(s => {
+            if (s.name === DEBUG_SESSION_NAME) { this.setState('debugging'); }
+        }));
+        this.disposables.push(vscode.debug.onDidTerminateDebugSession(s => {
+            if (s.name === DEBUG_SESSION_NAME) { this.setState('idle'); }
+        }));
+    }
 
     dispose(): void {
         this.stop();
+        this.disposables.forEach(d => d.dispose());
+        this.output?.dispose();
+    }
+
+    private setState(state: RunState): void {
+        if (this._state === state) { return; }
+        this._state = state;
+        this.stateEmitter.fire(state);
+    }
+
+    // ---------------------------------------------------------------- toggles
+
+    /** Play/stop behavior for the Run button. */
+    async runToggle(): Promise<void> {
+        if (this._state === 'running') { this.stop(); return; }
+        this.stop();
+        await this.run();
+    }
+
+    /** Play/stop behavior for the Debug button. */
+    async debugToggle(): Promise<void> {
+        if (this._state === 'debugging') { this.stop(); return; }
+        this.stop();
+        await this.debug();
     }
 
     // ------------------------------------------------------------------ Build
@@ -23,7 +100,13 @@ export class DotnetTools implements vscode.Disposable {
     async build(): Promise<void> {
         const project = await this.findProject();
         if (!project) { return; }
-        await this.execTask('build', ['build', project, '-c', 'Debug']);
+        const pre = await this.preflight(project);
+        if (!pre) { return; }
+        if (pre.msbuild) {
+            await this.execTask('build', [project, '/p:Configuration=Debug', '/v:m'], pre.msbuild);
+        } else {
+            await this.execTask('build', ['build', project, '-c', 'Debug']);
+        }
     }
 
     // -------------------------------------------------------------------- Run
@@ -31,19 +114,65 @@ export class DotnetTools implements vscode.Disposable {
     async run(): Promise<void> {
         const project = await this.findProject();
         if (!project) { return; }
+        const pre = await this.preflight(project);
+        if (!pre) { return; }
         this.stop();
-        this.runTerminal = vscode.window.createTerminal({
-            name: 'UI Maker: Run',
-            cwd: path.dirname(project)
-        });
-        this.runTerminal.show(true);
+
+        // Classic projects: build with MSBuild, then launch the exe directly
+        // (dotnet run does not understand non-SDK projects).
+        if (pre.msbuild) {
+            const code = await this.execTaskAndWait('build', [project, '/p:Configuration=Debug', '/v:m'], pre.msbuild);
+            if (code !== 0) {
+                vscode.window.showErrorMessage('UI Maker: build failed — see the terminal output.');
+                return;
+            }
+            const exe = this.findOutputBinary(project, '.exe');
+            if (!exe) {
+                vscode.window.showErrorMessage('UI Maker: build succeeded but the output .exe was not found.');
+                return;
+            }
+            this.launchExe(exe);
+            return;
+        }
+
         // `dotnet run` builds first, so a stale binary is never launched.
-        this.runTerminal.sendText(`dotnet run --project "${project}"`);
+        // Running it as a task tells us when the app exits (play/stop toggle).
+        this.runExecution = await this.execTask('run', ['run', '--project', project]);
+        this.setState('running');
+    }
+
+    /** Launch a built .exe as a tracked child process (classic projects). */
+    private launchExe(exe: string): void {
+        this.output ??= vscode.window.createOutputChannel('UI Maker: Run');
+        this.output.appendLine(`[UI Maker] launching ${exe}`);
+        const child = cp.spawn(exe, [], { cwd: path.dirname(exe) });
+        child.stdout?.on('data', d => this.output?.append(String(d)));
+        child.stderr?.on('data', d => this.output?.append(String(d)));
+        child.on('error', err => {
+            this.output?.appendLine(`[UI Maker] failed to start: ${err.message}`);
+            this.runProcess = undefined;
+            this.setState('idle');
+        });
+        child.on('exit', code => {
+            this.output?.appendLine(`[UI Maker] exited with code ${code ?? 'unknown'}`);
+            this.runProcess = undefined;
+            this.setState('idle');
+        });
+        this.runProcess = child;
+        this.setState('running');
     }
 
     stop(): void {
-        this.runTerminal?.dispose();
-        this.runTerminal = undefined;
+        if (vscode.debug.activeDebugSession?.name === DEBUG_SESSION_NAME) {
+            void vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
+        }
+        this.runExecution?.terminate();
+        this.runExecution = undefined;
+        if (this.runProcess) {
+            this.runProcess.kill();
+            this.runProcess = undefined;
+        }
+        this.setState('idle');
     }
 
     // ------------------------------------------------------------------ Debug
@@ -51,15 +180,25 @@ export class DotnetTools implements vscode.Disposable {
     async debug(): Promise<void> {
         const project = await this.findProject();
         if (!project) { return; }
+        const pre = await this.preflight(project);
+        if (!pre) { return; }
 
         // Build first; a failed build should surface errors, not a debugger.
-        const exitCode = await this.execTaskAndWait('build', ['build', project, '-c', 'Debug']);
+        const exitCode = pre.msbuild
+            ? await this.execTaskAndWait('build', [project, '/p:Configuration=Debug', '/v:m'], pre.msbuild)
+            : await this.execTaskAndWait('build', ['build', project, '-c', 'Debug']);
         if (exitCode !== 0) {
             vscode.window.showErrorMessage('UI Maker: build failed — fix the errors before debugging.');
             return;
         }
 
-        const program = this.findOutputAssembly(project);
+        const info = readProjectInfo(project);
+        const netFramework = info?.netFramework ?? false;
+        // .NET Framework apps debug with the 'clr' engine against the .exe;
+        // modern .NET uses 'coreclr' against the .dll.
+        const program = netFramework
+            ? this.findOutputBinary(project, '.exe')
+            : this.findOutputBinary(project, '.dll');
         if (!program) {
             vscode.window.showWarningMessage('UI Maker: could not locate the build output. Launching without the debugger.');
             await this.run();
@@ -68,8 +207,8 @@ export class DotnetTools implements vscode.Disposable {
 
         const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project));
         const config: vscode.DebugConfiguration = {
-            name: 'UI Maker: Debug',
-            type: 'coreclr',
+            name: DEBUG_SESSION_NAME,
+            type: netFramework ? 'clr' : 'coreclr',
             request: 'launch',
             program,
             cwd: path.dirname(program),
@@ -77,8 +216,8 @@ export class DotnetTools implements vscode.Disposable {
             stopAtEntry: false
         };
 
-        // `coreclr` is provided by the C# extension. If it is missing the call
-        // rejects, in which case we offer the install and fall back to Run.
+        // The debug engines come from the C# extension. If it is missing the
+        // call rejects, in which case we offer the install and fall back to Run.
         const started = await Promise.resolve(vscode.debug.startDebugging(folder, config)).then(
             ok => ok,
             () => false
@@ -101,11 +240,21 @@ export class DotnetTools implements vscode.Disposable {
     async release(): Promise<void> {
         const project = await this.findProject();
         if (!project) { return; }
-        const exitCode = await this.execTaskAndWait('publish', ['publish', project, '-c', 'Release']);
+        const pre = await this.preflight(project);
+        if (!pre) { return; }
+
+        let exitCode: number | undefined;
+        if (pre.msbuild) {
+            exitCode = await this.execTaskAndWait('publish', [project, '/p:Configuration=Release', '/v:m'], pre.msbuild);
+        } else {
+            exitCode = await this.execTaskAndWait('publish', this.publishArgs(project));
+        }
         if (exitCode !== 0) { return; }
 
-        // Point the user at the publish folder that was just produced.
-        const publishDir = this.findPublishDir(project);
+        // Point the user at the output folder that was just produced.
+        const publishDir = pre.msbuild
+            ? this.findReleaseDir(project)
+            : (this.findPublishDir(project) ?? this.findReleaseDir(project));
         const open = 'Open Output Folder';
         const choice = await vscode.window.showInformationMessage(
             `UI Maker: release build published${publishDir ? ` to ${publishDir}` : ''}.`,
@@ -116,10 +265,87 @@ export class DotnetTools implements vscode.Disposable {
         }
     }
 
+    /**
+     * `dotnet publish` arguments honoring the UI Maker publish settings:
+     * single .exe, self-contained runtime, target runtime identifier.
+     * (.NET Framework targets ignore them — single-file needs modern .NET.)
+     */
+    private publishArgs(project: string): string[] {
+        const args = ['publish', project, '-c', 'Release'];
+        const info = readProjectInfo(project);
+        if (info?.netFramework) { return args; }
+
+        const cfg = vscode.workspace.getConfiguration('formforge');
+        const singleFile = cfg.get<boolean>('publish.singleFile', false);
+        const selfContained = cfg.get<boolean>('publish.selfContained', false);
+        const runtime = cfg.get<string>('publish.runtime', 'win-x64');
+
+        if (singleFile) {
+            args.push('-r', runtime, '-p:PublishSingleFile=true', '--self-contained', String(selfContained));
+            if (selfContained) {
+                // Bundle native libraries too, so the output really is one file.
+                args.push('-p:IncludeNativeLibrariesForSelfExtract=true');
+            }
+        } else if (selfContained) {
+            args.push('-r', runtime, '--self-contained', 'true');
+        }
+        return args;
+    }
+
+    // ------------------------------------------------------- build protection
+
+    /**
+     * Pre-build check that keeps projects working on any dev machine.
+     * Returns undefined to abort, `{}` to proceed with the dotnet CLI, or
+     * `{ msbuild }` to route the build through Visual Studio's MSBuild.
+     */
+    private async preflight(project: string): Promise<{ msbuild?: string } | undefined> {
+        const info = readProjectInfo(project);
+        if (!info) { return {}; }
+
+        // Classic non-SDK project: dotnet CLI cannot load it — use MSBuild.
+        if (!info.sdkStyle) {
+            const msbuild = await findMsBuild();
+            if (msbuild) { return { msbuild }; }
+            const get = 'Get Build Tools';
+            const choice = await vscode.window.showErrorMessage(
+                `UI Maker: ${path.basename(project)} is a classic .NET Framework project — the dotnet CLI cannot build it and Visual Studio MSBuild was not found. Install Visual Studio (or Build Tools) with the ".NET desktop" workload.`,
+                get
+            );
+            if (choice === get) {
+                void vscode.env.openExternal(vscode.Uri.parse('https://visualstudio.microsoft.com/downloads/'));
+            }
+            return undefined;
+        }
+
+        // SDK-style project targeting .NET Framework: without the reference
+        // assemblies the build dies with MSB3644 — offer the NuGet helper.
+        const tfm = info.targetFrameworks.find(isNetFrameworkTfm);
+        if (tfm && !info.hasRefAssembliesHelper && !refAssembliesInstalled(tfm)
+            && !this.askedRefAssemblies.has(project)) {
+            this.askedRefAssemblies.add(project);
+            const fix = 'Add Build Helper (Recommended)';
+            const anyway = 'Try Anyway';
+            const choice = await vscode.window.showWarningMessage(
+                `UI Maker: this project targets ${frameworkLabel(tfm)} but its reference assemblies are not installed on this PC, so the build would fail (MSB3644). ` +
+                'Add the Microsoft.NETFramework.ReferenceAssemblies package so it builds on any machine?',
+                fix, anyway
+            );
+            if (choice === fix) {
+                if (addRefAssembliesHelper(project)) {
+                    vscode.window.showInformationMessage('UI Maker: build helper added to the project file.');
+                } else {
+                    vscode.window.showErrorMessage('UI Maker: could not update the project file.');
+                }
+            }
+        }
+        return {};
+    }
+
     // ------------------------------------------------------- project location
 
     /**
-     * Locate the .csproj to operate on: walk up from the active editor's file,
+     * Locate the project to operate on: walk up from the active editor's file,
      * then fall back to a workspace search (with a picker if several exist).
      */
     async findProject(): Promise<string | undefined> {
@@ -128,17 +354,17 @@ export class DotnetTools implements vscode.Disposable {
             let dir = path.dirname(active.fsPath);
             const stopAt = vscode.workspace.getWorkspaceFolder(active)?.uri.fsPath ?? path.parse(dir).root;
             for (;;) {
-                const hit = this.csprojIn(dir);
+                const hit = this.projectIn(dir);
                 if (hit) { return hit; }
                 if (dir === stopAt || path.dirname(dir) === dir) { break; }
                 dir = path.dirname(dir);
             }
         }
 
-        const found = await vscode.workspace.findFiles('**/*.csproj', '**/{bin,obj,node_modules}/**', 16);
+        const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', '**/{bin,obj,node_modules}/**', 16);
         if (found.length === 0) {
             const create = 'New Project';
-            const choice = await vscode.window.showWarningMessage('UI Maker: no .csproj found in this workspace.', create);
+            const choice = await vscode.window.showWarningMessage('UI Maker: no .NET project found in this workspace.', create);
             if (choice === create) { void vscode.commands.executeCommand('formforge.newProject'); }
             return undefined;
         }
@@ -155,9 +381,9 @@ export class DotnetTools implements vscode.Disposable {
         return pick?.fsPath;
     }
 
-    private csprojIn(dir: string): string | undefined {
+    private projectIn(dir: string): string | undefined {
         try {
-            const hit = fs.readdirSync(dir).find(f => f.toLowerCase().endsWith('.csproj'));
+            const hit = fs.readdirSync(dir).find(f => /\.(cs|vb)proj$/i.test(f));
             return hit ? path.join(dir, hit) : undefined;
         } catch {
             return undefined;
@@ -166,14 +392,17 @@ export class DotnetTools implements vscode.Disposable {
 
     // --------------------------------------------------------- task plumbing
 
-    /** Run `dotnet <args>` as a shared task with MSBuild problem matching. */
-    private execTask(name: string, args: string[]): Thenable<vscode.TaskExecution> {
+    /** Run a build tool as a shared task with MSBuild problem matching. */
+    private execTask(name: string, args: string[], executable = 'dotnet'): Thenable<vscode.TaskExecution> {
         const task = new vscode.Task(
             { type: 'formforge', task: name },
             vscode.TaskScope.Workspace,
             name,
             'UI Maker',
-            new vscode.ShellExecution('dotnet', args),
+            new vscode.ShellExecution(
+                { value: executable, quoting: vscode.ShellQuoting.Strong },
+                args.map(a => ({ value: a, quoting: vscode.ShellQuoting.Strong }))
+            ),
             '$msCompile'
         );
         task.presentationOptions = {
@@ -185,8 +414,8 @@ export class DotnetTools implements vscode.Disposable {
     }
 
     /** Run a task and resolve with its process exit code. */
-    private async execTaskAndWait(name: string, args: string[]): Promise<number | undefined> {
-        const execution = await this.execTask(name, args);
+    private async execTaskAndWait(name: string, args: string[], executable = 'dotnet'): Promise<number | undefined> {
+        const execution = await this.execTask(name, args, executable);
         return new Promise(resolve => {
             const sub = vscode.tasks.onDidEndTaskProcess(e => {
                 if (e.execution === execution) {
@@ -199,45 +428,68 @@ export class DotnetTools implements vscode.Disposable {
 
     // ------------------------------------------------------- output discovery
 
-    /** Resolve bin/Debug/<tfm>/<assembly>.dll for the given project. */
-    private findOutputAssembly(project: string): string | undefined {
+    /**
+     * Resolve the Debug build output with the given extension: checks
+     * bin/Debug/<file> (classic layout) and bin/Debug/<tfm>/<file>.
+     */
+    private findOutputBinary(project: string, ext: '.dll' | '.exe'): string | undefined {
         const dir = path.dirname(project);
         const xml = this.tryRead(project) ?? '';
         const assembly =
             /<AssemblyName>\s*([^<]+?)\s*<\/AssemblyName>/.exec(xml)?.[1] ??
-            path.basename(project, '.csproj');
+            path.basename(project).replace(/\.(cs|vb)proj$/i, '');
 
         // Prefer the declared target framework, otherwise scan bin/Debug.
         const tfm =
             /<TargetFramework>\s*([^<]+?)\s*<\/TargetFramework>/.exec(xml)?.[1] ??
             /<TargetFrameworks>\s*([^<;]+)/.exec(xml)?.[1];
 
-        const candidates: string[] = [];
-        if (tfm) {
-            candidates.push(path.join(dir, 'bin', 'Debug', tfm, `${assembly}.dll`));
-        }
         const debugDir = path.join(dir, 'bin', 'Debug');
+        const candidates: string[] = [path.join(debugDir, `${assembly}${ext}`)];
+        if (tfm) {
+            candidates.push(path.join(debugDir, tfm, `${assembly}${ext}`));
+        }
         try {
             for (const sub of fs.readdirSync(debugDir)) {
-                candidates.push(path.join(debugDir, sub, `${assembly}.dll`));
+                candidates.push(path.join(debugDir, sub, `${assembly}${ext}`));
             }
         } catch { /* no build output yet */ }
+        // Classic projects sometimes build to bin/x86|x64/Debug.
+        for (const arch of ['x86', 'x64']) {
+            candidates.push(path.join(dir, 'bin', arch, 'Debug', `${assembly}${ext}`));
+        }
 
         return candidates.find(c => fs.existsSync(c));
     }
 
-    /** Locate the newest bin/Release/<tfm>/publish folder after a publish. */
+    /** Locate the newest publish folder after `dotnet publish` (handles -r). */
     private findPublishDir(project: string): string | undefined {
         const releaseDir = path.join(path.dirname(project), 'bin', 'Release');
+        const hits: string[] = [];
         try {
-            const dirs = fs.readdirSync(releaseDir)
-                .map(sub => path.join(releaseDir, sub, 'publish'))
-                .filter(p => fs.existsSync(p))
-                .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-            return dirs[0];
+            for (const sub of fs.readdirSync(releaseDir)) {
+                // bin/Release/<tfm>/publish
+                const direct = path.join(releaseDir, sub, 'publish');
+                if (fs.existsSync(direct)) { hits.push(direct); }
+                // bin/Release/<tfm>/<rid>/publish (runtime-specific publishes)
+                const tfmDir = path.join(releaseDir, sub);
+                try {
+                    for (const rid of fs.readdirSync(tfmDir)) {
+                        const nested = path.join(tfmDir, rid, 'publish');
+                        if (fs.existsSync(nested)) { hits.push(nested); }
+                    }
+                } catch { /* not a directory */ }
+            }
         } catch {
             return undefined;
         }
+        return hits.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+    }
+
+    /** bin/Release itself — the classic MSBuild output location. */
+    private findReleaseDir(project: string): string | undefined {
+        const dir = path.join(path.dirname(project), 'bin', 'Release');
+        return fs.existsSync(dir) ? dir : undefined;
     }
 
     private tryRead(file: string): string | undefined {
