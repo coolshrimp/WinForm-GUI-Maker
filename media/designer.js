@@ -2743,6 +2743,38 @@
         switchPanelTab('events');
     });
 
+    // Collapsible side panels: the chevron shrinks a panel to a thin strip;
+    // clicking (or Enter/Space on) the strip brings it back. The choice is
+    // remembered in the webview state so it survives tab switches.
+    function setPanelCollapsed(panel, collapseBtn, collapsed) {
+        panel.classList.toggle('ff-collapsed', collapsed);
+        collapseBtn.setAttribute('aria-expanded', String(!collapsed));
+        const state = vscode.getState() || {};
+        const collapsedPanels = state.collapsedPanels || {};
+        collapsedPanels[panel.id] = collapsed;
+        vscode.setState({ ...state, collapsedPanels });
+    }
+
+    for (const [panelId, btnId, tabId] of [
+        ['ff-toolbox', 'ff-toolbox-collapse', 'ff-toolbox-tab'],
+        ['ff-props', 'ff-props-collapse', 'ff-props-tab']
+    ]) {
+        const panel = $(panelId);
+        const btn = $(btnId);
+        const tab = $(tabId);
+        if (!panel || !btn || !tab) { continue; }
+        btn.addEventListener('click', () => setPanelCollapsed(panel, btn, true));
+        tab.addEventListener('click', () => setPanelCollapsed(panel, btn, false));
+        tab.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setPanelCollapsed(panel, btn, false);
+            }
+        });
+        const saved = (vscode.getState() || {}).collapsedPanels;
+        if (saved && saved[panelId]) { setPanelCollapsed(panel, btn, true); }
+    }
+
     // Property grid sort mode: categorized (like VS) or flat alphabetical.
     const sortCatBtn = $('ff-sort-cat');
     const sortAzBtn = $('ff-sort-az');

@@ -452,7 +452,11 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         <div id="ff-main">
             <!-- Toolbox: drag controls onto the canvas -->
             <div id="ff-toolbox" role="region" aria-label="Toolbox">
-                <div class="ff-panel-title">Toolbox</div>
+                <div class="ff-panel-title ff-panel-header">
+                    <span>Toolbox</span>
+                    <button id="ff-toolbox-collapse" class="ff-collapse-btn" title="Collapse Toolbox" aria-expanded="true">⮜</button>
+                </div>
+                <div id="ff-toolbox-tab" class="ff-collapsed-tab" role="button" tabindex="0" title="Expand Toolbox">Toolbox</div>
                 <div id="ff-toolbox-items"></div>
             </div>
 
@@ -475,7 +479,9 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 <div class="ff-tabs" role="tablist" aria-label="Inspector">
                     <button id="ff-tab-props" class="active" role="tab" aria-selected="true">Properties</button>
                     <button id="ff-tab-events" role="tab" aria-selected="false">Events</button>
+                    <button id="ff-props-collapse" class="ff-collapse-btn" title="Collapse Properties" aria-expanded="true">⮞</button>
                 </div>
+                <div id="ff-props-tab" class="ff-collapsed-tab" role="button" tabindex="0" title="Expand Properties">Properties</div>
                 <div id="ff-props-target" class="ff-panel-title"></div>
                 <div id="ff-props-tools">
                     <button id="ff-sort-cat" class="active" title="Categorized">▤ Categorized</button>

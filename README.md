@@ -100,6 +100,10 @@ Open any `.xaml` window in the UI Maker Designer:
   Items…** on ListBox, ComboBox, CheckedListBox, and DomainUpDown (one line
   per item, written back as `Items.AddRange`). Right-click the form or the
   component tray for their own menus.
+- **Collapsible side panels** — the ⮜ / ⮞ chevron in the Toolbox and
+  Properties headers folds either panel into a thin strip, giving the canvas
+  the full editor width; click the strip to bring the panel back. The designer
+  remembers the choice while the tab stays open.
 - **Design canvas** that mimics a real window (title bar, client area) with
   snap-to-grid placement, drag to move, 8-point resize handles — and grips on
   the window's own edges to resize the form/window itself.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.0
+
+**Collapsible designer panels.** The Toolbox and Properties panels now have a
+collapse chevron in their headers (user request): either panel folds into a
+thin vertical strip so the design canvas gets the full editor width, and
+clicking the strip (or pressing Enter/Space on it) restores the panel. The
+collapsed/expanded choice is kept in the webview state, so it survives
+switching editor tabs. In narrow editor groups the collapsed panel hands its
+grid track back to the canvas, and the bottom-docked Properties strip renders
+horizontally.
+
 ## 0.12.0
 
 **Visual Basic WinForms designer.** `*.Designer.vb` files now open in the same

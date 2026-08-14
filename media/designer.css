@@ -120,6 +120,91 @@ html, body {
     text-overflow: ellipsis;
 }
 
+/* ------------------------------------------------- collapsible side panels */
+
+.ff-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+/* Chevron that collapses a side panel. Inside .ff-tabs it must not stretch
+ * like the tab buttons do. */
+.ff-collapse-btn {
+    flex: 0 0 auto;
+    background: transparent;
+    color: var(--vscode-foreground);
+    border: none;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.ff-collapse-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    opacity: 1;
+}
+
+/* Inside the inspector tab strip the chevron must beat the .ff-tabs button
+ * rule (flex: 1 would stretch it like a tab). */
+.ff-tabs button.ff-collapse-btn {
+    flex: 0 0 auto;
+    align-self: center;
+    margin-right: 2px;
+    padding: 2px 6px;
+    border-bottom: none;
+    opacity: 0.7;
+}
+
+.ff-tabs button.ff-collapse-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    opacity: 1;
+}
+
+/* Vertical strip shown while a panel is collapsed; clicking it expands. */
+.ff-collapsed-tab {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 100%;
+    writing-mode: vertical-rl;
+    padding: 10px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    opacity: 0.75;
+    cursor: pointer;
+    user-select: none;
+}
+
+.ff-collapsed-tab:hover {
+    background: var(--vscode-list-hoverBackground);
+    opacity: 1;
+}
+
+#ff-toolbox.ff-collapsed,
+#ff-props.ff-collapsed {
+    flex: 0 0 26px;
+    min-width: 26px;
+    overflow: hidden;
+}
+
+#ff-toolbox.ff-collapsed > :not(.ff-collapsed-tab),
+#ff-props.ff-collapsed > :not(.ff-collapsed-tab) {
+    display: none;
+}
+
+#ff-toolbox.ff-collapsed > .ff-collapsed-tab,
+#ff-props.ff-collapsed > .ff-collapsed-tab {
+    display: flex;
+}
+
 /* ------------------------------------------------------------------ toolbox */
 
 #ff-toolbox {
@@ -1157,6 +1242,24 @@ html, body {
         display: grid;
         grid-template-columns: 130px minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr) minmax(190px, 34vh);
+    }
+
+    /* Collapsed panels give their grid track back to the canvas. */
+    #ff-main:has(> #ff-toolbox.ff-collapsed) {
+        grid-template-columns: 26px minmax(0, 1fr);
+    }
+
+    #ff-main:has(> #ff-props.ff-collapsed) {
+        grid-template-rows: minmax(0, 1fr) 26px;
+    }
+
+    /* The properties panel docks at the bottom here, so its strip is a
+     * horizontal bar, not a vertical one. */
+    #ff-props.ff-collapsed > .ff-collapsed-tab {
+        writing-mode: horizontal-tb;
+        height: auto;
+        width: 100%;
+        padding: 4px 10px;
     }
 
     #ff-toolbox {
