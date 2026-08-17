@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.18.2
+
+Canvas quality-of-life (user requests):
+
+* **Shift+scroll zoom** — hold Shift (or Ctrl) and scroll over the canvas to
+  zoom in 5% steps, 25%–300%. The toolbar dropdown stays in sync (odd values
+  show as a custom entry).
+* **Zoom readout in a real status bar** — the bottom strip now shows the
+  current zoom percentage on the right; click it to snap back to 100%.
+* **Better image placeholders** — Image/PictureBox controls without a
+  resolvable picture draw a clean scalable SVG photo glyph instead of the
+  emoji, on a softer checkerboard; the placeholder disappears entirely once
+  a real image resolves (set images always render — project resources,
+  local resx bitmaps, and imported files alike).
+
 ## 0.18.1
 
 **Windows 11 chrome on the WinForms canvas.** WinForms apps run with modern

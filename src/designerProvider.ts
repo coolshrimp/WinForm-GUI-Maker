@@ -507,7 +507,10 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             </div>
         </div>
 
-        <div id="ff-status" role="status" aria-live="polite">Ready</div>
+        <div id="ff-statusbar">
+            <div id="ff-status" role="status" aria-live="polite">Ready</div>
+            <button id="ff-zoom-status" title="Canvas zoom (Shift+scroll or Ctrl+scroll to zoom) — click to reset to 100%">100%</button>
+        </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

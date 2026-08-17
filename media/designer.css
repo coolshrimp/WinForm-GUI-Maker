@@ -501,13 +501,30 @@ html, body {
 
 .ff-look-image {
     justify-content: center;
-    font-size: 22px;
     background:
-        linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%),
-        linear-gradient(45deg, #eee 25%, #fff 25%, #fff 75%, #eee 75%);
+        linear-gradient(45deg, #f3f3f3 25%, transparent 25%, transparent 75%, #f3f3f3 75%),
+        linear-gradient(45deg, #f3f3f3 25%, #fbfbfb 25%, #fbfbfb 75%, #f3f3f3 75%);
     background-size: 16px 16px;
     background-position: 0 0, 8px 8px;
-    border: 1px solid #aaa;
+    border: 1px solid #c9c9c9;
+}
+
+/* SVG glyph shown when an Image/PictureBox has no resolvable picture:
+ * scales with the control, stays subtle. */
+.ff-img-ph {
+    width: 40%;
+    height: 40%;
+    max-width: 48px;
+    max-height: 48px;
+    min-width: 14px;
+    min-height: 14px;
+    color: #8a8a8a;
+    opacity: 0.8;
+}
+
+.ff-look-button .ff-img-ph {
+    width: 16px;
+    height: 16px;
 }
 
 .ff-look-progress {
@@ -1120,16 +1137,38 @@ html, body {
 
 /* ------------------------------------------------------------------- status */
 
-#ff-status {
+#ff-statusbar {
     flex: 0 0 auto;
-    padding: 3px 10px;
-    font-size: 11px;
+    display: flex;
+    align-items: center;
     border-top: 1px solid var(--vscode-panel-border, #444);
     background: var(--vscode-statusBar-background, var(--vscode-sideBar-background));
     color: var(--vscode-statusBar-foreground, var(--vscode-foreground));
+}
+
+#ff-status {
+    flex: 1 1 auto;
+    padding: 3px 10px;
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* Zoom readout: click to reset to 100%. */
+#ff-zoom-status {
+    flex: 0 0 auto;
+    padding: 3px 12px;
+    font-size: 11px;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--vscode-panel-border, #444);
+    color: inherit;
+    cursor: pointer;
+}
+
+#ff-zoom-status:hover {
+    background: var(--vscode-statusBarItem-hoverBackground, rgba(127, 127, 127, 0.25));
 }
 
 /* ------------------------------------------------------------- context menu */

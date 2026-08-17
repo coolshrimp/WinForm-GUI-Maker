@@ -117,7 +117,9 @@ Open any `.xaml` window in the UI Maker Designer:
   default gray chrome.
 - **Design canvas** that mimics a real window (title bar, client area) with
   snap-to-grid placement, drag to move, 8-point resize handles — and grips on
-  the window's own edges to resize the form/window itself.
+  the window's own edges to resize the form/window itself. Zoom with the
+  toolbar dropdown or **Shift+scroll** (25%–300%); the status bar shows the
+  current percentage and clicking it resets to 100%.
 - **Properties window, Visual Studio style** — properties grouped under
   collapsible categories (Accessibility, Appearance, Behavior, Data, Design,
   Focus, Layout, Window Style) with a Categorized / A–Z toggle and a

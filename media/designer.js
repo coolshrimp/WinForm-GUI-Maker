@@ -1098,6 +1098,14 @@
         }
     }
 
+    /** Clean SVG placeholder for image controls with no (resolvable) image. */
+    const IMAGE_PLACEHOLDER_SVG =
+        '<svg class="ff-img-ph" viewBox="0 0 24 24" aria-hidden="true">'
+        + '<rect x="2.5" y="4.5" width="19" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/>'
+        + '<circle cx="8.6" cy="9.6" r="1.8" fill="currentColor"/>'
+        + '<path d="M4.5 17.5l4.8-5 3.6 3.6 2.9-2.6 3.7 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '</svg>';
+
     /** Turn a container div into a single-cell CSS grid (stretchable child). */
     function singleCell(div) {
         div.style.display = 'grid';
@@ -1277,7 +1285,7 @@
                     inner.textContent = '';
                     inner.appendChild(img);
                 } else {
-                    inner.textContent = '🖼';
+                    inner.innerHTML = IMAGE_PLACEHOLDER_SVG;
                 }
                 break;
             }
@@ -3239,9 +3247,51 @@
         render();
     });
     $('ff-zoom').addEventListener('change', e => {
-        zoom = parseFloat(e.target.value) || 1;
-        render();
+        setZoom(parseFloat(e.target.value) || 1);
     });
+
+    // ---- zoom: toolbar select + Shift/Ctrl+scroll + status-bar readout -----
+
+    const zoomStatusEl = $('ff-zoom-status');
+
+    /** Set the canvas zoom (clamped), sync every zoom UI, re-render. */
+    function setZoom(z) {
+        zoom = Math.min(3, Math.max(0.25, Math.round(z * 20) / 20)); // 5% steps
+        const select = $('ff-zoom');
+        if (select) {
+            // Keep the dropdown honest: exact presets select themselves,
+            // wheel-zoomed values show through a synced custom entry.
+            const preset = [...select.options ?? []].find(o => parseFloat(o.value) === zoom && o.id !== 'ff-zoom-custom');
+            let custom = document.getElementById('ff-zoom-custom');
+            if (preset) {
+                if (custom) { custom.remove(); }
+                select.value = preset.value;
+            } else {
+                if (!custom || custom.tagName !== 'OPTION') {
+                    custom = document.createElement('option');
+                    custom.id = 'ff-zoom-custom';
+                    select.appendChild(custom);
+                }
+                custom.value = String(zoom);
+                custom.textContent = `${Math.round(zoom * 100)}%`;
+                select.value = String(zoom);
+            }
+        }
+        if (zoomStatusEl) { zoomStatusEl.textContent = `${Math.round(zoom * 100)}%`; }
+        render();
+    }
+
+    // Hold Shift (or Ctrl) and scroll over the canvas to zoom.
+    $('ff-canvas-host')?.addEventListener('wheel', e => {
+        if (!e.shiftKey && !e.ctrlKey) { return; }
+        e.preventDefault();
+        // Shift+wheel reports the delta on X in most browsers.
+        const delta = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) > 0 ? -0.05 : 0.05;
+        setZoom(zoom + delta);
+    }, { passive: false });
+
+    // Click the status-bar percentage to snap back to 100%.
+    zoomStatusEl?.addEventListener('click', () => setZoom(1));
 
     $('ff-tab-props').addEventListener('click', () => {
         switchPanelTab('props');
@@ -4366,7 +4416,9 @@
                 inner.classList.add('ff-look-button');
                 // Image-only buttons (Text empty, Image from resources) show a
                 // placeholder glyph instead of their variable name.
-                inner.textContent = text || (ctrl.props.Image ? '🖼' : ctrl.name);
+                if (text) { inner.textContent = text; }
+                else if (ctrl.props.Image) { inner.innerHTML = IMAGE_PLACEHOLDER_SVG; }
+                else { inner.textContent = ctrl.name; }
                 break;
             case 'Label':
                 inner.classList.add('ff-look-label');
@@ -4445,7 +4497,7 @@
                 break;
             case 'PictureBox':
                 inner.classList.add('ff-look-image');
-                inner.textContent = '🖼';
+                inner.innerHTML = IMAGE_PLACEHOLDER_SVG;
                 break;
             case 'ProgressBar':
                 inner.classList.add('ff-look-progress');
@@ -4502,7 +4554,7 @@
         // PictureBox Image with SizeMode.
         const imgUri = wfImageUri(ctrl.props.Image);
         if (imgUri && ctrl.type === 'PictureBox' && inner) {
-            inner.textContent = '';
+            inner.innerHTML = ''; // drop the placeholder glyph entirely
             const img = document.createElement('img');
             img.className = 'ff-pic-img';
             img.src = imgUri;
