@@ -20,7 +20,7 @@ import { openGuide } from './guide';
 import { openAppSettings } from './appSettings';
 import { openProjectProperties } from './projectProperties';
 import { openNugetPackages } from './nugetPackages';
-import { initInstaller, openInstallerCreator, revealFolder } from './installer';
+import { initInstaller, openInstallerCreator, pickInstallerScope, revealFolder } from './installer';
 import { convertToSdkStyle } from './convertToSdk';
 import { registerXamlIntellisense } from './xamlIntellisense';
 import {
@@ -166,6 +166,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 return openInstallerCreator(dotnet, project);
             }
         }),
+        vscode.commands.registerCommand('uimaker.installerSettingsScope', () => pickInstallerScope()),
         vscode.commands.registerCommand('uimaker.nugetPackages', (project?: string) => openNugetPackages(dotnet, project)),
 
         // Classic .NET Framework project -> modern SDK format (fixes the

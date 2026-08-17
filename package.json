@@ -1,8 +1,8 @@
 {
     "name": "uimaker",
-    "displayName": "UI Maker — .NET UI Designer",
+    "displayName": "UI Maker \u2014 .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.20.1",
+    "version": "0.20.2",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -94,7 +94,7 @@
             },
             {
                 "command": "uimaker.openProject",
-                "title": "Open Project (Any Folder)…",
+                "title": "Open Project (Any Folder)\u2026",
                 "category": "UI Maker",
                 "icon": "$(folder-opened)"
             },
@@ -139,6 +139,12 @@
                 "title": "Create Installer (Inno Setup)",
                 "category": "UI Maker",
                 "icon": "$(package)"
+            },
+            {
+                "command": "uimaker.installerSettingsScope",
+                "title": "Installer Settings: Uniform Template or Per-Project\u2026",
+                "category": "UI Maker",
+                "icon": "$(settings-gear)"
             },
             {
                 "command": "uimaker.stop",

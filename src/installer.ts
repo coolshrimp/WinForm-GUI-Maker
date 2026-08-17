@@ -213,6 +213,40 @@ export function buildIssScript(s: InstallerSettings, sourceDir: string, exeName:
     return lines.join('\r\n');
 }
 
+/**
+ * Quick-pick for uimaker.installer.settingsScope (palette command + the
+ * Change button on the installer page). Re-renders an open installer page
+ * so the banner and loaded settings follow the new scope immediately.
+ */
+export async function pickInstallerScope(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('uimaker');
+    const current = cfg.get<string>('installer.settingsScope', 'uniform');
+    const pick = await vscode.window.showQuickPick(
+        [
+            {
+                label: '$(globe) Uniform template',
+                description: current === 'uniform' ? 'current' : undefined,
+                detail: 'One shared installer template for ALL projects — same branding everywhere. App name, version, and output file still follow each project.',
+                id: 'uniform'
+            },
+            {
+                label: '$(folder) Per-project settings',
+                description: current === 'perProject' ? 'current' : undefined,
+                detail: 'Each project remembers its own installer settings — for multi-brand work.',
+                id: 'perProject'
+            }
+        ],
+        { placeHolder: 'How should Create Installer remember its settings?' }
+    );
+    if (!pick || pick.id === current) { return; }
+    await cfg.update('installer.settingsScope', pick.id, vscode.ConfigurationTarget.Global);
+    if (panel && currentProject) {
+        panel.webview.html = installerHtml(panel.webview, currentProject, loadSettings(currentProject));
+    }
+    void vscode.window.showInformationMessage(
+        `UI Maker: installer settings are now ${pick.id === 'uniform' ? 'a uniform template shared across all projects' : 'remembered per project'}.`);
+}
+
 /** Open the Create Installer page for the current project. */
 export async function openInstallerCreator(dotnet: DotnetTools, explicitProject?: string): Promise<void> {
     const project = explicitProject ?? await dotnet.findProject();
@@ -238,6 +272,8 @@ export async function openInstallerCreator(dotnet: DotnetTools, explicitProject?
             saveSettings(proj, msg.settings);
             void vscode.window.showInformationMessage(
                 `UI Maker: installer settings saved (${usePerProject() ? 'this project' : 'uniform template for all projects'}).`);
+        } else if (msg.type === 'scope') {
+            await pickInstallerScope();
         } else if (msg.type === 'browse' && msg.field) {
             const isFolder = msg.field === 'outputDir' || msg.field === 'sourceDir';
             const picked = await vscode.window.showOpenDialog({
@@ -371,7 +407,8 @@ function installerHtml(webview: vscode.Webview, project: string, s: InstallerSet
 <body>
 <h1>Create an Installer</h1>
 <div class="project">Project: <code>${path.basename(project)}</code> — packages the newest <code>publish</code> output into a Windows installer (Inno Setup)</div>
-<div class="scope">Settings memory: <b>${scope}</b> — change it with the <code>uimaker.installer.settingsScope</code> setting.</div>
+<div class="scope">Settings memory: <b>${scope}</b>
+    <button id="scopeBtn" class="secondary" title="Switch between one uniform template for all projects and per-project settings">Change…</button></div>
 
 <div class="grid">
     <label>App name</label><input type="text" id="appName"><span></span>
@@ -425,6 +462,7 @@ Compiling needs <a href="https://jrsoftware.org/isdl.php">Inno Setup 6</a> insta
     document.getElementById('gen').addEventListener('click', () => vscode.postMessage({ type: 'generate', compile: false, settings: collect() }));
     document.getElementById('genc').addEventListener('click', () => vscode.postMessage({ type: 'generate', compile: true, settings: collect() }));
     document.getElementById('open').addEventListener('click', () => vscode.postMessage({ type: 'openOutput', settings: collect() }));
+    document.getElementById('scopeBtn').addEventListener('click', () => vscode.postMessage({ type: 'scope' }));
 </script>
 </body>
 </html>`;

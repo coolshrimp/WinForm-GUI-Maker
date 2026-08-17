@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.20.2
+
+The installer settings scope is now one click away (user request): a
+**Change…** button on the Create Installer page's scope banner, plus a new
+palette command **UI Maker: Installer Settings — Uniform Template or
+Per-Project…**. Both open a quick-pick explaining the two modes, mark the
+current one, and an open installer page refreshes immediately with the
+newly-scoped settings.
+
 ## 0.20.1
 
 **Publish-mode assistant on Build Release** (user request). Release now asks
