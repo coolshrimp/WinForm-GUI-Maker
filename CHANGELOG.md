@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.7
+
+Fix: WinForms labels, checkboxes, and radio buttons rendered a few pixels
+right of their true position — the designer chrome added a 4px inner inset
+that real WinForms controls don't have. Label-style controls now start their
+glyph/text exactly at Location, and the check-glyph gap matches the native
+4px spacing.
+
 ## 0.18.6
 
 **Hover tooltips on every property row.** Both property panels (WPF and

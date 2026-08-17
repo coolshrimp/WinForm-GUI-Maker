@@ -1491,3 +1491,13 @@ html, body {
     white-space: nowrap;
     overflow: visible;
 }
+
+/* WinForms label-style controls have NO inner padding — the glyph/text
+ * starts exactly at Location, unlike the default chrome's 4px inset. */
+.ff-winforms .ff-look-label {
+    padding: 0;
+}
+
+.ff-winforms .ff-glyph {
+    margin-right: 4px;
+}
