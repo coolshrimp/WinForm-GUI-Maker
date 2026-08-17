@@ -154,10 +154,11 @@
     /** Properties shown for every control, in panel order. */
     const COMMON_PROPS = ['Width', 'Height', 'Margin', 'HorizontalAlignment', 'VerticalAlignment',
         'Grid.Row', 'Grid.Column', 'Background', 'Foreground',
-        'FontSize', 'FontWeight', 'IsEnabled', 'Visibility', 'ToolTip'];
+        'FontSize', 'FontFamily', 'FontWeight', 'FontStyle', 'IsEnabled', 'Visibility', 'ToolTip'];
 
     /** Window-level properties/events shown when nothing is selected. */
-    const WINDOW_PROPS = ['Title', 'Width', 'Height', 'Background', 'ResizeMode', 'WindowStartupLocation'];
+    const WINDOW_PROPS = ['Title', 'Width', 'Height', 'Background', 'FontSize', 'FontFamily',
+        'ResizeMode', 'WindowStartupLocation', 'WindowStyle', 'WindowState', 'SizeToContent', 'Topmost'];
     const WINDOW_EVENTS = ['Loaded', 'Closing', 'KeyDown', 'KeyUp'];
 
     /** Suggested values for enum-like attributes (rendered as datalists). */
@@ -180,8 +181,27 @@
         VerticalScrollBarVisibility: ['Auto', 'Visible', 'Hidden', 'Disabled'],
         HorizontalScrollBarVisibility: ['Auto', 'Visible', 'Hidden', 'Disabled'],
         ResizeMode: ['NoResize', 'CanMinimize', 'CanResize', 'CanResizeWithGrip'],
-        WindowStartupLocation: ['Manual', 'CenterScreen', 'CenterOwner']
+        WindowStartupLocation: ['Manual', 'CenterScreen', 'CenterOwner'],
+        WindowStyle: ['None', 'SingleBorderWindow', 'ThreeDBorderWindow', 'ToolWindow'],
+        WindowState: ['Normal', 'Minimized', 'Maximized'],
+        SizeToContent: ['Manual', 'Width', 'Height', 'WidthAndHeight'],
+        Topmost: ['True', 'False'],
+        FontStyle: ['Normal', 'Italic', 'Oblique'],
+        SelectionMode: ['Single', 'Multiple', 'Extended'],
+        DisplayMode: ['Month', 'Year', 'Decade']
     };
+
+    /** Brush-typed attributes: swatch + native color picker + named colors. */
+    const XAML_BRUSH_PROPS = new Set(['Background', 'Foreground', 'BorderBrush', 'Fill', 'Stroke']);
+
+    /** Suggested sizes/families for the font rows (free text still allowed). */
+    const XAML_FONT_SIZES = ['8', '9', '10', '11', '12', '13', '14', '15', '16', '18',
+        '20', '22', '24', '26', '28', '32', '36', '48', '72'];
+    const XAML_FONT_FAMILIES = ['Segoe UI', 'Segoe UI Semibold', 'Arial', 'Bahnschrift', 'Calibri',
+        'Cambria', 'Candara', 'Cascadia Code', 'Cascadia Mono', 'Comic Sans MS', 'Consolas',
+        'Constantia', 'Corbel', 'Courier New', 'Georgia', 'Impact', 'Lucida Console',
+        'Malgun Gothic', 'MS Gothic', 'Sylfaen', 'Tahoma', 'Times New Roman',
+        'Trebuchet MS', 'Verdana'];
 
     /** Panels that accept toolbox drops. */
     const DROP_PANELS = ['Grid', 'Canvas', 'StackPanel', 'WrapPanel', 'DockPanel'];
@@ -192,10 +212,14 @@
         HorizontalAlignment: 'Layout', VerticalAlignment: 'Layout',
         'Grid.Row': 'Layout', 'Grid.Column': 'Layout',
         Background: 'Appearance', Foreground: 'Appearance', FontSize: 'Appearance',
-        FontWeight: 'Appearance', BorderBrush: 'Appearance', BorderThickness: 'Appearance',
+        FontWeight: 'Appearance', FontFamily: 'Appearance', FontStyle: 'Appearance',
+        BorderBrush: 'Appearance', BorderThickness: 'Appearance',
         CornerRadius: 'Appearance', Title: 'Appearance',
+        Fill: 'Appearance', Stroke: 'Appearance',
         IsEnabled: 'Behavior', Visibility: 'Behavior', ToolTip: 'Behavior',
-        ResizeMode: 'Window Style', WindowStartupLocation: 'Layout'
+        ResizeMode: 'Window Style', WindowStartupLocation: 'Layout',
+        WindowStyle: 'Window Style', WindowState: 'Window Style',
+        SizeToContent: 'Layout', Topmost: 'Window Style'
     };
 
     /** Grid help-pane text for common XAML attributes. */
@@ -217,7 +241,16 @@
         ToolTip: 'The tooltip shown when the pointer hovers over the element.',
         Title: 'The text shown in the window title bar.',
         ResizeMode: 'Whether and how the user can resize the window.',
-        WindowStartupLocation: 'Where the window first appears on screen.'
+        WindowStartupLocation: 'Where the window first appears on screen.',
+        FontFamily: 'The font family used to draw text, e.g. Segoe UI or Consolas.',
+        FontStyle: 'Normal, Italic, or Oblique text.',
+        WindowStyle: 'The window chrome: standard border, tool window, or none.',
+        WindowState: 'Whether the window starts normal, minimized, or maximized.',
+        SizeToContent: 'Auto-size the window to its content in one or both directions.',
+        Topmost: 'Keep the window above all non-topmost windows.',
+        Source: 'The image file shown, as a project-relative path.',
+        Fill: 'The brush that paints the interior of the shape.',
+        Stroke: 'The brush that paints the outline of the shape.'
     };
 
     // ------------------------------------------------------------------ state
@@ -297,16 +330,30 @@
             render();
         } else if (msg.type === 'imageSet') {
             // Host imported an image for a property — write the assignment.
-            imageCache.set(`p:${msg.key}`, msg.uri);
-            if (docMode === 'winforms') {
-                wfApply(msg.isForm
-                    ? wfSetFormLine(msg.prop, msg.code)
-                    : wfSetLine(msg.ctrl, msg.prop, msg.code));
+            if (msg.xaml) {
+                imageCache.set(`x:${msg.rel}`, msg.uri);
+                if (pendingXamlImage && !modelStale) {
+                    const { el, prop } = pendingXamlImage;
+                    pendingXamlImage = null;
+                    if (prop === 'Source') {
+                        el.setAttribute('Source', msg.rel);
+                        commit();
+                    } else {
+                        setXamlImageBrush(el, prop, msg.rel);
+                    }
+                }
+            } else {
+                imageCache.set(`p:${msg.key}`, msg.uri);
+                if (docMode === 'winforms') {
+                    wfApply(msg.isForm
+                        ? wfSetFormLine(msg.prop, msg.code)
+                        : wfSetLine(msg.ctrl, msg.prop, msg.code));
+                }
             }
         } else if (msg.type === 'images') {
             // Host resolved referenced images — cache and redraw.
             for (const [k, v] of Object.entries(msg.images ?? {})) { imageCache.set(k, v); }
-            if (docMode === 'winforms') { wfRender(); }
+            if (docMode === 'winforms') { wfRender(); } else if (xamlDoc) { render(); }
         } else if (msg.type === 'clipboard') {
             // Shared clipboard from the host — enables cross-form paste.
             if (msg.data) { clipboard = msg.data; }
@@ -404,6 +451,70 @@
     /** The property element <Type.Name> of `el`, or null. */
     function propertyElement(el, name) {
         return [...el.children].find(c => c.localName === `${el.localName}.${name}`) ?? null;
+    }
+
+    // ------------------------------------------------------------ xaml images
+    // Image.Source and ImageBrush.ImageSource values are project-relative
+    // paths; the extension host resolves them to webview URIs on request.
+    // Cache keys are 'x:<relative path>'; null marks an in-flight request.
+
+    let xamlImageWanted = [];      // batched resolveImages request
+    let pendingXamlImage = null;   // { el, prop } awaiting the host's pick
+
+    /** The <ImageBrush> inside <Element.Prop>, or null. */
+    function xamlImageBrush(el, prop) {
+        const pe = propertyElement(el, prop);
+        return pe ? [...pe.children].find(c => c.localName === 'ImageBrush') ?? null : null;
+    }
+
+    /** ImageBrush Stretch -> CSS background-size. */
+    function ibStretchCss(stretch) {
+        switch (stretch) {
+            case 'None': return 'auto';
+            case 'Uniform': return 'contain';
+            case 'UniformToFill': return 'cover';
+            default: return '100% 100%'; // Fill
+        }
+    }
+
+    /** Renderable URI for a XAML image path (queues host resolution once). */
+    function xamlImageUri(src) {
+        if (!src || src.includes('{')) { return null; }
+        const rel = src.trim().replace(/^pack:\/\/[^,]*,,,\//i, '').replace(/^\//, '');
+        if (!rel) { return null; }
+        const ck = `x:${rel}`;
+        if (!imageCache.has(ck)) {
+            imageCache.set(ck, null); // pending — avoids re-request loops
+            if (!xamlImageWanted.length) { setTimeout(flushXamlImageRequests, 0); }
+            xamlImageWanted.push(rel);
+        }
+        return imageCache.get(ck) || null;
+    }
+
+    function flushXamlImageRequests() {
+        if (!xamlImageWanted.length) { return; }
+        vscode.postMessage({ type: 'resolveImages', keys: xamlImageWanted.map(k => ({ scope: 'x', key: k })) });
+        xamlImageWanted = [];
+    }
+
+    /** Remove <Element.Prop> (used when an attribute value replaces a brush). */
+    function removePropertyElement(el, name) {
+        const pe = propertyElement(el, name);
+        if (pe) { pe.remove(); }
+    }
+
+    /** Write <Element.Prop><ImageBrush ImageSource="rel"/></Element.Prop>. */
+    function setXamlImageBrush(el, prop, rel) {
+        el.removeAttribute(prop); // attribute + property element = XAML error
+        removePropertyElement(el, prop);
+        const ns = el.namespaceURI;
+        const pe = xamlDoc.createElementNS(ns, `${el.localName}.${prop}`);
+        const ib = xamlDoc.createElementNS(ns, 'ImageBrush');
+        ib.setAttribute('ImageSource', rel);
+        ib.setAttribute('Stretch', 'UniformToFill');
+        pe.appendChild(ib);
+        el.insertBefore(pe, el.firstChild);
+        commit();
     }
 
     /** After a re-parse, re-select the element with the previous x:Name or path. */
@@ -605,6 +716,17 @@
         const fg = toCssColor(styleProp(el, 'Foreground'));
         if (bg) { div.style.background = bg; }
         if (fg) { div.style.color = fg; }
+        // <Element.Background><ImageBrush ImageSource="…"/></Element.Background>
+        const ib = xamlImageBrush(el, 'Background');
+        if (ib) {
+            const uri = xamlImageUri(ib.getAttribute('ImageSource'));
+            if (uri) {
+                div.style.backgroundImage = `url("${uri}")`;
+                div.style.backgroundSize = ibStretchCss(ib.getAttribute('Stretch') || 'Fill');
+                div.style.backgroundPosition = 'center';
+                div.style.backgroundRepeat = 'no-repeat';
+            }
+        }
         const fs = num(styleProp(el, 'FontSize'), NaN);
         if (Number.isFinite(fs)) { div.style.fontSize = `${fs}px`; }
         const fw = styleProp(el, 'FontWeight');
@@ -680,6 +802,12 @@
                 div.style.left = `${num(el.getAttribute('Canvas.Left'), 0)}px`;
                 div.style.top = `${num(el.getAttribute('Canvas.Top'), 0)}px`;
                 break;
+            case 'flow':
+                // Auto-flowing grid cell (UniformGrid) — alignment only, the
+                // grid's auto-placement decides the cell.
+                div.style.justifySelf = jh;
+                div.style.alignSelf = jv;
+                break;
             case 'scroll':
             default:
                 break; // plain block flow
@@ -727,6 +855,34 @@
             case 'DockPanel':
                 buildDock(div, el);
                 break;
+            case 'UniformGrid': {
+                // Equal cells filled in child order. Rows/Columns attributes
+                // are honored; with neither, WPF picks a near-square layout.
+                const kids = elementChildren(el);
+                const rowsAttr = int(el.getAttribute('Rows'), 0);
+                let cols = int(el.getAttribute('Columns'), 0);
+                if (!cols) {
+                    cols = rowsAttr > 0
+                        ? Math.ceil((kids.length || 1) / rowsAttr)
+                        : Math.ceil(Math.sqrt(kids.length || 1));
+                }
+                div.style.display = 'grid';
+                div.style.gridTemplateColumns = `repeat(${Math.max(1, cols)}, minmax(0, 1fr))`;
+                div.style.gridAutoRows = '1fr';
+                for (const c of kids) { div.appendChild(renderElement(c, 'flow')); }
+                break;
+            }
+            case 'Viewbox':
+                singleCell(div);
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'cell')); }
+                break;
+            case 'Menu': case 'ToolBar': case 'StatusBar': {
+                div.style.display = 'flex';
+                div.style.flexDirection = 'row';
+                div.style.alignItems = 'center';
+                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'stack-h')); }
+                break;
+            }
             case 'Canvas': {
                 if (!div.style.position) { div.style.position = 'relative'; }
                 div.style.overflow = 'hidden';
@@ -799,10 +955,19 @@
                 // Leaf control chrome; nested element content renders inside it.
                 const inner = buildInner(type, el);
                 const kids = elementChildren(el).filter(c => c.localName !== 'ListBoxItem');
-                if (kids.length) {
+                if (kids.length === 1) {
                     inner.textContent = '';
                     singleCell(inner);
-                    for (const c of kids) { inner.appendChild(renderElement(c, 'cell')); }
+                    inner.appendChild(renderElement(kids[0], 'cell'));
+                } else if (kids.length > 1) {
+                    // Unknown multi-child container (ItemsControl, custom
+                    // panel, …): approximate as a vertical stack instead of
+                    // piling every child into the same cell.
+                    inner.textContent = '';
+                    inner.style.display = 'flex';
+                    inner.style.flexDirection = 'column';
+                    inner.style.alignItems = 'stretch';
+                    for (const c of kids) { inner.appendChild(renderElement(c, 'stack-v')); }
                 }
                 div.appendChild(inner);
             }
@@ -971,10 +1136,27 @@
                 inner.classList.add('ff-look-list');
                 inner.innerHTML = '<div class="ff-grid-header"><span>Col1</span><span>Col2</span><span>Col3</span></div>';
                 break;
-            case 'Image':
+            case 'Image': {
                 inner.classList.add('ff-look-image');
-                inner.textContent = '🖼';
+                const uri = xamlImageUri(el.getAttribute('Source'));
+                if (uri) {
+                    const img = document.createElement('img');
+                    img.src = uri;
+                    img.draggable = false;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    const st = el.getAttribute('Stretch') || 'Uniform';
+                    img.style.objectFit =
+                        st === 'Fill' ? 'fill'
+                        : st === 'UniformToFill' ? 'cover'
+                        : st === 'None' ? 'none' : 'contain';
+                    inner.textContent = '';
+                    inner.appendChild(img);
+                } else {
+                    inner.textContent = '🖼';
+                }
                 break;
+            }
             case 'ProgressBar': {
                 inner.classList.add('ff-look-progress');
                 const pct = progressPct(el);
@@ -1858,15 +2040,139 @@
             : [...(CONTROLS[el.localName]?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS];
 
         for (const prop of names) {
-            const node = propRow(prop, el.getAttribute(prop) ?? '', v => {
-                if (v === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, v); }
-                commit();
-            }, ENUM_VALUES[prop]);
-            if (el.getAttribute(prop) !== null) { node.classList.add('ff-set'); }
+            const node = xamlPropRow(el, prop);
+            if (el.getAttribute(prop) !== null || propertyElement(el, prop)) { node.classList.add('ff-set'); }
             attachDesc(node, prop, XAML_DESCS[prop] ?? '');
             rows.push({ label: prop, cat: XAML_CATS[prop] ?? 'Common', node });
         }
         renderGrid(rows);
+    }
+
+    /**
+     * Kind-aware XAML property row: brushes get a color swatch + picker (and
+     * Background an image button), enums/booleans a dropdown, fonts curated
+     * suggestion lists, Image.Source a file picker — everything else stays a
+     * free text row so bindings and resources can always be typed.
+     */
+    function xamlPropRow(el, prop) {
+        const write = v => {
+            removePropertyElement(el, prop); // an attribute replaces any expanded form
+            if (v === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, v); }
+            commit();
+        };
+        if (XAML_BRUSH_PROPS.has(prop)) { return xamlBrushRow(el, prop, write); }
+        if (ENUM_VALUES[prop]) { return xamlEnumRow(el, prop, write); }
+        if (prop === 'Source' && el.localName === 'Image') { return xamlImagePathRow(el, prop, write); }
+        if (prop === 'FontSize') { return propRow(prop, el.getAttribute(prop) ?? '', write, XAML_FONT_SIZES); }
+        if (prop === 'FontFamily') { return propRow(prop, el.getAttribute(prop) ?? '', write, XAML_FONT_FAMILIES); }
+        return propRow(prop, el.getAttribute(prop) ?? '', write);
+    }
+
+    /** Dropdown row for enum/boolean attributes, VS-style with a default entry. */
+    function xamlEnumRow(el, prop, write) {
+        const row = document.createElement('div');
+        row.className = 'ff-prop-row';
+        const lab = document.createElement('label');
+        lab.textContent = prop;
+        row.appendChild(lab);
+
+        const raw = el.getAttribute(prop) ?? '';
+        const values = ENUM_VALUES[prop];
+        const sel = document.createElement('select');
+        const reset = document.createElement('option');
+        reset.value = '';
+        reset.textContent = raw ? '(reset)' : '(default)';
+        sel.appendChild(reset);
+        // Bindings/resources aren't in the list — keep the current value visible.
+        const options = raw && !values.includes(raw) ? [raw, ...values] : values;
+        for (const v of options) {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            if (v === raw) { opt.selected = true; }
+            sel.appendChild(opt);
+        }
+        sel.addEventListener('change', () => write(sel.value));
+        sel.addEventListener('keydown', e => e.stopPropagation());
+        row.appendChild(sel);
+        return row;
+    }
+
+    /** Brush row: color swatch (native picker) + named-color text + image button. */
+    function xamlBrushRow(el, prop, write) {
+        const row = document.createElement('div');
+        row.className = 'ff-prop-row';
+        const lab = document.createElement('label');
+        lab.textContent = prop;
+        row.appendChild(lab);
+
+        const raw = el.getAttribute(prop) ?? '';
+        const imageBrush = xamlImageBrush(el, prop);
+
+        const swatch = document.createElement('input');
+        swatch.type = 'color';
+        swatch.className = 'ff-color-swatch';
+        // Show the effective color (explicit value, else the style-resolved one).
+        swatch.value = cssColorToHex(toCssColor(raw) || toCssColor(styleProp(el, prop) || ''));
+        swatch.title = 'Pick a color';
+        swatch.addEventListener('change', () => write(swatch.value.toUpperCase()));
+        row.appendChild(swatch);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = imageBrush ? `(image) ${imageBrush.getAttribute('ImageSource') ?? ''}` : raw;
+        input.placeholder = 'color, #hex, or {resource}';
+        input.spellcheck = false;
+        input.setAttribute('list', ensureDatalist('ff-dl-xaml-colors', ['Transparent', ...WF_NAMED_COLORS]));
+        input.addEventListener('change', () => {
+            const v = input.value.trim();
+            if (v.startsWith('(image)')) { renderPanel(); return; } // display text, not a value
+            write(v);
+        });
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { input.blur(); }
+            e.stopPropagation();
+        });
+        row.appendChild(input);
+
+        if (prop === 'Background') {
+            const pick = document.createElement('button');
+            pick.type = 'button';
+            pick.className = 'ff-img-btn';
+            pick.textContent = '🖼';
+            pick.title = 'Use an image as the background (imports it into the project and writes an ImageBrush)';
+            pick.addEventListener('click', () => {
+                pendingXamlImage = { el, prop };
+                vscode.postMessage({ type: 'pickImage', xaml: true, prop });
+            });
+            row.appendChild(pick);
+        }
+        if (imageBrush || raw) {
+            const clear = document.createElement('button');
+            clear.type = 'button';
+            clear.className = 'ff-img-btn';
+            clear.textContent = '✕';
+            clear.title = 'Clear this brush';
+            clear.addEventListener('click', () => write(''));
+            row.appendChild(clear);
+        }
+        return row;
+    }
+
+    /** Image.Source row: path text + "…" file picker. */
+    function xamlImagePathRow(el, prop, write) {
+        const row = propRow(prop, el.getAttribute(prop) ?? '', write);
+        const pick = document.createElement('button');
+        pick.type = 'button';
+        pick.className = 'ff-img-btn';
+        pick.textContent = '…';
+        pick.title = 'Import an image (.png, .jpg, .gif, .bmp, .ico) into the project';
+        pick.addEventListener('click', () => {
+            pendingXamlImage = { el, prop };
+            vscode.postMessage({ type: 'pickImage', xaml: true, prop });
+        });
+        row.appendChild(pick);
+        return row;
     }
 
     /** One labelled input row; commits on change (blur/Enter). */

@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { codeBehindPathOf, ensureEventHandler, removeEventHandles } from './codeBehind';
-import { pickAndImportImage, resolveImages, findProjectDir, ImageKey } from './resources';
+import { pickAndImportImage, pickXamlImage, resolveImages, findProjectDir, ImageKey } from './resources';
 import { projectDirOf, setWorkingFolder } from './workingFolder';
 import { escapeRegExp, isCSharpIdentifier, renameCSharpIdentifier } from './csharpText';
 import { isVbIdentifier, parseVbHandles, renameVbIdentifier } from './vbText';
@@ -364,6 +364,21 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 // picked file as a project resource and hand back the C#
                 // expression plus a URI the canvas can render.
                 case 'pickImage': {
+                    // XAML: copy into Resources/, register the <Resource>
+                    // build item, and hand back a document-relative path.
+                    if (msg.xaml) {
+                        const res = await pickXamlImage(document.uri.fsPath);
+                        if (res) {
+                            void panel.webview.postMessage({
+                                type: 'imageSet',
+                                xaml: true,
+                                prop: msg.prop,
+                                rel: res.rel,
+                                uri: String(panel.webview.asWebviewUri(vscode.Uri.file(res.fsPath)))
+                            });
+                        }
+                        break;
+                    }
                     if (/\.designer\.vb$/i.test(document.uri.fsPath)) {
                         // VB projects keep resources in "My Project" with a VB
                         // accessor class this importer does not generate yet.

@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.15.0
+
+**Smarter WPF property grid + real-world rendering fixes** (user request,
+tested against a real production WPF app). The XAML side of the designer
+catches up with the WinForms side:
+
+* **Dropdowns for enums and booleans** — `Visibility`, alignments,
+  `FontWeight`, `TextWrapping`, `ResizeMode`, `IsEnabled`, and every other
+  enum-like property is now a real `<select>` with a `(default)` / `(reset)`
+  entry, so nobody has to guess accepted values. Values that aren't in the
+  list (bindings, resources) stay visible and selectable.
+* **Color picker for brushes** — `Background`, `Foreground`, `BorderBrush`,
+  `Fill`, and `Stroke` rows get a color swatch that opens the native picker
+  (writes clean hex) next to a text box with autocomplete for all named
+  colors; `{StaticResource}` brushes can still be typed, and the swatch
+  previews the style-resolved color.
+* **Image backgrounds** — the `Background` row's new 🖼 button imports a
+  picture (copied to `Resources/`, registered as a `<Resource>` build item)
+  and writes `<Element.Background><ImageBrush …/></Element.Background>`;
+  `Image.Source` gets the same `…` picker. Both render as real images on
+  the canvas now (correct `Stretch` mapping) instead of a placeholder glyph.
+* **Font editing without guesswork** — new `FontFamily` and `FontStyle` rows
+  plus curated suggestion lists for family and size on every element and the
+  Window; the Window also gains `WindowStyle`, `WindowState`,
+  `SizeToContent`, and `Topmost` rows.
+* **Fixed: overlapping text in nested layouts** — `UniformGrid` (the usual
+  card/stat-tile layout) now renders as a true equal-cell grid honoring
+  `Rows`/`Columns`, `Viewbox` renders its child, `Menu`/`ToolBar`/`StatusBar`
+  lay out horizontally, and *unknown* multi-child containers (ItemsControl,
+  custom panels) approximate as a vertical stack instead of piling every
+  child into the same cell — the cause of the garbled, overlapping text when
+  opening real-world projects.
+* The test harness gained a small XML DOM, so the XAML render pipeline now
+  runs under Node tests; new regressions cover UniformGrid layouts, image
+  resolution requests, pack URIs, and binding-valued sources.
+
 ## 0.14.0
 
 **XAML IntelliSense in the text editor** (user request — "avoid Visual Studio

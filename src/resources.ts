@@ -35,9 +35,10 @@ export interface ImportedImage {
     fsPath: string;
 }
 
-/** A reference the webview wants resolved: project resx or local form resx. */
+/** A reference the webview wants resolved: project resx, local form resx,
+ *  or a XAML project-relative image path ('x'). */
 export interface ImageKey {
-    scope: 'p' | 'l';
+    scope: 'p' | 'l' | 'x';
     key: string;
 }
 
@@ -95,6 +96,89 @@ export async function pickAndImportImage(docPath: string, iconOnly: boolean): Pr
     });
     if (!picked?.length) { return undefined; }
     return importResourceFile(docPath, picked[0].fsPath);
+}
+
+/** An image imported for XAML use (Image.Source / ImageBrush.ImageSource). */
+export interface XamlImage {
+    /** Path relative to the XAML document, with forward slashes. */
+    rel: string;
+    /** Absolute path of the imported file. */
+    fsPath: string;
+}
+
+/**
+ * Ask the user for an image and import it for a XAML document: copy into
+ * <project>/Resources and register a <Resource Include> so relative pack
+ * URIs keep working in published builds. No resx involved — WPF references
+ * images by path, not through Properties.Resources.
+ */
+export async function pickXamlImage(docPath: string): Promise<XamlImage | undefined> {
+    const picked = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        openLabel: 'Use Image',
+        filters: IMAGE_FILTERS
+    });
+    if (!picked?.length) { return undefined; }
+    return importXamlImage(docPath, picked[0].fsPath);
+}
+
+export function importXamlImage(docPath: string, src: string): XamlImage | undefined {
+    const projDir = findProjectDir(docPath);
+    if (!projDir) {
+        vscode.window.showWarningMessage('UI Maker: no project file found — images need a project folder to import into.');
+        return undefined;
+    }
+    try {
+        // 1) Copy into <project>/Resources (deduping identical content).
+        const resDir = path.join(projDir, 'Resources');
+        if (!fs.existsSync(resDir)) { fs.mkdirSync(resDir, { recursive: true }); }
+        let destName = path.basename(src);
+        let dest = path.join(resDir, destName);
+        if (path.resolve(path.dirname(src)) === path.resolve(resDir)) {
+            dest = src; // picked from Resources/ itself — reuse in place
+        } else if (fs.existsSync(dest) && !fs.readFileSync(dest).equals(fs.readFileSync(src))) {
+            const ext = path.extname(destName);
+            const stem = path.basename(destName, ext);
+            for (let i = 1; ; i++) {
+                destName = `${stem}${i}${ext}`;
+                dest = path.join(resDir, destName);
+                if (!fs.existsSync(dest) || fs.readFileSync(dest).equals(fs.readFileSync(src))) { break; }
+            }
+            if (!fs.existsSync(dest)) { fs.copyFileSync(src, dest); }
+        } else if (!fs.existsSync(dest)) {
+            fs.copyFileSync(src, dest);
+        }
+
+        // 2) Make sure the project compiles it as a WPF Resource.
+        ensureXamlResourceInclude(projDir, path.relative(projDir, dest));
+
+        const rel = path.relative(path.dirname(docPath), dest).split(path.sep).join('/');
+        return { rel, fsPath: dest };
+    } catch (err) {
+        vscode.window.showWarningMessage(`UI Maker: could not import the image — ${err instanceof Error ? err.message : err}`);
+        return undefined;
+    }
+}
+
+/**
+ * Add <Resource Include="Resources\file.png"/> to the project file unless an
+ * equivalent Resource/Content entry (or a wildcard) already covers it. Both
+ * SDK-style and classic projects need the entry — WPF only packs images
+ * whose build action is Resource.
+ */
+function ensureXamlResourceInclude(projDir: string, relFromProj: string): void {
+    const projFile = fs.readdirSync(projDir).find(f => /\.(cs|vb)proj$/i.test(f));
+    if (!projFile) { return; }
+    const projPath = path.join(projDir, projFile);
+    const xml = fs.readFileSync(projPath, 'utf8');
+    const msbuildRel = relFromProj.split(path.sep).join('\\');
+    const escaped = msbuildRel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`<(Resource|Content)\\s+Include="${escaped}"`, 'i').test(xml)) { return; }
+    if (/<(Resource|Content)\s+Include="Resources\\[^"]*\*/i.test(xml)) { return; } // wildcard covers it
+    const closing = /^[ \t]*<\/Project>/m.exec(xml);
+    if (!closing) { return; }
+    const entry = `    <ItemGroup>\n        <Resource Include="${msbuildRel}" />\n    </ItemGroup>\n`;
+    replaceFileAtomically(projPath, xml.slice(0, closing.index) + entry + xml.slice(closing.index));
 }
 
 /**
@@ -560,6 +644,25 @@ export function resolveImages(docPath: string, keys: ImageKey[]): Map<string, st
                 const rel = e.fileRef.split(';')[0].split('\\').join(path.sep);
                 const abs = path.resolve(path.dirname(file), rel);
                 if (fs.existsSync(abs)) { out.set(`p:${k.key}`, abs); }
+            }
+        }
+    }
+
+    // XAML paths resolve relative to the document, then the project folder.
+    const xamlKeys = keys.filter(k => k.scope === 'x');
+    if (xamlKeys.length) {
+        const projDir = findProjectDir(docPath);
+        const baseDirs = [path.dirname(docPath), ...(projDir ? [projDir] : [])];
+        for (const k of xamlKeys) {
+            const rel = k.key.split('/').join(path.sep);
+            for (const base of baseDirs) {
+                const abs = path.resolve(base, rel);
+                try {
+                    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+                        out.set(`x:${k.key}`, abs);
+                        break;
+                    }
+                } catch { /* unreadable — skip */ }
             }
         }
     }

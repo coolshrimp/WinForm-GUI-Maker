@@ -112,9 +112,14 @@ Open any `.xaml` window in the UI Maker Designer:
   collapsible categories (Accessibility, Appearance, Behavior, Data, Design,
   Focus, Layout, Window Style) with a Categorized / A–Z toggle and a
   description pane at the bottom. Enums and booleans are dropdowns with their
-  defaults shown, colors get a picker + named/system color autocomplete,
-  fonts use the familiar `Segoe UI, 9pt, style=Bold` format, and WinForms
-  `Anchor` is edited with Top/Bottom/Left/Right toggle buttons.
+  defaults shown — **in both WinForms and WPF/XAML** — colors get a swatch
+  that opens the native color picker plus named-color autocomplete, fonts get
+  curated family and size suggestion lists (WinForms keeps the familiar
+  `Segoe UI, 9pt, style=Bold` format), and WinForms `Anchor` is edited with
+  Top/Bottom/Left/Right toggle buttons. WPF brush rows (`Background`,
+  `Foreground`, `BorderBrush`, `Fill`, `Stroke`) accept a color name, hex, or
+  `{StaticResource}` text, and `Background` has a 🖼 button that imports an
+  image and writes an `ImageBrush` — so a picture background is two clicks.
   Explicitly-set values render **bold**, and clearing a value removes it from
   the file — exactly like VS.
 - **Images and icons** — `Image`, `BackgroundImage`, and the form `Icon`
@@ -124,7 +129,10 @@ Open any `.xaml` window in the UI Maker Designer:
   `Resources.Designer.cs`, and referenced as
   `Properties.Resources.name` in the form code. Placement and scaling are
   full VS: `ImageAlign`, `TextImageRelation`, `BackgroundImageLayout`, and
-  PictureBox `SizeMode` — all previewed live on the canvas.
+  PictureBox `SizeMode` — all previewed live on the canvas. WPF gets the
+  same treatment: `Image.Source` has a `…` picker, backgrounds accept an
+  `ImageBrush` via the property grid, imported files are registered as
+  `<Resource>` build items, and both render as real images on the canvas.
 - **Events panel** — type a handler name (or accept the default) and UI Maker sets
   the XAML attribute *and* generates the C# method stub in the `.xaml.cs` code-behind.
 - **Double-click a control** to wire its default event, exactly like classic designers.
@@ -370,7 +378,7 @@ deleted.
 ## Known limitations
 
 - Nested layouts (Grid rows/columns, StackPanel, DockPanel, TabControl,
-  ScrollViewer, …) **render** faithfully, and any element can be selected,
+  UniformGrid, Viewbox, ScrollViewer, …) **render** faithfully, and any element can be selected,
   resized, and edited in the panels — but drag-to-move is only offered for
   Canvas children and absolutely-placed Grid children (`Left`/`Top`
   alignment), because moving a stacked/docked child would rewrite its layout.
