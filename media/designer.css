@@ -1285,3 +1285,27 @@ html, body {
 
     .ff-brand { width: 100%; }
 }
+
+/* ------------------------------------------------ resizable side panels */
+
+/* Drag splitter between each side panel and the canvas. */
+.ff-panel-splitter {
+    flex: 0 0 5px;
+    margin: 0 -2px;          /* visually thin, easy to grab */
+    cursor: col-resize;
+    z-index: 6;
+    background: transparent;
+    transition: background 0.12s ease;
+}
+
+.ff-panel-splitter:hover,
+.ff-panel-splitter:active {
+    background: var(--vscode-focusBorder, #007fd4);
+    opacity: 0.55;
+}
+
+/* A collapsed neighbor makes its splitter inert. */
+#ff-toolbox.ff-collapsed + .ff-panel-splitter,
+.ff-panel-splitter:has(+ #ff-props.ff-collapsed) {
+    pointer-events: none;
+}

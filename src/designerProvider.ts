@@ -527,8 +527,55 @@ export function renameIdentifier(source: string, oldName: string, newName: strin
 /** The 'update' message for a designer document. VB WinForms documents carry
  *  the Handles wiring parsed from the code-behind so the events panel can
  *  show it (the webview never reads other files itself). */
+/** Cache of application-level resource XAML, invalidated by file mtimes. */
+const appResourceCache = new Map<string, { stamp: string; texts: string[] }>();
+
+/**
+ * The XAML texts that define application-wide resources for a document:
+ * App.xaml (any project-root .xaml whose root element is <Application>) plus
+ * one level of <ResourceDictionary Source="…"> merged dictionaries. The
+ * designer webview resolves {StaticResource} brushes and implicit styles from
+ * these so the canvas matches the running app.
+ */
+function appResourcesFor(docPath: string): string[] {
+    if (!/\.xaml$/i.test(docPath)) { return []; }
+    const projDir = findProjectDir(docPath);
+    if (!projDir) { return []; }
+    try {
+        let appPath: string | null = null;
+        for (const f of fs.readdirSync(projDir)) {
+            if (!/\.xaml$/i.test(f)) { continue; }
+            const p = path.join(projDir, f);
+            if (p.toLowerCase() === docPath.toLowerCase()) { continue; }
+            if (/<\s*Application[\s>]/.test(fs.readFileSync(p, 'utf8').slice(0, 2000))) {
+                appPath = p;
+                break;
+            }
+        }
+        if (!appPath) { return []; }
+        const appText = fs.readFileSync(appPath, 'utf8');
+        const files = [appPath];
+        for (const m of appText.matchAll(/<ResourceDictionary\s[^>]*Source="([^"]+)"/g)) {
+            const rel = m[1].replace(/^pack:\/\/[^,]*,,,\//i, '').replace(/^\//, '').split('/').join(path.sep);
+            const abs = path.resolve(projDir, rel);
+            if (fs.existsSync(abs) && !files.includes(abs)) { files.push(abs); }
+        }
+        const stamp = files.map(p => `${p}:${fs.statSync(p).mtimeMs}`).join('|');
+        const cached = appResourceCache.get(docPath);
+        if (cached && cached.stamp === stamp) { return cached.texts; }
+        const texts = files.map(p => fs.readFileSync(p, 'utf8'));
+        appResourceCache.set(docPath, { stamp, texts });
+        return texts;
+    } catch {
+        return [];
+    }
+}
+
 function designerUpdateMessage(document: vscode.TextDocument): Record<string, unknown> {
     const message: Record<string, unknown> = { type: 'update', text: document.getText() };
+    if (/\.xaml$/i.test(document.uri.fsPath)) {
+        message.appResources = appResourcesFor(document.uri.fsPath);
+    }
     if (/\.designer\.vb$/i.test(document.uri.fsPath)) {
         try {
             const codePath = codeBehindPathOf(document.uri.fsPath);

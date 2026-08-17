@@ -151,10 +151,13 @@
         Grid: []
     };
 
-    /** Properties shown for every control, in panel order. */
-    const COMMON_PROPS = ['Width', 'Height', 'Margin', 'HorizontalAlignment', 'VerticalAlignment',
-        'Grid.Row', 'Grid.Column', 'Background', 'Foreground',
-        'FontSize', 'FontFamily', 'FontWeight', 'FontStyle', 'IsEnabled', 'Visibility', 'ToolTip'];
+    /** Properties shown for every control, in panel order (VS parity set). */
+    const COMMON_PROPS = ['Width', 'Height', 'MinWidth', 'MinHeight', 'MaxWidth', 'MaxHeight',
+        'Margin', 'Padding', 'HorizontalAlignment', 'VerticalAlignment',
+        'Grid.Row', 'Grid.Column', 'Grid.RowSpan', 'Grid.ColumnSpan', 'Panel.ZIndex',
+        'Background', 'Foreground', 'BorderBrush', 'BorderThickness', 'Opacity',
+        'FontSize', 'FontFamily', 'FontWeight', 'FontStyle',
+        'Cursor', 'IsEnabled', 'Visibility', 'ToolTip', 'Tag'];
 
     /** Window-level properties/events shown when nothing is selected. */
     const WINDOW_PROPS = ['Title', 'Width', 'Height', 'Background', 'FontSize', 'FontFamily',
@@ -188,7 +191,8 @@
         Topmost: ['True', 'False'],
         FontStyle: ['Normal', 'Italic', 'Oblique'],
         SelectionMode: ['Single', 'Multiple', 'Extended'],
-        DisplayMode: ['Month', 'Year', 'Decade']
+        DisplayMode: ['Month', 'Year', 'Decade'],
+        Cursor: ['Arrow', 'Hand', 'Wait', 'Cross', 'IBeam', 'No', 'SizeAll', 'SizeNS', 'SizeWE', 'Help', 'AppStarting']
     };
 
     /** Brush-typed attributes: swatch + native color picker + named colors. */
@@ -209,8 +213,11 @@
     /** Property-grid categories for XAML attributes (default: Common). */
     const XAML_CATS = {
         Width: 'Layout', Height: 'Layout', Margin: 'Layout', Padding: 'Layout',
+        MinWidth: 'Layout', MinHeight: 'Layout', MaxWidth: 'Layout', MaxHeight: 'Layout',
         HorizontalAlignment: 'Layout', VerticalAlignment: 'Layout',
         'Grid.Row': 'Layout', 'Grid.Column': 'Layout',
+        'Grid.RowSpan': 'Layout', 'Grid.ColumnSpan': 'Layout', 'Panel.ZIndex': 'Layout',
+        Opacity: 'Appearance', Cursor: 'Behavior', Tag: 'Common',
         Background: 'Appearance', Foreground: 'Appearance', FontSize: 'Appearance',
         FontWeight: 'Appearance', FontFamily: 'Appearance', FontStyle: 'Appearance',
         BorderBrush: 'Appearance', BorderThickness: 'Appearance',
@@ -250,7 +257,20 @@
         Topmost: 'Keep the window above all non-topmost windows.',
         Source: 'The image file shown, as a project-relative path.',
         Fill: 'The brush that paints the interior of the shape.',
-        Stroke: 'The brush that paints the outline of the shape.'
+        Stroke: 'The brush that paints the outline of the shape.',
+        Padding: 'Inner spacing between the border and the content: left,top,right,bottom.',
+        MinWidth: 'The minimum width the element may shrink to.',
+        MinHeight: 'The minimum height the element may shrink to.',
+        MaxWidth: 'The maximum width the element may grow to.',
+        MaxHeight: 'The maximum height the element may grow to.',
+        'Grid.RowSpan': 'How many Grid rows this element spans.',
+        'Grid.ColumnSpan': 'How many Grid columns this element spans.',
+        'Panel.ZIndex': 'Stacking order — higher values render on top.',
+        Opacity: '0.0 (transparent) through 1.0 (opaque).',
+        Cursor: 'The mouse cursor shown while over the element.',
+        Tag: 'Arbitrary data slot — not used by WPF itself.',
+        BorderBrush: 'The brush that paints the border (with BorderThickness).',
+        BorderThickness: 'Border width per edge: uniform or left,top,right,bottom.'
     };
 
     // ------------------------------------------------------------------ state
@@ -267,7 +287,8 @@
     let selected = null;        // selected XML element / WinForms record / null
     let selectedPath = '';      // index path of the selection (survives re-parse)
     let visuals = [];           // [{ el, div }] rendered this pass
-    let styles = { byKey: new Map(), byType: new Map() }; // resolved <Style> resources
+    let styles = { byKey: new Map(), byType: new Map(), resources: new Map() }; // <Style> + brush resources
+    let appResourceTexts = [];  // App.xaml / merged dictionaries sent by the host
     let wfControls = new Map(); // WinForms mode: name -> control record
     let wfForm = null;          // WinForms mode: the form itself
     let wfStyle = { thisPrefix: true, qualified: true }; // code dialect of the file
@@ -307,7 +328,13 @@
             const handlesChanged = Array.isArray(msg.vbHandles)
                 && JSON.stringify(msg.vbHandles) !== JSON.stringify(wfVbHandles);
             if (Array.isArray(msg.vbHandles)) { wfVbHandles = msg.vbHandles; }
-            if (msg.text === xamlText && !handlesChanged) { return; } // echo of our own edit
+            // Application-level resources (App.xaml + merged dictionaries):
+            // when they change, styles must be re-collected even if this
+            // document's text is unchanged.
+            const appChanged = Array.isArray(msg.appResources)
+                && JSON.stringify(msg.appResources) !== JSON.stringify(appResourceTexts);
+            if (Array.isArray(msg.appResources)) { appResourceTexts = msg.appResources; }
+            if (msg.text === xamlText && !handlesChanged && !appChanged) { return; } // echo of our own edit
             xamlText = msg.text;
             parseAndRender();
         } else if (msg.type === 'editResult') {
@@ -564,8 +591,20 @@
     // Enough to preview styled TextBlocks/Borders the way VS renders them.
 
     function collectStyles() {
-        styles = { byKey: new Map(), byType: new Map() };
+        styles = { byKey: new Map(), byType: new Map(), resources: new Map() };
         if (!windowEl) { return; }
+        // Application-level resources first, so the document's own definitions
+        // override them (same precedence as WPF resource lookup).
+        for (const text of appResourceTexts) {
+            const doc = new DOMParser().parseFromString(text, 'text/xml');
+            if (doc.getElementsByTagName('parsererror').length) { continue; }
+            const root = doc.documentElement;
+            if (!root) { continue; }
+            if (root.localName === 'ResourceDictionary') { collectStylesFrom(root); continue; }
+            for (const child of root.children) {
+                if (child.localName.endsWith('.Resources')) { collectStylesFrom(child); }
+            }
+        }
         for (const child of windowEl.children) {
             if (!child.localName.endsWith('.Resources')) { continue; }
             collectStylesFrom(child);
@@ -575,27 +614,98 @@
     function collectStylesFrom(container) {
         for (const node of container.children) {
             if (node.localName === 'ResourceDictionary') { collectStylesFrom(node); continue; }
+            const key = node.getAttributeNS(X_NS, 'Key') || node.getAttribute('x:Key');
+
+            // Brush/color resources referenced via {StaticResource}.
+            if (key && node.localName === 'SolidColorBrush') {
+                const css = toCssColor(node.getAttribute('Color') || collapse(node.textContent));
+                if (css) { styles.resources.set(key, css); }
+                continue;
+            }
+            if (key && node.localName === 'Color') {
+                const css = toCssColor(collapse(node.textContent));
+                if (css) { styles.resources.set(key, css); }
+                continue;
+            }
+            if (key && (node.localName === 'LinearGradientBrush' || node.localName === 'RadialGradientBrush')) {
+                const css = gradientCss(node);
+                if (css) { styles.resources.set(key, css); }
+                continue;
+            }
+
             if (node.localName !== 'Style') { continue; }
             const setters = {};
             for (const s of node.children) {
                 if (s.localName !== 'Setter') { continue; }
                 const p = (s.getAttribute('Property') || '').split('.').pop();
                 const v = s.getAttribute('Value');
-                if (p && v !== null && !v.includes('{')) { setters[p] = v; }
+                if (p === 'Template') {
+                    // Approximate templated chrome: the template's first
+                    // <Border> supplies corner rounding when no explicit
+                    // CornerRadius setter exists.
+                    const border = findDescendantElement(s, 'Border');
+                    const cr = border?.getAttribute('CornerRadius');
+                    if (cr && !cr.includes('{') && !('CornerRadius' in setters)) { setters.CornerRadius = cr; }
+                    continue;
+                }
+                if (p && v !== null) { setters[p] = v; }
             }
             const basedOn = resourceKey(node.getAttribute('BasedOn'));
             const entry = { setters, basedOn };
-            const key = node.getAttributeNS(X_NS, 'Key') || node.getAttribute('x:Key');
             const target = (node.getAttribute('TargetType') || '').split(':').pop();
             if (key) { styles.byKey.set(key, entry); }
             else if (target) { styles.byType.set(target, entry); }
         }
     }
 
-    /** Extract KEY from "{StaticResource KEY}" / "{DynamicResource KEY}". */
+    /** First descendant element with the given localName (depth-first). */
+    function findDescendantElement(node, name) {
+        for (const c of node.children) {
+            if (c.localName === name) { return c; }
+            const d = findDescendantElement(c, name);
+            if (d) { return d; }
+        }
+        return null;
+    }
+
+    /** CSS gradient for a Linear/RadialGradientBrush resource. */
+    function gradientCss(node) {
+        const stops = [];
+        const walk = n => {
+            for (const c of n.children) {
+                if (c.localName === 'GradientStop') {
+                    const color = toCssColor(c.getAttribute('Color') || '');
+                    if (color) { stops.push({ color, offset: num(c.getAttribute('Offset'), stops.length ? 1 : 0) }); }
+                } else { walk(c); }
+            }
+        };
+        walk(node);
+        if (!stops.length) { return ''; }
+        stops.sort((a, b) => a.offset - b.offset);
+        const list = stops.map(s => `${s.color} ${Math.round(s.offset * 100)}%`).join(', ');
+        if (node.localName === 'RadialGradientBrush') { return `radial-gradient(circle, ${list})`; }
+        // CSS angles: 0deg points up, clockwise; WPF y grows downward.
+        const sp = (node.getAttribute('StartPoint') || '0,0').split(',').map(Number);
+        const ep = (node.getAttribute('EndPoint') || '1,1').split(',').map(Number);
+        const deg = Math.round(Math.atan2((ep[0] ?? 1) - (sp[0] ?? 0), -((ep[1] ?? 1) - (sp[1] ?? 0))) * 180 / Math.PI);
+        return `linear-gradient(${deg}deg, ${list})`;
+    }
+
+    /** Extract KEY from "{StaticResource KEY}" / "{DynamicResource KEY}" —
+     *  including nested forms like "{StaticResource {x:Type Button}}". */
     function resourceKey(v) {
-        const m = /\{\s*(?:StaticResource|DynamicResource)\s+([^}]+?)\s*\}/.exec(v || '');
+        const m = /^\{\s*(?:StaticResource|DynamicResource)\s+([\s\S]+?)\s*\}$/.exec((v || '').trim());
         return m ? m[1] : null;
+    }
+
+    /** XAML brush value -> CSS: resolves {StaticResource} colors/gradients,
+     *  then plain colors. Bindings/template bindings yield ''. */
+    function resolveBrush(v) {
+        if (!v) { return ''; }
+        const key = resourceKey(v);
+        if (key) { return styles.resources.get(key) ?? ''; }
+        if (v.includes('{')) { return ''; }
+        return toCssColor(v);
     }
 
     /**
@@ -616,7 +726,12 @@
             if (name in entry.setters) { return entry.setters[name]; }
             if (!entry.basedOn || seen.has(entry.basedOn)) { break; }
             seen.add(entry.basedOn);
-            entry = styles.byKey.get(entry.basedOn) ?? null;
+            // BasedOn="{StaticResource {x:Type Button}}" chains to the
+            // implicit style for that type; plain keys chain by name.
+            const typeRef = /^\{\s*x:Type\s+(?:\w+:)?(\w+)\s*\}$/.exec(entry.basedOn);
+            entry = typeRef
+                ? (styles.byType.get(typeRef[1]) ?? null)
+                : (styles.byKey.get(entry.basedOn) ?? null);
         }
         return null;
     }
@@ -647,9 +762,14 @@
         surfaceEl.style.height = `${winH - 32}px`; // minus mock title bar
         windowBox.style.transform = `scale(${zoom})`;
 
-        const bg = toCssColor(windowEl.getAttribute('Background')) || '#ffffff';
+        // Window chrome follows the effective style (App.xaml implicit Window
+        // style included) so themed apps preview like they run.
+        const bg = resolveBrush(styleProp(windowEl, 'Background')) || '#ffffff';
         surfaceEl.style.background = bg;
         surfaceEl.style.setProperty('--ff-surface-bg', bg);
+        surfaceEl.style.color = resolveBrush(styleProp(windowEl, 'Foreground')) || '';
+        const winFf = styleProp(windowEl, 'FontFamily');
+        surfaceEl.style.fontFamily = winFf && !winFf.includes('{') ? winFf : '';
 
         // Grid dots follow the snap size.
         surfaceEl.style.backgroundImage = config.snap
@@ -712,8 +832,8 @@
 
     /** Shared visual attributes (colors, fonts, visibility, enabled state). */
     function applyVisual(div, el) {
-        const bg = toCssColor(styleProp(el, 'Background'));
-        const fg = toCssColor(styleProp(el, 'Foreground'));
+        const bg = resolveBrush(styleProp(el, 'Background'));
+        const fg = resolveBrush(styleProp(el, 'Foreground'));
         if (bg) { div.style.background = bg; }
         if (fg) { div.style.color = fg; }
         // <Element.Background><ImageBrush ImageSource="…"/></Element.Background>
@@ -730,7 +850,7 @@
         const fs = num(styleProp(el, 'FontSize'), NaN);
         if (Number.isFinite(fs)) { div.style.fontSize = `${fs}px`; }
         const fw = styleProp(el, 'FontWeight');
-        if (fw) { div.style.fontWeight = fw.toLowerCase() === 'bold' ? 'bold' : fw; }
+        if (fw) { div.style.fontWeight = cssFontWeight(fw); }
         const fst = styleProp(el, 'FontStyle');
         if (fst && fst.toLowerCase() === 'italic') { div.style.fontStyle = 'italic'; }
         const ff = styleProp(el, 'FontFamily');
@@ -1193,11 +1313,51 @@
                 inner.classList.add('ff-look-unknown');
                 inner.textContent = type;
         }
+
+        // Style-aware chrome: implicit/keyed styles (App.xaml included)
+        // restyle the default look so themed apps preview like they run.
+        const sBg = resolveBrush(styleProp(el, 'Background'));
+        if (sBg) { inner.style.background = sBg; }
+        const sFg = resolveBrush(styleProp(el, 'Foreground'));
+        if (sFg) { inner.style.color = sFg; }
+        const sBb = resolveBrush(styleProp(el, 'BorderBrush'));
+        if (sBb) { inner.style.borderColor = sBb; inner.style.borderStyle = 'solid'; }
+        const sBt = styleProp(el, 'BorderThickness');
+        if (sBt && !String(sBt).includes('{')) {
+            const t = parseMargin(sBt);
+            inner.style.borderStyle = 'solid';
+            inner.style.borderWidth = `${t.t}px ${t.r}px ${t.b}px ${t.l}px`;
+        }
+        const sCr = styleProp(el, 'CornerRadius'); // real or template-derived
+        if (sCr && !String(sCr).includes('{')) {
+            inner.style.borderRadius = `${parseFloat(sCr) || 0}px`;
+        }
+        const sPad = styleProp(el, 'Padding');
+        if (sPad && !String(sPad).includes('{') && type !== 'Label') {
+            const p = parseMargin(sPad);
+            inner.style.padding = `${p.t}px ${p.r}px ${p.b}px ${p.l}px`;
+        }
+        const hca = styleProp(el, 'HorizontalContentAlignment');
+        if (hca) {
+            inner.style.justifyContent =
+                hca === 'Left' ? 'flex-start' : hca === 'Right' ? 'flex-end' : 'center';
+        }
         return inner;
     }
 
+    /** WPF font weight names -> CSS numeric weights. */
+    function cssFontWeight(w) {
+        const map = {
+            thin: 100, extralight: 200, ultralight: 200, light: 300,
+            normal: 400, regular: 400, medium: 500,
+            semibold: 600, demibold: 600, bold: 700,
+            extrabold: 800, ultrabold: 800, black: 900, heavy: 900
+        };
+        return map[String(w).toLowerCase()] ?? w;
+    }
+
     function applyBorder(target, el) {
-        const brush = toCssColor(styleProp(el, 'BorderBrush')) || '#808080';
+        const brush = resolveBrush(styleProp(el, 'BorderBrush')) || '#808080';
         const t = parseMargin(styleProp(el, 'BorderThickness') || '1');
         target.style.borderStyle = 'solid';
         target.style.borderColor = brush;
@@ -2112,8 +2272,9 @@
         const swatch = document.createElement('input');
         swatch.type = 'color';
         swatch.className = 'ff-color-swatch';
-        // Show the effective color (explicit value, else the style-resolved one).
-        swatch.value = cssColorToHex(toCssColor(raw) || toCssColor(styleProp(el, prop) || ''));
+        // Show the effective color: explicit value, {StaticResource} brushes
+        // resolved through App.xaml, else the style-resolved fallback.
+        swatch.value = cssColorToHex(resolveBrush(raw) || resolveBrush(styleProp(el, prop) || ''));
         swatch.title = 'Pick a color';
         swatch.addEventListener('change', () => write(swatch.value.toUpperCase()));
         row.appendChild(swatch);
@@ -2123,7 +2284,7 @@
         input.value = imageBrush ? `(image) ${imageBrush.getAttribute('ImageSource') ?? ''}` : raw;
         input.placeholder = 'color, #hex, or {resource}';
         input.spellcheck = false;
-        input.setAttribute('list', ensureDatalist('ff-dl-xaml-colors', ['Transparent', ...WF_NAMED_COLORS]));
+        input.setAttribute('list', brushDatalist());
         input.addEventListener('change', () => {
             const v = input.value.trim();
             if (v.startsWith('(image)')) { renderPanel(); return; } // display text, not a value
@@ -2157,6 +2318,31 @@
             row.appendChild(clear);
         }
         return row;
+    }
+
+    /**
+     * Datalist for brush rows, rebuilt on every use: the project's own
+     * {StaticResource …} brush keys first, then the named colors.
+     */
+    function brushDatalist() {
+        const id = 'ff-dl-xaml-brushes';
+        let dl = document.getElementById(id);
+        if (!dl || dl.tagName !== 'DATALIST') {
+            dl = document.createElement('datalist');
+            dl.id = id;
+            document.body.appendChild(dl);
+        }
+        dl.innerHTML = '';
+        const values = [
+            ...[...styles.resources.keys()].map(k => `{StaticResource ${k}}`),
+            'Transparent', ...WF_NAMED_COLORS
+        ];
+        dl.append(...values.map(v => {
+            const o = document.createElement('option');
+            o.value = v;
+            return o;
+        }));
+        return id;
     }
 
     /** Image.Source row: path text + "…" file picker. */
@@ -3080,6 +3266,53 @@
         const saved = (vscode.getState() || {}).collapsedPanels;
         if (saved && saved[panelId]) { setPanelCollapsed(panel, btn, true); }
     }
+
+    // Resizable side panels: a drag splitter sits between each panel and the
+    // canvas. Widths persist in the webview state (like the collapse choice).
+    function makePanelResizable(panelId, edge) {
+        const panel = $(panelId);
+        const main = $('ff-main');
+        if (!panel || !main || !panel.parentNode) { return; }
+
+        const savedW = ((vscode.getState() || {}).panelWidths || {})[panelId];
+        if (savedW) { panel.style.flexBasis = `${Math.max(120, Math.min(600, savedW))}px`; }
+
+        const grip = document.createElement('div');
+        grip.className = 'ff-panel-splitter';
+        grip.title = 'Drag to resize';
+        // The splitter sits on the canvas side of the panel.
+        if (edge === 'right') {
+            panel.parentNode.insertBefore(grip, panel.nextSibling);
+        } else {
+            panel.parentNode.insertBefore(grip, panel);
+        }
+
+        grip.addEventListener('mousedown', e => {
+            if (panel.classList.contains('ff-collapsed')) { return; }
+            e.preventDefault();
+            const startX = e.clientX;
+            const startW = panel.getBoundingClientRect().width;
+            document.body.style.cursor = 'col-resize';
+            const move = ev => {
+                const dx = ev.clientX - startX;
+                const w = Math.max(120, Math.min(600, edge === 'right' ? startW + dx : startW - dx));
+                panel.style.flexBasis = `${w}px`;
+            };
+            const up = () => {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', up);
+                document.body.style.cursor = '';
+                const state = vscode.getState() || {};
+                const panelWidths = state.panelWidths || {};
+                panelWidths[panelId] = Math.round(panel.getBoundingClientRect().width);
+                vscode.setState({ ...state, panelWidths });
+            };
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        });
+    }
+    makePanelResizable('ff-toolbox', 'right');
+    makePanelResizable('ff-props', 'left');
 
     // Property grid sort mode: categorized (like VS) or flat alphabetical.
     const sortCatBtn = $('ff-sort-cat');
@@ -6088,6 +6321,20 @@
         globalThis.__uimakerTest = {
             setDoc(name, text) { config.docName = name; xamlText = text; parseAndRender(); },
             setVbHandles(entries) { wfVbHandles = entries; },
+            setAppResources(texts) {
+                appResourceTexts = texts;
+                if (docMode === 'xaml' && xamlText) { parseAndRender(); }
+            },
+            /** Resolved CSS brush for an element path ('' = window) + property. */
+            probeStyle(pathStr, prop) {
+                const el = pathStr === '' ? windowEl : elAtPath(pathStr);
+                return el ? resolveBrush(styleProp(el, prop)) : null;
+            },
+            /** Raw effective style value (post-Style-chain, pre-brush-resolve). */
+            probeProp(pathStr, prop) {
+                const el = pathStr === '' ? windowEl : elAtPath(pathStr);
+                return el ? styleProp(el, prop) : null;
+            },
             get lang() { return wfLang; },
             get text() { return xamlText; },
             get controls() { return wfControls; },

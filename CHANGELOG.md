@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.16.0
+
+**The canvas now matches your running app** (user request: "the designer
+should match the runtime"). The designer reads your project's application
+resources instead of falling back to plain gray:
+
+* **App.xaml awareness** — the extension host finds the project's App.xaml
+  (plus one level of merged `ResourceDictionary Source="…"` files) and hands
+  it to the designer. `{StaticResource}` brushes now resolve everywhere:
+  window background, control backgrounds/foregrounds, borders, shapes, and
+  the property-grid color swatches.
+* **Implicit styles & BasedOn chains** — `<Style TargetType="Button">`
+  restyles every button on the canvas; keyed styles chain through
+  `BasedOn="{StaticResource {x:Type Button}}"` correctly, so themed apps
+  (nav buttons, card borders, dark text boxes) preview like they run.
+  Setter values that reference resources are no longer skipped, style
+  `Padding`/`Margin`/`FontWeight` apply, and WPF weight names (SemiBold …)
+  map to real CSS weights.
+* **Templates & gradients, approximated** — a `ControlTemplate`'s first
+  `<Border CornerRadius>` rounds the control's corners, and
+  Linear/RadialGradientBrush resources render as CSS gradients with correct
+  angles and stops.
+* **Resource-aware brush editing** — brush rows in the property grid now
+  autocomplete your own `{StaticResource …}` keys ahead of the named colors,
+  and the swatch shows the resolved resource color.
+* **Resizable side panels** — drag the splitter between the Toolbox /
+  Properties panels and the canvas; widths persist per editor session,
+  alongside the existing collapse chevrons.
+* **More VS-parity property rows** — Padding, Min/Max Width/Height,
+  Grid.RowSpan/ColumnSpan, Panel.ZIndex, BorderBrush, BorderThickness,
+  Opacity, Cursor (dropdown), and Tag on every element.
+* Window/app resource precedence follows WPF (the document's own resources
+  override App.xaml), and new regression tests cover the resolution chain,
+  gradients, template corners, and overrides.
+
 ## 0.15.0
 
 **Smarter WPF property grid + real-world rendering fixes** (user request,
