@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.19.4
+
+More visual pickers (user request):
+
+* **Cursor dropdowns preview the real cursor** — the Cursor row (WPF) and
+  the WinForms Cursors row are now editable combos where hovering each
+  option shows the actual cursor (Hand, IBeam, Wait, the resize arrows, …)
+  right on the list item.
+* **Directional glyphs on enum options** — alignment, dock, orientation,
+  and visibility dropdowns in both panels prefix each option with a small
+  glyph (↖ TopLeft, ← Left, ⛶ Fill, ⊘ Collapsed, …) for at-a-glance
+  selection; the written value is unchanged.
+
 ## 0.19.3
 
 Zoom ergonomics (user request): clicking the **Zoom** word in the toolbar

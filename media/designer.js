@@ -2250,6 +2250,7 @@
                 const r = document.createElement('div');
                 r.className = 'ff-combo-item';
                 r.innerHTML = it.html;
+                if (it.cursor) { r.style.cursor = it.cursor; } // live preview on hover
                 r.addEventListener('mousedown', e => { e.preventDefault(); apply(it.value); });
                 pop.appendChild(r);
             }
@@ -2279,6 +2280,41 @@
             fill(input.value.trim().toLowerCase());
         });
         input.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); } });
+    }
+
+    /** WPF/WinForms cursor names -> CSS cursors (hover previews the real one). */
+    const CURSOR_CSS = {
+        Default: 'default', Arrow: 'default', AppStarting: 'progress',
+        Cross: 'crosshair', Hand: 'pointer', Help: 'help',
+        HSplit: 'row-resize', VSplit: 'col-resize', IBeam: 'text',
+        No: 'not-allowed', SizeAll: 'move', SizeNESW: 'nesw-resize',
+        SizeNS: 'ns-resize', SizeNWSE: 'nwse-resize', SizeWE: 'ew-resize',
+        UpArrow: 'default', Wait: 'wait', WaitCursor: 'wait',
+        PanEast: 'e-resize', PanWest: 'w-resize', PanNorth: 'n-resize', PanSouth: 's-resize'
+    };
+
+    /** Directional/state glyphs shown before enum values in dropdowns. */
+    const ENUM_GLYPHS = {
+        HorizontalAlignment: { Left: '←', Center: '↔', Right: '→', Stretch: '⇿' },
+        VerticalAlignment: { Top: '↑', Center: '↕', Bottom: '↓', Stretch: '⇳' },
+        TextAlignment: { Left: '←', Center: '↔', Right: '→', Justify: '☰' },
+        Orientation: { Horizontal: '↔', Vertical: '↕' },
+        Visibility: { Visible: '●', Hidden: '◌', Collapsed: '⊘' },
+        Dock: { Left: '←', Top: '↑', Right: '→', Bottom: '↓' },
+        DockStyle: { None: '·', Top: '↑', Bottom: '↓', Left: '←', Right: '→', Fill: '⛶' },
+        ContentAlignment: {
+            TopLeft: '↖', TopCenter: '↑', TopRight: '↗',
+            MiddleLeft: '←', MiddleCenter: '•', MiddleRight: '→',
+            BottomLeft: '↙', BottomCenter: '↓', BottomRight: '↘'
+        },
+        LeftRightAlignment: { Left: '←', Right: '→' },
+        HorizontalAlignmentWf: { Left: '←', Center: '↔', Right: '→' }
+    };
+
+    /** "↖  Value" option label when a glyph exists (value itself unchanged). */
+    function enumOptionLabel(enumName, value) {
+        const g = ENUM_GLYPHS[enumName]?.[value];
+        return g ? `${g}  ${value}` : value;
     }
 
     /** Swatch + name item HTML for a color choice. */
@@ -2370,7 +2406,7 @@
             commit();
         };
         if (XAML_BRUSH_PROPS.has(prop)) { return xamlBrushRow(el, prop, write); }
-        if (['FontSize', 'FontFamily', 'FontWeight', 'FontStyle'].includes(prop)) {
+        if (['FontSize', 'FontFamily', 'FontWeight', 'FontStyle', 'Cursor'].includes(prop)) {
             return xamlFontRow(el, prop, write);
         }
         if (ENUM_VALUES[prop]) { return xamlEnumRow(el, prop, write); }
@@ -2398,7 +2434,7 @@
         for (const v of options) {
             const opt = document.createElement('option');
             opt.value = v;
-            opt.textContent = v;
+            opt.textContent = enumOptionLabel(prop, v);
             if (v === raw) { opt.selected = true; }
             sel.appendChild(opt);
         }
@@ -2515,6 +2551,11 @@
             FontStyle: () => ENUM_VALUES.FontStyle.map(s => ({
                 value: s,
                 html: `<span style="font-style:${s.toLowerCase() === 'normal' ? 'normal' : s.toLowerCase()}">${s}</span>`
+            })),
+            Cursor: () => ENUM_VALUES.Cursor.map(c => ({
+                value: c,
+                cursor: CURSOR_CSS[c] ?? 'default',
+                html: `${escapeHtml(c)}<span class="ff-combo-muted">hover previews</span>`
             }))
         };
         attachCombo(row, input, items[prop]);
@@ -6376,6 +6417,32 @@
             return { label: prop, cat: def.cat, node: row };
         }
 
+        if (def.kind === 'enum' && def.enum === 'Cursors') {
+            // Editable cursor combo — hovering an option previews the cursor.
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = isSet ? String(display) : '';
+            input.placeholder = def.def ? `(default: ${def.def})` : '(default)';
+            input.spellcheck = false;
+            input.addEventListener('change', () => {
+                const v = input.value.trim();
+                if (v === '') { remove(); return; }
+                const code = wfSerialize(def, v);
+                if (code !== null) { write(code); } else { renderPanel(); }
+            });
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { input.blur(); }
+                e.stopPropagation();
+            });
+            row.appendChild(input);
+            attachCombo(row, input, () => (WF_ENUM_VALUES.Cursors ?? []).map(c => ({
+                value: c,
+                cursor: CURSOR_CSS[c] ?? 'default',
+                html: `${escapeHtml(c)}<span class="ff-combo-muted">hover previews</span>`
+            })));
+            return { label: prop, cat: def.cat, node: row };
+        }
+
         if (def.kind === 'bool' || def.kind === 'enum' || def.kind === 'ref') {
             const values = def.kind === 'bool' ? ['True', 'False']
                 : def.kind === 'ref' ? [...wfControls.values()].filter(c => c.type === (def.refType ?? 'Button')).map(c => c.name)
@@ -6387,7 +6454,8 @@
             sel.appendChild(reset);
             for (const v of values) {
                 const opt = document.createElement('option');
-                opt.value = opt.textContent = v;
+                opt.value = v;
+                opt.textContent = def.kind === 'enum' ? enumOptionLabel(def.enum, v) : v;
                 sel.appendChild(opt);
             }
             sel.value = isSet && values.includes(display) ? display : '';
