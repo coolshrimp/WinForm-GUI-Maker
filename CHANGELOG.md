@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.1
+
+Theme-preview polish after testing 0.16.0 against a real dark-themed app:
+
+* **Tab strip and tab content blend with the app theme** — the TabControl
+  header row and content area no longer use hardcoded white/light chrome;
+  they draw with translucent neutral tones over whatever background the
+  window/style provides, so dark apps stay dark in the designer.
+* **No phantom borders** — `<Border>` elements without a `BorderThickness`
+  no longer show the designer's old 1px gray outline (WPF's real default is
+  0), so cards and status boxes match the running app exactly.
+
 ## 0.16.0
 
 **The canvas now matches your running app** (user request: "the designer

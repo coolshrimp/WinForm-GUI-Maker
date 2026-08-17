@@ -587,16 +587,17 @@ html, body {
 
 .ff-tab-head {
     padding: 3px 12px;
-    background: #f0f0f0;
-    border: 1px solid #d9d9d9;
+    background: rgba(127, 127, 127, 0.16);
+    border: 1px solid rgba(127, 127, 127, 0.35);
     border-bottom: none;
+    color: inherit;
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
 }
 
 .ff-tab-head.active {
-    background: #fff;
+    background: rgba(127, 127, 127, 0.3);
     position: relative;
     top: 1px;
     border-top: 2px solid #0078d4;
@@ -606,8 +607,8 @@ html, body {
 .ff-tab-content {
     flex: 1 1 auto;
     min-height: 0;
-    border: 1px solid #d9d9d9;
-    background: #fff;
+    border: 1px solid rgba(127, 127, 127, 0.28);
+    background: transparent;
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     grid-template-columns: minmax(0, 1fr);

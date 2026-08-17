@@ -1358,7 +1358,9 @@
 
     function applyBorder(target, el) {
         const brush = resolveBrush(styleProp(el, 'BorderBrush')) || '#808080';
-        const t = parseMargin(styleProp(el, 'BorderThickness') || '1');
+        // WPF's default BorderThickness is 0 — a <Border> with only a
+        // Background/CornerRadius draws no outline at runtime.
+        const t = parseMargin(styleProp(el, 'BorderThickness') || '0');
         target.style.borderStyle = 'solid';
         target.style.borderColor = brush;
         target.style.borderWidth = `${t.t}px ${t.r}px ${t.b}px ${t.l}px`;
