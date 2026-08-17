@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.19.1
+
+Zoom + text-metric fixes from live testing:
+
+* **Component tray follows the zoom** — the canvas scales with
+  `transform: scale`, which reserves no layout space, so zooming in made
+  the window overlap (and hide) the SelectFolder/SaveFile tray beneath it,
+  and zooming out left a dead gap. The window now adds compensating margins
+  matching its scaled size, so the tray docks correctly at every zoom level.
+* **AutoSize captions hug their text** — autosized labels/checkboxes use
+  max-content width (no phantom right padding) with slight negative letter
+  tracking to bring browser text widths in line with GDI's, so captions no
+  longer run into the control sitting to their right.
+
 ## 0.19.0
 
 **Rich pickers in the property grid** (user request). Native dropdowns can't

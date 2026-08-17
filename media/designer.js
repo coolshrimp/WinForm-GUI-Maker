@@ -813,8 +813,22 @@
             surfaceEl.appendChild(renderElement(contentRoot, 'cell'));
         }
 
+        applyZoomLayout();
         drawSelection();
         renderPanel();
+    }
+
+    /**
+     * transform:scale is visual-only — it reserves no layout space, so at
+     * >100% the window overlapped whatever follows it (the component tray)
+     * and at <100% left a dead gap. Compensating margins keep the flow
+     * matching the scaled size.
+     */
+    function applyZoomLayout() {
+        const w = windowBox.offsetWidth || 0;
+        const h = windowBox.offsetHeight || 0;
+        windowBox.style.marginRight = `${Math.round(w * (zoom - 1))}px`;
+        windowBox.style.marginBottom = `${Math.round(h * (zoom - 1))}px`;
     }
 
     /**
@@ -4276,6 +4290,7 @@
         }
 
         wfRenderTray();
+        applyZoomLayout();
         drawSelection();
         drawTabOrderBadges();
         renderPanel();
@@ -4363,7 +4378,7 @@
             : autoSizeDefault;
         if (autoSize && !dockRect
             && ['Label', 'LinkLabel', 'CheckBox', 'RadioButton'].includes(ctrl.type)) {
-            div.style.width = 'auto';
+            div.style.width = 'max-content'; // hug the text — no phantom right padding
             div.style.height = 'auto';
             div.style.minWidth = `${Math.min(size.w, 20)}px`;
             div.style.minHeight = `${size.h}px`;

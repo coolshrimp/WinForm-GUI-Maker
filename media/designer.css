@@ -1570,3 +1570,11 @@ html, body {
     background-size: 8px 8px;
     background-position: 0 0, 4px 4px;
 }
+
+/* AutoSize text hugging: width follows the text exactly (no phantom right
+ * padding), and slight negative tracking narrows browser text toward GDI's
+ * metrics so captions stop running into neighboring controls. */
+.ff-wf-autosize {
+    width: max-content;
+    letter-spacing: -0.2px;
+}
