@@ -379,13 +379,6 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                         }
                         break;
                     }
-                    if (/\.designer\.vb$/i.test(document.uri.fsPath)) {
-                        // VB projects keep resources in "My Project" with a VB
-                        // accessor class this importer does not generate yet.
-                        void vscode.window.showInformationMessage(
-                            'UI Maker: importing images into Visual Basic projects is not supported yet — add the image in Visual Studio (My.Resources); existing images render fine.');
-                        break;
-                    }
                     const res = await pickAndImportImage(document.uri.fsPath, !!msg.iconOnly);
                     if (res) {
                         void panel.webview.postMessage({

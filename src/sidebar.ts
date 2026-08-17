@@ -21,6 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DotnetTools } from './dotnetTools';
 import { folderTypeLabel } from './projectInfo';
+import { revealFolder } from './installer';
 import {
     EXCLUDE_GLOB, getWorkingFolder, inWorkspace, listFilesUnder,
     onDidChangeWorkingFolder, pickWorkingFolder, setWorkingFolder, workspaceProjectDirs
@@ -336,6 +337,7 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
                 ? new SidebarItem('Stop Debugging', { icon: 'debug-stop', iconColor: 'charts.red', command: 'uimaker.debugToggle', description: 'debugging', tooltip: 'The debugger is attached — click to stop it' })
                 : new SidebarItem('Debug App', { icon: 'debug-alt', iconColor: 'charts.green', command: 'uimaker.debugToggle', tooltip: 'Build and launch under the debugger' }),
             new SidebarItem('Build Release (Publish)', { icon: 'package', command: 'uimaker.release', tooltip: 'Publish a Release build (honors the single .exe settings — see UI Maker settings)' }),
+            new SidebarItem('Create Installer', { icon: 'package', iconColor: 'charts.purple', command: 'uimaker.createInstaller', tooltip: 'Package the publish output into a Windows installer (Inno Setup) — customizable, with remembered settings' }),
             new SidebarItem('Project Properties', { icon: 'gear', command: 'uimaker.projectProperties', tooltip: 'Visual Studio-style project properties — output type, target framework, assembly name, namespace, icon, manifest, version info' }),
             new SidebarItem('NuGet Packages', { icon: 'archive', command: 'uimaker.nugetPackages', tooltip: 'Browse, install, update, and remove NuGet packages for this project (nuget.org)' }),
             new SidebarItem('App Settings', { icon: 'settings-gear', command: 'uimaker.appSettings', tooltip: 'Define the settings your app remembers (Properties.Settings) — names, types, User/Application scope, defaults' }),
@@ -473,10 +475,12 @@ export function registerSidebar(context: vscode.ExtensionContext, dotnet: Dotnet
         }),
 
         // Open the project folder in the OS file manager (Windows Explorer).
-        vscode.commands.registerCommand('uimaker.recentRevealFolder', async (item: unknown) => {
+        vscode.commands.registerCommand('uimaker.recentRevealFolder', (item: unknown) => {
             const folder = (item as SidebarItem)?.projectPath;
             if (!folder || !fs.existsSync(folder)) { return; }
-            await vscode.env.openExternal(vscode.Uri.file(folder));
+            // openExternal misroutes folder URIs through app associations on
+            // Windows ("error opening an external program", 0x2).
+            revealFolder(folder);
         }),
 
         vscode.commands.registerCommand('uimaker.recentRemove', (item: unknown) => {

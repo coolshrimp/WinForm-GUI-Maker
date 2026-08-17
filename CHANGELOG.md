@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.20.0
+
+**Create an Installer + full Visual Basic parity** (user requests):
+
+* **Create Installer** (Actions panel + palette) — packages the project's
+  newest publish output into a Windows installer via Inno Setup. A
+  customization page covers app name/version/publisher, a stable App ID
+  GUID (upgrades replace instead of duplicating), setup icon, license file,
+  architecture, desktop-shortcut / launch-after / per-user options, source
+  folder (auto-detects the newest `bin\…\publish`), and the output folder
+  (defaults to `<project>\Installer`, customizable and remembered).
+  Generate the ready-to-compile `.iss` script, or Generate + Compile when
+  Inno Setup 6 is installed (auto-detected; offered for download otherwise).
+* **Installer settings memory, your way** — by default one **uniform
+  template** is shared across all projects (identity fields still follow
+  each project); the new `uimaker.installer.settingsScope` setting flips to
+  **per-project** storage for multi-brand work. Each project keeps its own
+  stable App ID either way.
+* **VB parity complete** — the last three C#-only features now handle
+  Visual Basic projects: the **App Settings** editor writes
+  `My Project/Settings.settings` + `Settings.Designer.vb` (use
+  `My.Settings.X` — the usage snippet adapts), **classic→SDK conversion**
+  rewrites `.vbproj` files (VB targets import, `My Project/AssemblyInfo.vb`
+  handling), and **image/resource import** generates the `My.Resources`
+  accessor module (`My Project/Resources.resx` + `Resources.Designer.vb`,
+  classic-project bookkeeping with the VB generator metadata). The designer's
+  image picker and the sidebar's Add Image / Add Resource buttons now work
+  in VB projects.
+* **Fixed: "Open Folder in File Explorer" error** — folder reveals went
+  through app associations on Windows and failed with "cannot find the file
+  specified (0x2)"; folders now open directly in Explorer (also fixes Open
+  Working Folder).
+
 ## 0.19.5
 
 **Cursor icons in the picker.** Every option in the Cursor dropdowns (WPF and

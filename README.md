@@ -344,6 +344,7 @@ launches with UI Maker loaded.
 | `UI Maker: Run / Stop App` | Build and launch the app, or stop it if running |
 | `UI Maker: Debug / Stop Debugging` | Build and debug the app, or stop the session |
 | `UI Maker: Build Release (Publish)` | Publish a Release build (honors the single-exe settings) |
+| `UI Maker: Create Installer (Inno Setup)` | Package the publish output into a Windows installer — customizable, settings remembered (uniform template or per project) |
 | `UI Maker: Stop Running App` | Terminate the app started by Run |
 | `UI Maker: App Settings` | Grid editor for the settings your app remembers (`Properties.Settings`) |
 | `UI Maker: Project Properties` | VS-style Application page — output type, framework, assembly name, icon, manifest, version info |
@@ -362,6 +363,7 @@ launches with UI Maker loaded.
 | `uimaker.publish.singleFile` | `false` | Build Release (Publish) produces one portable `.exe` |
 | `uimaker.publish.selfContained` | `false` | Bundle the .NET runtime so the target PC needs nothing installed |
 | `uimaker.publish.runtime` | `win-x64` | Target runtime for single-file / self-contained publishing |
+| `uimaker.installer.settingsScope` | `uniform` | Create Installer memory: one shared template for all projects, or per-project settings for multi-brand work |
 
 ## How it works
 
@@ -415,12 +417,11 @@ deleted.
   intentionally disabled until every nested object can be cloned losslessly.
 - Without the C# language service, control rename falls back to the
   Designer.cs/code-behind pair; project-wide references then need a manual rename.
-- Visual Basic parity covers the WinForms designer (`*.Designer.vb`
-  round-tripping), Add Form/Window, Duplicate, New Class, event stubs with
-  `Handles` clauses, and control rename. Still C#-only for now: the App
-  Settings editor, classic→SDK conversion, and importing new images as
-  project resources in VB projects (`My.Resources` generation) — existing VB
-  images render fine on the canvas.
+- Visual Basic parity is complete: the WinForms designer
+  (`*.Designer.vb` round-tripping), Add Form/Window, Duplicate, New Class,
+  `Handles`-based events, control rename, the App Settings editor
+  (`My.Settings`), classic→SDK conversion, and image/resource import with
+  `My.Resources` accessor generation.
 - The classic-project converter deliberately stops before writing when it finds
   custom imports/targets, conditional target frameworks, framework profiles,
   or package install-script/content semantics it cannot migrate safely.
@@ -439,10 +440,10 @@ deleted.
 - [x] Multi-select, alignment & distribution tools, tab-order view, copy/paste across forms
 - [x] Docked controls that push each other for space; TabControl and tab-page drops
 - [x] Visual Basic WinForms designer (`*.Designer.vb` round-tripping, `Handles`-based events, VB scaffolding)
-- [ ] Remaining VB parity: App Settings editor, classic→SDK conversion, `My.Resources` image import
+- [x] Remaining VB parity: App Settings editor, classic→SDK conversion, `My.Resources` image import
 - [ ] Sub-menu (nested menu item) designing and item icons
 - [ ] Drag-reordering inside StackPanel / DockPanel children
-- [ ] "Create an Installer" for multi-file releases (Inno Setup script generation)
+- [x] "Create an Installer" for multi-file releases (Inno Setup script generation)
 - [ ] Style/resource editing and live theme preview
 - [ ] Marketplace publishing and prebuilt VSIX releases
 

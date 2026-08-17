@@ -20,6 +20,7 @@ import { openGuide } from './guide';
 import { openAppSettings } from './appSettings';
 import { openProjectProperties } from './projectProperties';
 import { openNugetPackages } from './nugetPackages';
+import { initInstaller, openInstallerCreator, revealFolder } from './installer';
 import { convertToSdkStyle } from './convertToSdk';
 import { registerXamlIntellisense } from './xamlIntellisense';
 import {
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // project-scoped (run/build, sidebar lists) targets this folder only —
     // a parent folder full of projects is never operated on as a whole.
     initWorkingFolder(context);
+    initInstaller(context);
 
     // --- Visual designer (custom editor) ------------------------------------
     context.subscriptions.push(DesignerProvider.register(context));
@@ -157,6 +159,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Visual Studio-style project property page and NuGet manager.
         vscode.commands.registerCommand('uimaker.projectProperties', () => openProjectProperties(dotnet)),
+
+        // Package the publish output into a Windows installer (Inno Setup).
+        vscode.commands.registerCommand('uimaker.createInstaller', async (project?: string) => {
+            if (await requireWorkspaceTrust('create an installer')) {
+                return openInstallerCreator(dotnet, project);
+            }
+        }),
         vscode.commands.registerCommand('uimaker.nugetPackages', (project?: string) => openNugetPackages(dotnet, project)),
 
         // Classic .NET Framework project -> modern SDK format (fixes the
@@ -178,7 +187,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 vscode.window.showWarningMessage('UI Maker: open a folder first.');
                 return;
             }
-            return vscode.env.openExternal(target);
+            return revealFolder(target.fsPath);
         }),
 
         // Window/form creation and duplication (sidebar buttons + context menus).

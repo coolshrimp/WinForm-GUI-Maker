@@ -30,10 +30,6 @@ export async function convertToSdkStyle(dotnet: DotnetTools, explicitProject?: s
         vscode.window.showWarningMessage('UI Maker: the selected project no longer exists.');
         return;
     }
-    if (/\.vbproj$/i.test(project)) {
-        vscode.window.showWarningMessage('UI Maker: automatic conversion supports C# projects only (for now).');
-        return;
-    }
     const info = readProjectInfo(project);
     if (!info) {
         vscode.window.showErrorMessage('UI Maker: could not read the project file.');
@@ -90,7 +86,7 @@ const DEFAULT_ITEM_TYPES = new Set(['compile', 'embeddedresource', 'none', 'page
 
 /** Rewrite one classic .csproj as SDK-style. Throws before writing on error. */
 export function convertProjectFile(project: string): ConversionResult {
-    if (!/\.csproj$/i.test(project)) { throw new Error('only C# project files can be converted'); }
+    if (!/\.(cs|vb)proj$/i.test(project)) { throw new Error('only C#/VB project files can be converted'); }
 
     const dir = path.dirname(project);
     const xml = fs.readFileSync(project, 'utf8');
@@ -227,7 +223,8 @@ export function convertProjectFile(project: string): ConversionResult {
     if (useWinForms) { mainProps.push('    <UseWindowsForms>true</UseWindowsForms>'); }
     if (useWpf) { mainProps.push('    <UseWPF>true</UseWPF>'); }
     const hasAssemblyInfo = fs.existsSync(path.join(dir, 'Properties', 'AssemblyInfo.cs'))
-        || /<Compile\b[^>]*\bInclude=["'][^"']*AssemblyInfo\.cs["']/i.test(semanticXml);
+        || fs.existsSync(path.join(dir, 'My Project', 'AssemblyInfo.vb'))
+        || /<Compile\b[^>]*\bInclude=["'][^"']*AssemblyInfo\.(cs|vb)["']/i.test(semanticXml);
     const oldGenerateAssemblyInfo = prop('GenerateAssemblyInfo');
     if (hasAssemblyInfo) { mainProps.push('    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>'); }
     else if (oldGenerateAssemblyInfo) {
@@ -412,6 +409,7 @@ function packagePathMatches(value: string, packages: PackageSpec[]): boolean {
 function isStandardImport(value: string): boolean {
     const normalized = value.replace(/\\/g, '/').toLowerCase();
     return normalized.endsWith('/microsoft.csharp.targets')
+        || normalized.endsWith('/microsoft.visualbasic.targets')
         || normalized.endsWith('/microsoft.common.props');
 }
 

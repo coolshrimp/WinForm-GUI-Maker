@@ -36,13 +36,13 @@ interface AppSetting {
 }
 
 /** The types offered in the grid and their C# keyword for codegen. */
-const SETTING_TYPES: Array<{ clr: string; cs: string; label: string }> = [
-    { clr: 'System.String',   cs: 'string',                    label: 'string (text)' },
-    { clr: 'System.Int32',    cs: 'int',                       label: 'int (whole number)' },
-    { clr: 'System.Boolean',  cs: 'bool',                      label: 'bool (true/false)' },
-    { clr: 'System.Double',   cs: 'double',                    label: 'double (decimal number)' },
-    { clr: 'System.Int64',    cs: 'long',                      label: 'long (big whole number)' },
-    { clr: 'System.DateTime', cs: 'global::System.DateTime',   label: 'DateTime (date & time)' }
+const SETTING_TYPES: Array<{ clr: string; cs: string; vb: string; label: string }> = [
+    { clr: 'System.String',   cs: 'string',                    vb: 'String',                  label: 'string (text)' },
+    { clr: 'System.Int32',    cs: 'int',                       vb: 'Integer',                 label: 'int (whole number)' },
+    { clr: 'System.Boolean',  cs: 'bool',                      vb: 'Boolean',                 label: 'bool (true/false)' },
+    { clr: 'System.Double',   cs: 'double',                    vb: 'Double',                  label: 'double (decimal number)' },
+    { clr: 'System.Int64',    cs: 'long',                      vb: 'Long',                    label: 'long (big whole number)' },
+    { clr: 'System.DateTime', cs: 'global::System.DateTime',   vb: 'Global.System.DateTime',  label: 'DateTime (date & time)' }
 ];
 
 let panel: vscode.WebviewPanel | undefined;
@@ -59,12 +59,8 @@ export async function openAppSettings(dotnet: DotnetTools, explicitProject?: str
         vscode.window.showWarningMessage('UI Maker: the selected project no longer exists.');
         return;
     }
-    if (/\.vbproj$/i.test(project)) {
-        vscode.window.showWarningMessage('UI Maker: the App Settings editor supports C# projects only (for now).');
-        return;
-    }
-
-    const settingsPath = path.join(path.dirname(project), 'Properties', 'Settings.settings');
+    const isVb = /\.vbproj$/i.test(project);
+    const settingsPath = path.join(path.dirname(project), isVb ? 'My Project' : 'Properties', 'Settings.settings');
     const existing = fs.existsSync(settingsPath) ? parseSettingsFile(fs.readFileSync(settingsPath, 'utf8')) : [];
 
     currentProject = project;
@@ -72,7 +68,7 @@ export async function openAppSettings(dotnet: DotnetTools, explicitProject?: str
     if (panel) {
         // Refresh the existing panel with the current project's settings.
         panel.title = `App Settings — ${path.basename(path.dirname(project))}`;
-        panel.webview.html = editorHtml(panel.webview, project, existing);
+        panel.webview.html = editorHtml(panel.webview, project, existing, isVb);
         panel.reveal();
         return;
     }
@@ -84,7 +80,7 @@ export async function openAppSettings(dotnet: DotnetTools, explicitProject?: str
         { enableScripts: true }
     );
     panel.onDidDispose(() => { panel = undefined; currentProject = undefined; });
-    panel.webview.html = editorHtml(panel.webview, project, existing);
+    panel.webview.html = editorHtml(panel.webview, project, existing, isVb);
 
     panel.webview.onDidReceiveMessage((msg: { type: string; settings?: AppSetting[] }) => {
         const proj = currentProject;
@@ -164,21 +160,28 @@ function saveSettings(project: string, settings: AppSetting[]): void {
         }
     }
 
-    const propsDir = path.join(path.dirname(project), 'Properties');
+    const isVb = /\.vbproj$/i.test(project);
+    const propsDir = path.join(path.dirname(project), isVb ? 'My Project' : 'Properties');
     if (!fs.existsSync(propsDir)) { fs.mkdirSync(propsDir, { recursive: true }); }
 
-    const ns = `${rootNamespace(project)}.Properties`;
+    // VB settings live in the My namespace (My.Settings.X); C# in Properties.
+    const ns = isVb ? 'My' : `${rootNamespace(project)}.Properties`;
     const files = [
         {
             target: path.join(propsDir, 'Settings.settings'),
-            contents: settingsXml(ns, settings)
+            contents: settingsXml(ns, isVb ? 'MySettings' : 'Settings', settings)
         },
-        {
-            target: path.join(propsDir, 'Settings.Designer.cs'),
-            contents: designerCs(ns, settings)
-        }
+        isVb
+            ? {
+                target: path.join(propsDir, 'Settings.Designer.vb'),
+                contents: designerVb(rootNamespace(project), settings)
+            }
+            : {
+                target: path.join(propsDir, 'Settings.Designer.cs'),
+                contents: designerCs(ns, settings)
+            }
     ];
-    const registeredProject = settingsProjectRegistration(project);
+    const registeredProject = settingsProjectRegistration(project, isVb);
     if (registeredProject !== undefined) {
         files.push({ target: project, contents: registeredProject });
     }
@@ -248,14 +251,14 @@ function rootNamespace(project: string): string {
 }
 
 /** The Settings.settings XML — same shape Visual Studio writes. */
-function settingsXml(ns: string, settings: AppSetting[]): string {
+function settingsXml(ns: string, className: string, settings: AppSetting[]): string {
     const rows = settings.map(s =>
         `    <Setting Name="${s.name}" Type="${s.type}" Scope="${s.scope}">\r\n` +
         `      <Value Profile="(Default)">${xmlEscape(s.value)}</Value>\r\n` +
         `    </Setting>`).join('\r\n');
     return `<?xml version='1.0' encoding='utf-8'?>\r\n` +
         `<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" ` +
-        `CurrentProfile="(Default)" GeneratedClassNamespace="${ns}" GeneratedClassName="Settings">\r\n` +
+        `CurrentProfile="(Default)" GeneratedClassNamespace="${ns}" GeneratedClassName="${className}">\r\n` +
         `  <Profiles />\r\n` +
         (settings.length
             ? `  <Settings>\r\n${rows}\r\n  </Settings>\r\n`
@@ -316,12 +319,85 @@ function designerCs(ns: string, settings: AppSetting[]): string {
         `}\r\n`;
 }
 
+/** The generated VB accessor — the My.Settings class VS's generator emits. */
+function designerVb(rootNs: string, settings: AppSetting[]): string {
+    const vbEscape = (s: string) => s.replace(/"/g, '""');
+    const props = settings.map(s => {
+        const vb = SETTING_TYPES.find(t => t.clr === s.type)?.vb ?? 'String';
+        const scopeAttr = s.scope === 'Application'
+            ? 'Global.System.Configuration.ApplicationScopedSettingAttribute()'
+            : 'Global.System.Configuration.UserScopedSettingAttribute()';
+        const defaultAttr = (s.value !== '' || s.type === 'System.String')
+            ? `, Global.System.Configuration.DefaultSettingValueAttribute("${vbEscape(s.value)}")`
+            : '';
+        if (s.scope === 'User') {
+            return `        <${scopeAttr}, Global.System.Diagnostics.DebuggerNonUserCodeAttribute()${defaultAttr}>\r\n` +
+                `        Public Property ${s.name}() As ${vb}\r\n` +
+                `            Get\r\n` +
+                `                Return CType(Me("${s.name}"), ${vb})\r\n` +
+                `            End Get\r\n` +
+                `            Set(ByVal value As ${vb})\r\n` +
+                `                Me("${s.name}") = value\r\n` +
+                `            End Set\r\n` +
+                `        End Property`;
+        }
+        return `        <${scopeAttr}, Global.System.Diagnostics.DebuggerNonUserCodeAttribute()${defaultAttr}>\r\n` +
+            `        Public ReadOnly Property ${s.name}() As ${vb}\r\n` +
+            `            Get\r\n` +
+            `                Return CType(Me("${s.name}"), ${vb})\r\n` +
+            `            End Get\r\n` +
+            `        End Property`;
+    }).join('\r\n\r\n');
+
+    return `'------------------------------------------------------------------------------\r\n` +
+        `' <auto-generated>\r\n` +
+        `'     This code was generated by a tool.\r\n` +
+        `'     Changes to this file may cause incorrect behavior and will be lost if\r\n` +
+        `'     the code is regenerated.\r\n` +
+        `' </auto-generated>\r\n` +
+        `'------------------------------------------------------------------------------\r\n` +
+        `\r\n` +
+        `Option Strict On\r\n` +
+        `Option Explicit On\r\n` +
+        `\r\n` +
+        `Namespace My\r\n` +
+        `\r\n` +
+        `    <Global.System.Runtime.CompilerServices.CompilerGeneratedAttribute(), Global.System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "17.0.0.0")>\r\n` +
+        `    Partial Friend NotInheritable Class MySettings\r\n` +
+        `        Inherits Global.System.Configuration.ApplicationSettingsBase\r\n` +
+        `\r\n` +
+        `        Private Shared defaultInstance As MySettings = CType(Global.System.Configuration.ApplicationSettingsBase.Synchronized(New MySettings()), MySettings)\r\n` +
+        `\r\n` +
+        `        Public Shared ReadOnly Property [Default]() As MySettings\r\n` +
+        `            Get\r\n` +
+        `                Return defaultInstance\r\n` +
+        `            End Get\r\n` +
+        `        End Property\r\n` +
+        (props ? `\r\n${props}\r\n` : '') +
+        `    End Class\r\n` +
+        `End Namespace\r\n` +
+        `\r\n` +
+        `Namespace My\r\n` +
+        `\r\n` +
+        `    <Global.Microsoft.VisualBasic.HideModuleNameAttribute(), Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), Global.System.Runtime.CompilerServices.CompilerGeneratedAttribute()>\r\n` +
+        `    Friend Module MySettingsProperty\r\n` +
+        `\r\n` +
+        `        <Global.System.ComponentModel.Design.HelpKeywordAttribute("My.Settings")>\r\n` +
+        `        Friend ReadOnly Property Settings() As Global.${rootNs}.My.MySettings\r\n` +
+        `            Get\r\n` +
+        `                Return Global.${rootNs}.My.MySettings.Default\r\n` +
+        `            End Get\r\n` +
+        `        End Property\r\n` +
+        `    End Module\r\n` +
+        `End Namespace\r\n`;
+}
+
 /**
  * Classic (non-SDK) projects list every file explicitly — add the settings
  * pair with the same metadata Visual Studio uses. Safe to call repeatedly:
  * does nothing when the entries are already present (or the project globs).
  */
-function settingsProjectRegistration(project: string): string | undefined {
+function settingsProjectRegistration(project: string, isVb: boolean): string | undefined {
     const xml = fs.readFileSync(project, 'utf8');
     if (/<Project\s[^>]*\bSdk\s*=/.test(xml)) { return undefined; }   // SDK-style globs
     if (xml.includes('Settings.settings')) { return undefined; }      // already registered
@@ -329,13 +405,15 @@ function settingsProjectRegistration(project: string): string | undefined {
         throw new Error('the project XML has no closing Project element');
     }
     const eol = xml.includes('\r\n') ? '\r\n' : '\n';
+    const dir = isVb ? 'My Project' : 'Properties';
+    const designer = isVb ? 'Settings.Designer.vb' : 'Settings.Designer.cs';
     const block =
         `  <ItemGroup>${eol}` +
-        `    <None Include="Properties\\Settings.settings">${eol}` +
+        `    <None Include="${dir}\\Settings.settings">${eol}` +
         `      <Generator>SettingsSingleFileGenerator</Generator>${eol}` +
-        `      <LastGenOutput>Settings.Designer.cs</LastGenOutput>${eol}` +
+        `      <LastGenOutput>${designer}</LastGenOutput>${eol}` +
         `    </None>${eol}` +
-        `    <Compile Include="Properties\\Settings.Designer.cs">${eol}` +
+        `    <Compile Include="${dir}\\${designer}">${eol}` +
         `      <AutoGen>True</AutoGen>${eol}` +
         `      <DesignTimeSharedInput>True</DesignTimeSharedInput>${eol}` +
         `      <DependentUpon>Settings.settings</DependentUpon>${eol}` +
@@ -347,7 +425,7 @@ function settingsProjectRegistration(project: string): string | undefined {
 // ------------------------------------------------------------------ webview
 
 /** The grid editor page. State lives in the webview; Save posts it back. */
-function editorHtml(webview: vscode.Webview, project: string, settings: AppSetting[]): string {
+function editorHtml(webview: vscode.Webview, project: string, settings: AppSetting[], isVb = false): string {
     const nonce = webviewNonce();
     const typeOptions = SETTING_TYPES.map(t => ({ clr: t.clr, label: t.label }));
     // "<" is escaped so a value containing "</script>" cannot break the page.
@@ -414,7 +492,7 @@ function editorHtml(webview: vscode.Webview, project: string, settings: AppSetti
 <body>
 <h1>App Settings</h1>
 <div class="project">Project: <code>${path.basename(project)}</code> →
-    writes <code>Properties/Settings.settings</code> + <code>Settings.Designer.cs</code></div>
+    writes <code>${isVb ? 'My Project' : 'Properties'}/Settings.settings</code> + <code>Settings.Designer.${isVb ? 'vb' : 'cs'}</code></div>
 
 <p class="hint">
 Settings are values your <em>built app</em> remembers — window positions, user names,
@@ -435,12 +513,19 @@ values the app only reads.</p>
 <button id="save">Save</button>
 
 <h3>Using them in your code</h3>
-<pre><code>// read
+<pre><code>${isVb
+        ? `' read
+Dim name = My.Settings.PlayerName
+
+' change + persist (User scope only)
+My.Settings.PlayerName = "Ada"
+My.Settings.Save()`
+        : `// read
 var name = Properties.Settings.Default.PlayerName;
 
 // change + persist (User scope only)
 Properties.Settings.Default.PlayerName = "Ada";
-Properties.Settings.Default.Save();</code></pre>
+Properties.Settings.Default.Save();`}</code></pre>
 
 <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();

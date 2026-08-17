@@ -1,8 +1,8 @@
 {
     "name": "uimaker",
-    "displayName": "UI Maker — .NET UI Designer",
+    "displayName": "UI Maker \u2014 .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.19.5",
+    "version": "0.20.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -94,7 +94,7 @@
             },
             {
                 "command": "uimaker.openProject",
-                "title": "Open Project (Any Folder)…",
+                "title": "Open Project (Any Folder)\u2026",
                 "category": "UI Maker",
                 "icon": "$(folder-opened)"
             },
@@ -131,6 +131,12 @@
             {
                 "command": "uimaker.release",
                 "title": "Build Release (Publish)",
+                "category": "UI Maker",
+                "icon": "$(package)"
+            },
+            {
+                "command": "uimaker.createInstaller",
+                "title": "Create Installer (Inno Setup)",
                 "category": "UI Maker",
                 "icon": "$(package)"
             },
@@ -443,6 +449,19 @@
                         "win-arm64"
                     ],
                     "description": "Target runtime used for single-file or self-contained publishing."
+                },
+                "uimaker.installer.settingsScope": {
+                    "type": "string",
+                    "default": "uniform",
+                    "enum": [
+                        "uniform",
+                        "perProject"
+                    ],
+                    "enumDescriptions": [
+                        "One shared installer template for all projects (same branding everywhere; app name/version/output file still follow each project).",
+                        "Each project remembers its own installer settings (multi-brand work)."
+                    ],
+                    "description": "How Create Installer remembers its settings."
                 }
             }
         }

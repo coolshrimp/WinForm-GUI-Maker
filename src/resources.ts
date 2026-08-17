@@ -66,6 +66,12 @@ function csprojPath(projDir: string): string | null {
     return name ? path.join(projDir, name) : null;
 }
 
+/** Any project file (C# or VB) in the folder. */
+function projectPathAny(projDir: string): string | null {
+    const name = fs.readdirSync(projDir).find(f => /\.(cs|vb)proj$/i.test(f));
+    return name ? path.join(projDir, name) : null;
+}
+
 /** Root namespace: csproj RootNamespace, else the sanitized project name. */
 function rootNamespace(csproj: string): string {
     try {
@@ -188,11 +194,12 @@ function ensureXamlResourceInclude(projDir: string, relFromProj: string): void {
  */
 export function importResourceFile(startPath: string, src: string): ImportedImage | undefined {
     const projDir = findProjectDir(startPath);
-    const csproj = projDir ? csprojPath(projDir) : null;
-    if (!projDir || !csproj) {
-        vscode.window.showWarningMessage('UI Maker: no .csproj found — resources need a project to import into.');
+    const proj = projDir ? projectPathAny(projDir) : null;
+    if (!projDir || !proj) {
+        vscode.window.showWarningMessage('UI Maker: no project file found — resources need a project to import into.');
         return undefined;
     }
+    const isVb = /\.vbproj$/i.test(proj);
 
     try {
         // 1) Copy into <project>/Resources (VS behavior), deduping by content.
@@ -215,17 +222,23 @@ export function importResourceFile(startPath: string, src: string): ImportedImag
             fs.copyFileSync(src, dest);
         }
 
-        // 2) Register in Properties/Resources.resx with the right CLR type.
-        const key = addResxFileRef(projDir, dest, resourceTypeFor(dest));
+        // 2) Register in the project resx with the right CLR type
+        // (Properties/ for C#, "My Project"/ for VB — VS's own layout).
+        const key = addResxFileRef(projDir, dest, resourceTypeFor(dest), isVb);
 
-        // 3) Regenerate the typed accessor class.
-        const ns = rootNamespace(csproj);
-        writeResourcesDesigner(projDir, ns);
+        // 3) Regenerate the typed accessor class in the project's language.
+        const ns = rootNamespace(proj);
+        if (isVb) { writeResourcesDesignerVb(projDir, ns); }
+        else { writeResourcesDesigner(projDir, ns); }
 
-        // 4) Classic csproj bookkeeping.
-        registerResourceFiles(csproj, path.relative(projDir, dest));
+        // 4) Classic project bookkeeping.
+        registerResourceFiles(proj, path.relative(projDir, dest), isVb);
 
-        return { key, code: `global::${ns}.Properties.Resources.${key}`, fsPath: dest };
+        return {
+            key,
+            code: isVb ? `My.Resources.${key}` : `global::${ns}.Properties.Resources.${key}`,
+            fsPath: dest
+        };
     } catch (err) {
         vscode.window.showErrorMessage(`UI Maker: could not import the resource — ${err}`);
         return undefined;
@@ -266,8 +279,8 @@ function resourceTypeFor(file: string): string {
     return BYTES_TYPE;
 }
 
-function resxPath(projDir: string): string {
-    return path.join(projDir, 'Properties', 'Resources.resx');
+function resxPath(projDir: string, isVb = false): string {
+    return path.join(projDir, isVb ? 'My Project' : 'Properties', 'Resources.resx');
 }
 
 /** One `<data>` entry of a resx, with everything needed to round-trip it. */
@@ -331,8 +344,8 @@ function accessorTypeFor(e: ResxEntry): string {
  * Add (or reuse) a fileref entry for the file; returns the resource name.
  * Creates Properties/Resources.resx when the project has none.
  */
-function addResxFileRef(projDir: string, fileAbs: string, type: string): string {
-    const file = resxPath(projDir);
+function addResxFileRef(projDir: string, fileAbs: string, type: string, isVb = false): string {
+    const file = resxPath(projDir, isVb);
     if (!fs.existsSync(path.dirname(file))) { fs.mkdirSync(path.dirname(file), { recursive: true }); }
     let xml = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : RESX_HEADER;
 
@@ -454,24 +467,108 @@ function writeResourcesDesigner(projDir: string, rootNs: string): void {
     replaceFileAtomically(path.join(projDir, 'Properties', 'Resources.Designer.cs'), code);
 }
 
+/** VB accessor type for a resx entry ("string" -> String, etc.). */
+function vbAccessorTypeFor(e: ResxEntry): string {
+    const cs = accessorTypeFor(e);
+    if (cs === 'string') { return 'String'; }
+    if (cs === 'byte[]') { return 'Byte()'; }
+    if (cs === 'object') { return 'Object'; }
+    return cs.replace(/^global::/, 'Global.').replace(/\[\]$/, '()');
+}
+
+/** Regenerate "My Project"/Resources.Designer.vb — the My.Resources module. */
+function writeResourcesDesignerVb(projDir: string, rootNs: string): void {
+    const file = resxPath(projDir, true);
+    const entries = fs.existsSync(file) ? parseResxEntries(fs.readFileSync(file, 'utf8')) : [];
+
+    const props = entries.map(e => {
+        if (!isCSharpIdentifier(e.name)) { return ''; }
+        const type = vbAccessorTypeFor(e);
+        if (type === 'String') {
+            return `        Friend ReadOnly Property ${e.name}() As String\r\n` +
+                `            Get\r\n` +
+                `                Return ResourceManager.GetString("${e.name}", resourceCulture)\r\n` +
+                `            End Get\r\n` +
+                `        End Property`;
+        }
+        return `        Friend ReadOnly Property ${e.name}() As ${type}\r\n` +
+            `            Get\r\n` +
+            `                Dim obj As Object = ResourceManager.GetObject("${e.name}", resourceCulture)\r\n` +
+            `                Return CType(obj, ${type})\r\n` +
+            `            End Get\r\n` +
+            `        End Property`;
+    }).filter(Boolean).join('\r\n\r\n');
+
+    const code =
+        `'------------------------------------------------------------------------------\r\n` +
+        `' <auto-generated>\r\n` +
+        `'     This code was generated by a tool.\r\n` +
+        `'     Changes to this file may cause incorrect behavior and will be lost if\r\n` +
+        `'     the code is regenerated.\r\n` +
+        `' </auto-generated>\r\n` +
+        `'------------------------------------------------------------------------------\r\n` +
+        `\r\n` +
+        `Option Strict On\r\n` +
+        `Option Explicit On\r\n` +
+        `\r\n` +
+        `Namespace My.Resources\r\n` +
+        `\r\n` +
+        `    <Global.System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "17.0.0.0"), Global.System.Diagnostics.DebuggerNonUserCodeAttribute(), Global.System.Runtime.CompilerServices.CompilerGeneratedAttribute(), Global.Microsoft.VisualBasic.HideModuleNameAttribute()>\r\n` +
+        `    Friend Module Resources\r\n` +
+        `\r\n` +
+        `        Private resourceMan As Global.System.Resources.ResourceManager\r\n` +
+        `\r\n` +
+        `        Private resourceCulture As Global.System.Globalization.CultureInfo\r\n` +
+        `\r\n` +
+        `        <Global.System.ComponentModel.EditorBrowsableAttribute(Global.System.ComponentModel.EditorBrowsableState.Advanced)>\r\n` +
+        `        Friend ReadOnly Property ResourceManager() As Global.System.Resources.ResourceManager\r\n` +
+        `            Get\r\n` +
+        `                If Object.ReferenceEquals(resourceMan, Nothing) Then\r\n` +
+        `                    Dim temp As Global.System.Resources.ResourceManager = New Global.System.Resources.ResourceManager("${rootNs}.Resources", GetType(Resources).Assembly)\r\n` +
+        `                    resourceMan = temp\r\n` +
+        `                End If\r\n` +
+        `                Return resourceMan\r\n` +
+        `            End Get\r\n` +
+        `        End Property\r\n` +
+        `\r\n` +
+        `        <Global.System.ComponentModel.EditorBrowsableAttribute(Global.System.ComponentModel.EditorBrowsableState.Advanced)>\r\n` +
+        `        Friend Property Culture() As Global.System.Globalization.CultureInfo\r\n` +
+        `            Get\r\n` +
+        `                Return resourceCulture\r\n` +
+        `            End Get\r\n` +
+        `            Set(ByVal value As Global.System.Globalization.CultureInfo)\r\n` +
+        `                resourceCulture = value\r\n` +
+        `            End Set\r\n` +
+        `        End Property\r\n` +
+        (props ? `\r\n${props}\r\n` : '') +
+        `    End Module\r\n` +
+        `End Namespace\r\n`;
+
+    replaceFileAtomically(path.join(projDir, 'My Project', 'Resources.Designer.vb'), code);
+}
+
 /**
  * Classic (non-SDK) projects list every file explicitly — register the resx
  * pair once and each imported image. SDK projects glob everything.
  */
-function registerResourceFiles(csproj: string, imageRel: string): void {
+function registerResourceFiles(proj: string, imageRel: string, isVb = false): void {
     try {
-        let xml = fs.readFileSync(csproj, 'utf8');
+        let xml = fs.readFileSync(proj, 'utf8');
         if (/<Project\s[^>]*\bSdk\s*=/.test(xml)) { return; }
         if (!/<\/Project>/.test(xml)) { return; }
         const eol = xml.includes('\r\n') ? '\r\n' : '\n';
+        const dir = isVb ? 'My Project' : 'Properties';
+        const generator = isVb ? 'VbMyResourcesResXFileCodeGenerator' : 'ResXFileCodeGenerator';
+        const designer = isVb ? 'Resources.Designer.vb' : 'Resources.Designer.cs';
         let block = '';
-        if (!xml.includes('Properties\\Resources.resx')) {
+        if (!xml.includes(`${dir}\\Resources.resx`)) {
             block +=
-                `    <EmbeddedResource Include="Properties\\Resources.resx">${eol}` +
-                `      <Generator>ResXFileCodeGenerator</Generator>${eol}` +
-                `      <LastGenOutput>Resources.Designer.cs</LastGenOutput>${eol}` +
+                `    <EmbeddedResource Include="${dir}\\Resources.resx">${eol}` +
+                `      <Generator>${generator}</Generator>${eol}` +
+                `      <LastGenOutput>${designer}</LastGenOutput>${eol}` +
+                (isVb ? `      <CustomToolNamespace>My.Resources</CustomToolNamespace>${eol}` : '') +
                 `    </EmbeddedResource>${eol}` +
-                `    <Compile Include="Properties\\Resources.Designer.cs">${eol}` +
+                `    <Compile Include="${dir}\\${designer}">${eol}` +
                 `      <AutoGen>True</AutoGen>${eol}` +
                 `      <DesignTime>True</DesignTime>${eol}` +
                 `      <DependentUpon>Resources.resx</DependentUpon>${eol}` +
@@ -484,7 +581,7 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
         }
         if (!block) { return; }
         xml = xml.replace(/<\/Project>/, `  <ItemGroup>${eol}${block}  </ItemGroup>${eol}</Project>`);
-        replaceFileAtomically(csproj, xml);
+        replaceFileAtomically(proj, xml);
     } catch {
         vscode.window.showWarningMessage('UI Maker: could not register the resource files in the project — add them manually.');
     }
@@ -499,7 +596,7 @@ function registerResourceFiles(csproj: string, imageRel: string): void {
  * types qualify — resource IMPORTS generate C# accessors, so they stay
  * C#-only; file creation works for both languages.
  */
-async function workspaceProjectDir(languages: 'cs' | 'any' = 'cs'): Promise<string | null> {
+async function workspaceProjectDir(languages: 'cs' | 'any' = 'any'): Promise<string | null> {
     const working = getWorkingFolder();
     const projRe = languages === 'cs' ? /\.csproj$/i : /\.(cs|vb)proj$/i;
     const hasProject = (dir: string): boolean => {
