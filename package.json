@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.13.0",
+    "version": "0.14.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -29,7 +29,9 @@
         "designer",
         "dotnet",
         "form designer",
-        "gui builder"
+        "gui builder",
+        "xaml intellisense",
+        "xaml snippets"
     ],
     "activationEvents": [
         "onStartupFinished"
@@ -410,6 +412,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Snap control positions and sizes to the grid."
+                },
+                "uimaker.xamlIntelliSense": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable UI Maker XAML IntelliSense in the text editor: element/attribute/value completions, code snippets, hover documentation, and inline color swatches with a picker."
                 },
                 "uimaker.publish.singleFile": {
                     "type": "boolean",

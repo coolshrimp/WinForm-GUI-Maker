@@ -26,6 +26,7 @@ UI Maker closes that gap:
 | Pain point | UI Maker answer |
 |---|---|
 | Hand-writing XAML layout | Drag-and-drop visual designer with snap-to-grid canvas |
+| No IntelliSense when you *do* edit XAML by hand | Element/attribute/value completions, snippets, hover docs, and an inline color picker in the text editor |
 | Guessing property names | A real Properties window — categorized like Visual Studio's, with dropdowns, color pickers, Anchor toggles, and a description pane |
 | Adding images and icons | Pick a file → it's imported into `Resources/`, registered in `Resources.resx`, and referenced from the Designer.cs — exactly like VS |
 | Wiring events by hand | Events panel — one click writes the handler stub into the code-behind |
@@ -157,6 +158,38 @@ Open any `.xaml` window in the UI Maker Designer:
 ### ↔️ Split Design / Code view
 The **View Code** button opens the raw XAML beside the designer. Edits flow both ways:
 change the markup and the canvas refreshes; move a control and the markup updates.
+
+### ⌨️ XAML IntelliSense in the text editor
+Prefer typing markup by hand sometimes? The plain text editor now understands
+XAML too — no Visual Studio, no extra extensions:
+
+- **Element completion** — type `<` and get the whole WPF catalog (panels,
+  controls, shapes, menus, Grid plumbing) with one-line descriptions.
+  Containers insert an open/close pair, leaf controls self-close. Type `</`
+  and the innermost still-open tag closes itself.
+- **Attribute completion** — inside a tag you're offered exactly what that
+  element supports: its own properties, the common layout set (`Margin`,
+  `HorizontalAlignment`, `Grid.Row`, `DockPanel.Dock`, …), and its events.
+  Attributes already on the tag aren't offered twice.
+- **Value completion** — inside the quotes, enums list their members
+  (`Visibility` → `Visible / Hidden / Collapsed`), booleans offer
+  `True`/`False`, and brush properties offer all 141 named XAML colors with
+  a preview swatch.
+- **Code snippets** — type a prefix and expand a ready block: `window`
+  (full Window skeleton), `grid2x2`, `gridrows`/`gridcols`, `stack`, `dock`
+  (menu + status bar + content shell), `button`, `labeltext`, `combo`,
+  `listbox`, `datagrid`, `tabs`, `menu`, `groupbox`, `scroll`, `image`,
+  `style`, `buttonrow` (OK/Cancel), `statusbar`, and `contextmenu` — with
+  tab stops on the parts you'll want to rename.
+- **Hover documentation** — hover any element or attribute for a plain-English
+  description, its type, and the allowed values.
+- **Inline color swatches & picker** — every `Background`, `Foreground`,
+  `BorderBrush`, `Fill`, `Stroke`, … value shows a color chip right in the
+  code; click it to open VS Code's native color picker. Picking a color writes
+  the hex back (or the friendly name when one matches exactly).
+
+Everything is scoped to `.xaml` files only and can be switched off with the
+`uimaker.xamlIntelliSense` setting.
 
 ### 🔨 Build, Run, Debug, Release buttons
 Status-bar buttons (and editor-title shortcuts) drive the .NET CLI for you:
@@ -299,6 +332,7 @@ launches with UI Maker loaded.
 |---|---|---|
 | `uimaker.gridSize` | `8` | Snap grid size in pixels on the design canvas |
 | `uimaker.snapToGrid` | `true` | Snap control positions/sizes to the grid |
+| `uimaker.xamlIntelliSense` | `true` | XAML completions, snippets, hover docs, and inline color swatches in the text editor |
 | `uimaker.publish.singleFile` | `false` | Build Release (Publish) produces one portable `.exe` |
 | `uimaker.publish.selfContained` | `false` | Bundle the .NET runtime so the target PC needs nothing installed |
 | `uimaker.publish.runtime` | `win-x64` | Target runtime for single-file / self-contained publishing |

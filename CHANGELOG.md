@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.14.0
+
+**XAML IntelliSense in the text editor** (user request — "avoid Visual Studio
+completely"). Hand-editing `.xaml` files now gets the full treatment without
+any extra extensions:
+
+* **Completions everywhere** — element names after `<` (containers insert an
+  open/close pair, leaf controls self-close), `</` closes the innermost open
+  tag, attribute names are scoped to what the element actually supports
+  (own properties + common layout set + events, minus attributes already on
+  the tag), and attribute values complete enum members, `True`/`False`, and
+  all 141 named XAML colors with preview swatches. Picking an enum-typed
+  attribute pops the value list automatically.
+* **20 code snippets** — `window`, `grid2x2`, `gridrows`, `gridcols`,
+  `stack`, `dock` (menu + status bar app shell), `button`, `labeltext`,
+  `combo`, `listbox`, `datagrid`, `tabs`, `menu`, `groupbox`, `scroll`,
+  `image`, `style`, `buttonrow` (OK/Cancel), `statusbar`, and `contextmenu`,
+  each with tab stops on the names you'll want to change and a rendered
+  preview in the completion docs.
+* **Hover documentation** — plain-English docs for every cataloged element
+  and attribute, including the property type and allowed values.
+* **Surprise: inline color swatches + picker** — brush-typed attribute values
+  (`Background`, `Foreground`, `BorderBrush`, `Fill`, `Stroke`, …) render a
+  color chip in the editor and open VS Code's native color picker; picking a
+  color writes clean hex (alpha only when translucent) or the exact named
+  color when one matches. Bindings and `{StaticResource}` values are left
+  alone.
+* The whole feature is scoped to `.xaml` files and gated behind a new
+  `uimaker.xamlIntelliSense` setting (default on) — flipping it off takes
+  effect immediately, no reload needed.
+* Under the hood the catalog (60+ elements, per-type properties/events, WPF
+  enum tables, the full named-color table) and the cursor-context analyzer
+  are a pure, dependency-free module with its own Node test suite (24 tests).
+
 ## 0.13.0
 
 **Collapsible designer panels.** The Toolbox and Properties panels now have a

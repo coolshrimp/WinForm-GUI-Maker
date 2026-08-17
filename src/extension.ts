@@ -21,6 +21,7 @@ import { openAppSettings } from './appSettings';
 import { openProjectProperties } from './projectProperties';
 import { openNugetPackages } from './nugetPackages';
 import { convertToSdkStyle } from './convertToSdk';
+import { registerXamlIntellisense } from './xamlIntellisense';
 import { EXCLUDE_GLOB, getWorkingFolder, initWorkingFolder } from './workingFolder';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
@@ -42,6 +43,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // --- Activity-bar side panel --------------------------------------------
     registerSidebar(context, dotnet);
+
+    // --- XAML IntelliSense in the text editor -------------------------------
+    // Completions, snippets, hover docs, and inline color swatches for .xaml —
+    // hand-editing markup no longer needs Visual Studio either.
+    registerXamlIntellisense(context);
 
     // --- Commands -----------------------------------------------------------
     context.subscriptions.push(
