@@ -564,6 +564,10 @@ html, body {
     color: #333;
 }
 
+.ff-dark-surface .ff-gb-header {
+    color: rgba(255, 255, 255, 0.85);
+}
+
 .ff-gb-content {
     flex: 1 1 auto;
     min-height: 0;
@@ -585,33 +589,54 @@ html, body {
     padding: 2px 2px 0;
 }
 
+/* Tab headers are designer-only chrome (apps often hide the real ones), so
+ * their colors adapt to the effective window background: the surface gets an
+ * .ff-dark-surface class when its background is dark, and these rules flip
+ * to bright text for contrast. */
 .ff-tab-head {
     padding: 3px 12px;
-    background: rgba(127, 127, 127, 0.16);
-    border: 1px solid rgba(127, 127, 127, 0.35);
+    background: rgba(0, 0, 0, 0.07);
+    border: 1px solid rgba(0, 0, 0, 0.28);
     border-bottom: none;
-    color: inherit;
+    color: rgba(0, 0, 0, 0.88);
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
 }
 
+.ff-dark-surface .ff-tab-head {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.32);
+    color: rgba(255, 255, 255, 0.92);
+}
+
 .ff-tab-head.active {
-    background: rgba(127, 127, 127, 0.3);
+    background: rgba(0, 0, 0, 0.16);
     position: relative;
     top: 1px;
     border-top: 2px solid #0078d4;
     z-index: 1;
+    font-weight: 600;
+}
+
+.ff-dark-surface .ff-tab-head.active {
+    background: rgba(255, 255, 255, 0.22);
+    border-top-color: #3ba0f3;
+    color: #ffffff;
 }
 
 .ff-tab-content {
     flex: 1 1 auto;
     min-height: 0;
-    border: 1px solid rgba(127, 127, 127, 0.28);
+    border: 1px solid rgba(0, 0, 0, 0.22);
     background: transparent;
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     grid-template-columns: minmax(0, 1fr);
+}
+
+.ff-dark-surface .ff-tab-content {
+    border-color: rgba(255, 255, 255, 0.22);
 }
 
 /* GridSplitter / Separator: simple neutral bars. */
@@ -775,6 +800,12 @@ html, body {
     background: repeating-linear-gradient(45deg, #f5f5f5, #f5f5f5 8px, #ececec 8px, #ececec 16px);
     border: 1px dashed #999;
     color: #666;
+}
+
+.ff-dark-surface .ff-look-unknown {
+    background: repeating-linear-gradient(45deg, rgba(255,255,255,0.05), rgba(255,255,255,0.05) 8px, rgba(255,255,255,0.1) 8px, rgba(255,255,255,0.1) 16px);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.75);
 }
 
 /* ---------------------------------------------------------------- selection */

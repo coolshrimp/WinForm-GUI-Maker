@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.2
+
+**Adaptive designer chrome for light and dark apps.** The designer-only UI
+drawn on the canvas — tab headers (which many apps hide at runtime; the strip
+exists in the designer purely for switching pages), GroupBox captions, and
+the unknown-control placeholder box — now picks its colors from the effective
+window background: dark themes get bright, high-contrast tab text (the 0.16.1
+gray-on-dark was hard to read), light themes keep dark text, and the active
+tab is bolder with a brighter accent in both. The switch is automatic per
+window, driven by the resolved background's luminance, so mixed light/dark
+projects each look right.
+
 ## 0.16.1
 
 Theme-preview polish after testing 0.16.0 against a real dark-themed app:

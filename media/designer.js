@@ -767,6 +767,9 @@
         const bg = resolveBrush(styleProp(windowEl, 'Background')) || '#ffffff';
         surfaceEl.style.background = bg;
         surfaceEl.style.setProperty('--ff-surface-bg', bg);
+        // Designer-only chrome (tab headers, GroupBox captions, placeholder
+        // boxes) flips to bright text on dark app themes for readability.
+        surfaceEl.classList.toggle('ff-dark-surface', isDarkColor(bg));
         surfaceEl.style.color = resolveBrush(styleProp(windowEl, 'Foreground')) || '';
         const winFf = styleProp(windowEl, 'FontFamily');
         surfaceEl.style.fontFamily = winFf && !winFf.includes('{') ? winFf : '';
@@ -1343,6 +1346,15 @@
                 hca === 'Left' ? 'flex-start' : hca === 'Right' ? 'flex-end' : 'center';
         }
         return inner;
+    }
+
+    /** True when a CSS color is dark (drives adaptive designer chrome). */
+    function isDarkColor(css) {
+        const hex = cssColorToHex(css || '#ffffff');
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 128;
     }
 
     /** WPF font weight names -> CSS numeric weights. */
