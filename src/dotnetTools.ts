@@ -669,6 +669,19 @@ export class DotnetTools implements vscode.Disposable {
         if (working) {
             const hit = this.projectIn(working);
             if (hit) { return hit; }
+            // The selected working folder holds no project file (renamed or
+            // deleted since it was chosen). NEVER fall through silently —
+            // that could create/build files in some other project.
+            const open = 'Open Project…';
+            const select = 'Select Working Folder…';
+            void vscode.window.showWarningMessage(
+                `UI Maker: the working folder "${path.basename(working)}" contains no .csproj/.vbproj — nothing was created or built. Pick the right project first.`,
+                open, select
+            ).then(choice => {
+                if (choice === open) { void vscode.commands.executeCommand('uimaker.openProject'); }
+                if (choice === select) { void vscode.commands.executeCommand('uimaker.selectWorkingFolder'); }
+            });
+            return undefined;
         }
 
         const active = vscode.window.activeTextEditor?.document.uri ?? DesignerActiveUri();

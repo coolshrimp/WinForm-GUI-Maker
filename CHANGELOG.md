@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.3
+
+Safety hardening for multi-project parent folders: every file-creating
+action already resolves its target by locating a real `.csproj`/`.vbproj`
+and writing next to it (New Window/Form, New Class, Add Image/Resource,
+imports, App Settings, installer output) — and now the one silent fallback
+is closed too: when the selected **working folder no longer contains a
+project file** (renamed/deleted since it was chosen), Run/Build/creation
+actions stop with a clear warning offering Open Project… / Select Working
+Folder… instead of quietly retargeting some other project in the workspace.
+
 ## 0.20.2
 
 The installer settings scope is now one click away (user request): a
