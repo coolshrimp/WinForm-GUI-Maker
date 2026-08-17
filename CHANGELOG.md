@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.6
+
+**Hover tooltips on every property row.** Both property panels (WPF and
+WinForms) now show a native tooltip when hovering any row — the property
+name plus the same plain-English description the bottom pane shows, without
+needing to click first. Filled in ~26 missing WPF descriptions (Content,
+Text, IsChecked, SelectedIndex, Stretch, Header, Orientation, scrollbar
+visibilities, and friends); all 165 WinForms property definitions already
+carried descriptions.
+
 ## 0.18.5
 
 Canvas fidelity, from overlaying designer vs runtime screenshots:

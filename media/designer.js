@@ -270,7 +270,33 @@
         Cursor: 'The mouse cursor shown while over the element.',
         Tag: 'Arbitrary data slot — not used by WPF itself.',
         BorderBrush: 'The brush that paints the border (with BorderThickness).',
-        BorderThickness: 'Border width per edge: uniform or left,top,right,bottom.'
+        BorderThickness: 'Border width per edge: uniform or left,top,right,bottom.',
+        Content: 'The content shown by the control — usually its text.',
+        Text: 'The text shown or edited by the control.',
+        TextWrapping: 'NoWrap (single line), Wrap, or WrapWithOverflow.',
+        MaxLength: 'Maximum number of characters the user can type (0 = unlimited).',
+        AcceptsReturn: 'Whether Enter inserts a new line (multi-line input).',
+        IsChecked: 'Whether the box/button is checked (True/False).',
+        GroupName: 'Radio buttons sharing a GroupName form one exclusive set.',
+        SelectedIndex: 'Index of the selected item (-1 = no selection).',
+        IsEditable: 'Whether the ComboBox also accepts typed free text.',
+        AutoGenerateColumns: 'Create one column per property of the bound items.',
+        IsReadOnly: 'Whether the user can edit the content.',
+        Stretch: 'How the image fills its bounds: None, Fill, Uniform, UniformToFill.',
+        Minimum: 'The lowest value of the range.',
+        Maximum: 'The highest value of the range.',
+        Value: 'The current value within Minimum…Maximum.',
+        IsIndeterminate: 'Marquee mode — animates without a specific value.',
+        TickFrequency: 'Spacing between tick marks on the slider.',
+        CornerRadius: 'Rounds the corners: one value or "tl,tr,br,bl".',
+        Header: 'The caption text (GroupBox title, tab caption, expander header).',
+        SelectedDate: 'The chosen date, e.g. 2026-08-17.',
+        DisplayMode: 'Calendar view: Month, Year, or Decade.',
+        IsExpanded: 'Whether the expander content is currently shown.',
+        Orientation: 'Vertical or Horizontal layout direction.',
+        LastChildFill: 'Give the final child all remaining DockPanel space.',
+        VerticalScrollBarVisibility: 'Auto, Visible, Hidden, or Disabled.',
+        HorizontalScrollBarVisibility: 'Auto, Visible, Hidden, or Disabled.'
     };
 
     // ------------------------------------------------------------------ state
@@ -2157,6 +2183,9 @@
         const show = () => showPropDesc(name, desc);
         row.addEventListener('focusin', show);
         row.addEventListener('mousedown', show);
+        // Native hover tooltip on every property row (same text as the
+        // description pane, available without clicking).
+        row.title = desc ? `${name}\n${desc}` : name;
     }
 
     function showPropDesc(name, desc) {
