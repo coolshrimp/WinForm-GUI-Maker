@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.1
+
+**Windows 11 chrome on the WinForms canvas.** WinForms apps run with modern
+visual styles, but the designer was drawing Windows-7-era control chrome —
+dark-gray button borders, harsh outlines. WinForms documents now render with
+the Windows 11 look: buttons are #FDFDFD with soft #D0D0D0 borders and 4px
+rounded corners, text boxes and lists get the lighter #ACACAC outline,
+GroupBoxes the near-invisible #D5D5D5 frame with normal-sized captions, and
+progress bars/separators match. Dark BackColor forms also get the adaptive
+designer chrome introduced in 0.16.2. WPF documents intentionally keep the
+flatter gray defaults — that is what unstyled WPF really looks like.
+
 ## 0.18.0
 
 **Recent Projects switch the working folder + auto-generated project files**

@@ -1341,3 +1341,47 @@ html, body {
 .ff-panel-splitter:has(+ #ff-props.ff-collapsed) {
     pointer-events: none;
 }
+
+/* -------------------------------------------- Windows 11 WinForms chrome */
+/* WinForms apps run with modern visual styles, so the canvas matches the
+ * Windows 11 look for classic controls. WPF documents keep the flatter
+ * gray defaults above — that IS unstyled WPF's real appearance. */
+
+.ff-winforms .ff-look-button {
+    background: #fdfdfd;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    color: #1a1a1a;
+    min-height: 22px;
+}
+
+.ff-winforms .ff-look-input {
+    background: #ffffff;
+    border: 1px solid #acacac;
+    border-radius: 0;
+}
+
+.ff-winforms .ff-look-list {
+    border: 1px solid #acacac;
+}
+
+.ff-winforms .ff-look-gb {
+    border: 1px solid #d5d5d5;
+    border-radius: 3px;
+    background: transparent;
+}
+
+.ff-winforms .ff-gb-header {
+    color: #1a1a1a;
+    font-size: 12px;
+}
+
+.ff-winforms .ff-look-progress {
+    background: #e6e6e6;
+    border: 1px solid #bcbcbc;
+    border-radius: 2px;
+}
+
+.ff-winforms .ff-look-separator {
+    background: #d5d5d5;
+}

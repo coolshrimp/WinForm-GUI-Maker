@@ -770,6 +770,7 @@
         // Designer-only chrome (tab headers, GroupBox captions, placeholder
         // boxes) flips to bright text on dark app themes for readability.
         surfaceEl.classList.toggle('ff-dark-surface', isDarkColor(bg));
+        surfaceEl.classList.remove('ff-winforms'); // XAML keeps WPF default chrome
         surfaceEl.style.color = resolveBrush(styleProp(windowEl, 'Foreground')) || '';
         const winFf = styleProp(windowEl, 'FontFamily');
         surfaceEl.style.fontFamily = winFf && !winFf.includes('{') ? winFf : '';
@@ -4012,7 +4013,11 @@
         windowBox.style.transform = `scale(${zoom})`;
         surfaceEl.style.display = 'block';
         surfaceEl.style.height = `${cs.h}px`;
-        surfaceEl.style.background = wfColor(wfForm.props.BackColor) || '#f0f0f0';
+        const wfBg = wfColor(wfForm.props.BackColor) || '#f0f0f0';
+        surfaceEl.style.background = wfBg;
+        // Windows-11 control chrome + adaptive designer chrome (dark forms).
+        surfaceEl.classList.add('ff-winforms');
+        surfaceEl.classList.toggle('ff-dark-surface', isDarkColor(wfBg));
 
         // Background layers: snap dots on top of the form's BackgroundImage.
         const layers = [], sizes = [], repeats = [], positions = [];
