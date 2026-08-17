@@ -43,6 +43,68 @@ export function inExcludedDir(p: string): boolean {
     return EXCLUDE_DIRS.some(d => parts.includes(d));
 }
 
+/** True when `dir` lies inside one of the open workspace folders. */
+export function inWorkspace(dir: string): boolean {
+    const d = dir.toLowerCase();
+    return (vscode.workspace.workspaceFolders ?? []).some(w => {
+        const root = w.uri.fsPath.toLowerCase();
+        return d === root || d.startsWith(root + path.sep);
+    });
+}
+
+/**
+ * Recursive fs listing of a folder (skipping build output/caches), used when
+ * the working project lives OUTSIDE the VS Code workspace — findFiles cannot
+ * see such folders, so the sidebar walks the disk directly.
+ */
+export function listFilesUnder(dir: string, limit = 800, maxDepth = 8): string[] {
+    const out: string[] = [];
+    const walk = (d: string, depth: number) => {
+        if (out.length >= limit || depth > maxDepth) { return; }
+        let entries: fs.Dirent[];
+        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+            if (out.length >= limit) { return; }
+            const full = path.join(d, e.name);
+            if (e.isDirectory()) {
+                if (!EXCLUDE_DIRS.includes(e.name.toLowerCase()) && !e.name.startsWith('.')) {
+                    walk(full, depth + 1);
+                }
+            } else if (e.isFile()) {
+                out.push(full);
+            }
+        }
+    };
+    walk(dir, 0);
+    return out;
+}
+
+/**
+ * Project folders inside `dir` (itself included), shallow-first, for the
+ * Open Project… picker. Depth-limited so pointing at a huge parent folder
+ * stays fast.
+ */
+export function findProjectDirsUnder(dir: string, maxDepth = 3, limit = 24): string[] {
+    const hits: string[] = [];
+    const queue: Array<{ d: string; depth: number }> = [{ d: dir, depth: 0 }];
+    while (queue.length && hits.length < limit) {
+        const { d, depth } = queue.shift()!;
+        let entries: fs.Dirent[];
+        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+        if (entries.some(e => e.isFile() && /\.(cs|vb)proj$/i.test(e.name))) {
+            hits.push(d);
+            continue; // nested projects under a project dir are rare; skip
+        }
+        if (depth >= maxDepth) { continue; }
+        for (const e of entries) {
+            if (e.isDirectory() && !EXCLUDE_DIRS.includes(e.name.toLowerCase()) && !e.name.startsWith('.')) {
+                queue.push({ d: path.join(d, e.name), depth: depth + 1 });
+            }
+        }
+    }
+    return hits;
+}
+
 /** Every project file in the workspace (excluding build output and caches). */
 export function workspaceProjectFiles(limit = 200): Thenable<vscode.Uri[]> {
     return vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, limit);
@@ -77,24 +139,39 @@ export function projectDirOf(file: string): string | undefined {
 /** Let the user pick the working project from the workspace's projects. */
 export async function pickWorkingFolder(): Promise<string | undefined> {
     const dirs = await workspaceProjectDirs();
+    // An externally-opened project (Open Project…) stays offered even though
+    // findFiles cannot see it.
+    const working = getWorkingFolder();
+    if (working && fs.existsSync(working) && !inWorkspace(working)
+        && !dirs.some(d => d.toLowerCase() === working.toLowerCase())) {
+        dirs.unshift(working);
+    }
     if (!dirs.length) {
-        void vscode.window.showWarningMessage('UI Maker: no .NET project found in this workspace.');
+        const open = 'Open Project…';
+        const choice = await vscode.window.showWarningMessage(
+            'UI Maker: no .NET project found in this workspace.', open);
+        if (choice === open) { void vscode.commands.executeCommand('uimaker.openProject'); }
         return undefined;
     }
-    if (dirs.length === 1) {
-        setWorkingFolder(dirs[0]);
-        return dirs[0];
-    }
+    const OPEN_OTHER = '__open_other__';
     const pick = await vscode.window.showQuickPick(
-        dirs.map(d => ({
-            label: path.basename(d),
-            description: vscode.workspace.asRelativePath(d),
-            dir: d
-        })),
+        [
+            ...dirs.map(d => ({
+                label: path.basename(d),
+                description: inWorkspace(d) ? vscode.workspace.asRelativePath(d) : d,
+                dir: d
+            })),
+            { label: '$(folder-opened) Open Project (any folder)…', description: 'browse the disk', dir: OPEN_OTHER }
+        ],
         { placeHolder: 'UI Maker: select the working project (Run, Build, and file lists target it)' }
     );
-    if (pick) { setWorkingFolder(pick.dir); }
-    return pick?.dir;
+    if (!pick?.dir) { return undefined; }
+    if (pick.dir === OPEN_OTHER) {
+        await vscode.commands.executeCommand('uimaker.openProject');
+        return getWorkingFolder();
+    }
+    setWorkingFolder(pick.dir);
+    return pick.dir;
 }
 
 /**

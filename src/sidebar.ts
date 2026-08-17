@@ -22,8 +22,8 @@ import * as path from 'path';
 import { DotnetTools } from './dotnetTools';
 import { folderTypeLabel } from './projectInfo';
 import {
-    EXCLUDE_GLOB, getWorkingFolder, onDidChangeWorkingFolder,
-    pickWorkingFolder, workspaceProjectDirs
+    EXCLUDE_GLOB, getWorkingFolder, inWorkspace, listFilesUnder,
+    onDidChangeWorkingFolder, pickWorkingFolder, workspaceProjectDirs
 } from './workingFolder';
 
 const RECENTS_KEY = 'uimaker.recentProjects';
@@ -158,6 +158,11 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     private async resolveScope(): Promise<{ mode: 'dir' | 'all' | 'pick'; dir?: string; multi: boolean }> {
         const dirs = await workspaceProjectDirs();
         const working = getWorkingFolder();
+        // A working project OUTSIDE the workspace (Open Project…) always wins:
+        // findFiles cannot see it, so everything below switches to fs walks.
+        if (working && fs.existsSync(working) && !inWorkspace(working)) {
+            return { mode: 'dir', dir: working, multi: dirs.length > 0 };
+        }
         if (dirs.length <= 1) { return { mode: 'all', multi: false }; }
         if (working && fs.existsSync(working)) { return { mode: 'dir', dir: working, multi: true }; }
         return { mode: 'pick', multi: true };
@@ -170,6 +175,36 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
             : glob;
     }
 
+    /** True when the scope points at a folder the workspace does not contain. */
+    private static externalScope(scope: { mode: string; dir?: string }): boolean {
+        return scope.mode === 'dir' && !!scope.dir && !inWorkspace(scope.dir);
+    }
+
+    /**
+     * Files for the active scope: findFiles inside the workspace, a direct
+     * fs walk for external projects opened via Open Project….
+     */
+    private async filesInScope(
+        scope: { mode: string; dir?: string },
+        glob: string,
+        matcher: RegExp,
+        limit: number
+    ): Promise<vscode.Uri[]> {
+        if (UiMakerSidebar.externalScope(scope)) {
+            return listFilesUnder(scope.dir!, limit)
+                .filter(p => matcher.test(p))
+                .map(p => vscode.Uri.file(p));
+        }
+        return vscode.workspace.findFiles(this.scopedPattern(scope, glob), EXCLUDE_GLOB, limit);
+    }
+
+    /** Display path for a file row (workspace-relative or project-relative). */
+    private static relLabel(scope: { mode: string; dir?: string }, uri: vscode.Uri): string {
+        return UiMakerSidebar.externalScope(scope)
+            ? path.relative(scope.dir!, uri.fsPath)
+            : vscode.workspace.asRelativePath(uri);
+    }
+
     private static pickHint(): SidebarItem {
         return new SidebarItem('Multiple projects here — choose a working folder', {
             icon: 'folder-opened',
@@ -180,12 +215,11 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
 
     /** Everything that is not a designable file, grouped by type category. */
     private async projectFileItems(scope: { mode: string; dir?: string }): Promise<SidebarItem[]> {
-        if (!vscode.workspace.workspaceFolders?.length) {
+        if (!vscode.workspace.workspaceFolders?.length && !UiMakerSidebar.externalScope(scope)) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
         if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
-        const files = await vscode.workspace.findFiles(
-            this.scopedPattern(scope, '**/*'), EXCLUDE_GLOB, 800);
+        const files = await this.filesInScope(scope, '**/*', /./, 800);
 
         // contextValue drives the inline add buttons (package.json menus).
         const cats: Record<string, { icon: string; context?: string; files: vscode.Uri[] }> = {
@@ -215,7 +249,7 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
             if (!cat.files.length) { continue; }
             cat.files.sort((a, b) => path.basename(a.fsPath).localeCompare(path.basename(b.fsPath)));
             const children = cat.files.map(uri => {
-                const rel = vscode.workspace.asRelativePath(uri);
+                const rel = UiMakerSidebar.relLabel(scope, uri);
                 const dir = path.dirname(rel);
                 const item = new SidebarItem(path.basename(uri.fsPath), {
                     command: 'vscode.open',
@@ -280,6 +314,11 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
                 : undefined;
 
         return [
+            new SidebarItem('Open Project…', {
+                icon: 'folder-opened',
+                command: 'uimaker.openProject',
+                tooltip: 'Point UI Maker at any .NET project folder on disk — it becomes the working folder for Run, Build, and the file lists, without changing the VS Code workspace.'
+            }),
             ...(workingRow ? [workingRow] : []),
             new SidebarItem('New .NET Desktop Project', { icon: 'new-folder', command: 'uimaker.newProject', tooltip: 'Scaffold a WPF, Windows Forms, or Console app via dotnet new (C# or Visual Basic)' }),
             new SidebarItem('Build', { icon: 'tools', command: 'uimaker.build', tooltip: 'Build the project (Debug)' }),
@@ -323,17 +362,17 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
 
     /** Every designable .xaml file in scope (skips build output). */
     private async designerFileItems(scope: { mode: string; dir?: string }, glob: string, icon: string, appIcon: string): Promise<SidebarItem[]> {
-        if (!vscode.workspace.workspaceFolders?.length) {
+        if (!vscode.workspace.workspaceFolders?.length && !UiMakerSidebar.externalScope(scope)) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
         if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
-        const files = await vscode.workspace.findFiles(this.scopedPattern(scope, glob), EXCLUDE_GLOB, 200);
+        const files = await this.filesInScope(scope, glob, /\.xaml$/i, 200);
         if (!files.length) {
             return [new SidebarItem('No matching files in this workspace', { icon: 'info' })];
         }
         files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
         return files.map(uri => {
-            const rel = vscode.workspace.asRelativePath(uri);
+            const rel = UiMakerSidebar.relLabel(scope, uri);
             const dir = path.dirname(rel);
             const isApp = uri.fsPath.toLowerCase().endsWith('app.xaml');
             const item = new SidebarItem(path.basename(uri.fsPath), {
@@ -352,11 +391,11 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     /** WinForms *.Designer.cs/.Designer.vb files (excluding generated codegen
      *  like Resources/Settings/Application designers and their folders). */
     private async winFormsItems(scope: { mode: string; dir?: string }): Promise<SidebarItem[]> {
-        if (!vscode.workspace.workspaceFolders?.length) {
+        if (!vscode.workspace.workspaceFolders?.length && !UiMakerSidebar.externalScope(scope)) {
             return [new SidebarItem('Open a folder to list its files', { icon: 'info' })];
         }
         if (scope.mode === 'pick') { return [UiMakerSidebar.pickHint()]; }
-        const files = await vscode.workspace.findFiles(this.scopedPattern(scope, '**/*.Designer.{cs,vb}'), EXCLUDE_GLOB, 200);
+        const files = await this.filesInScope(scope, '**/*.Designer.{cs,vb}', /\.designer\.(cs|vb)$/i, 200);
         const forms = files.filter(uri => {
             const base = path.basename(uri.fsPath).toLowerCase();
             if (/^(resources|settings|application)\.designer\.(cs|vb)$/.test(base)) { return false; }

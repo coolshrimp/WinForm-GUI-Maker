@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.17.0
+
+**Open Project — work on any project, from anywhere** (user request: run the
+extension independent of the opened folder, FAP-Studio style). UI Maker no
+longer requires the VS Code workspace to contain your .NET project:
+
+* **Open Project… action** — first row of the side panel's Actions (also in
+  the Command Palette): browse to any folder on disk, UI Maker finds the
+  `.csproj`/`.vbproj` inside (up to 3 levels deep, with a picker when several
+  are found) and makes it the working folder — without switching the VS Code
+  workspace.
+* **Everything follows the external working folder** — Run / Build / Debug /
+  Release, App Settings, Project Properties, and NuGet already resolved the
+  working folder first; now the sidebar's XAML Windows, WinForms Forms, and
+  Project Files lists walk the external folder directly (workspace search
+  can't see outside folders), the status-bar buttons appear, and file rows
+  show project-relative paths.
+* **No more dead ends** — the "no .NET project found in this workspace"
+  warnings from Run and the working-folder picker now offer **Open
+  Project…** right on the toast, and the working-folder quick-pick has an
+  "Open Project (any folder)…" entry and keeps an externally opened project
+  in its list.
+* Opened projects are added to Recent Projects as usual.
+
 ## 0.16.2
 
 **Adaptive designer chrome for light and dark apps.** The designer-only UI

@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.16.2",
+    "version": "0.17.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -91,6 +91,12 @@
                 "title": "New .NET Desktop Project",
                 "category": "UI Maker",
                 "icon": "$(new-folder)"
+            },
+            {
+                "command": "uimaker.openProject",
+                "title": "Open Project (Any Folder)…",
+                "category": "UI Maker",
+                "icon": "$(folder-opened)"
             },
             {
                 "command": "uimaker.openDesigner",

@@ -627,8 +627,11 @@ export class DotnetTools implements vscode.Disposable {
 
         const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 16);
         if (found.length === 0) {
+            const open = 'Open Project…';
             const create = 'New Project';
-            const choice = await vscode.window.showWarningMessage('UI Maker: no .NET project found in this workspace.', create);
+            const choice = await vscode.window.showWarningMessage(
+                'UI Maker: no .NET project found in this workspace.', open, create);
+            if (choice === open) { void vscode.commands.executeCommand('uimaker.openProject'); }
             if (choice === create) { void vscode.commands.executeCommand('uimaker.newProject'); }
             return undefined;
         }

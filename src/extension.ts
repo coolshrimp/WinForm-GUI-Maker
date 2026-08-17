@@ -22,7 +22,12 @@ import { openProjectProperties } from './projectProperties';
 import { openNugetPackages } from './nugetPackages';
 import { convertToSdkStyle } from './convertToSdk';
 import { registerXamlIntellisense } from './xamlIntellisense';
-import { EXCLUDE_GLOB, getWorkingFolder, initWorkingFolder } from './workingFolder';
+import {
+    EXCLUDE_GLOB, findProjectDirsUnder, getWorkingFolder, initWorkingFolder,
+    onDidChangeWorkingFolder, setWorkingFolder
+} from './workingFolder';
+import { touchRecentProject } from './sidebar';
+import * as path from 'path';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
 const statusItems: vscode.StatusBarItem[] = [];
@@ -55,6 +60,40 @@ export function activate(context: vscode.ExtensionContext): void {
             if (await requireWorkspaceTrust('create a project with the .NET CLI')) {
                 return newProject();
             }
+        }),
+
+        // Point UI Maker at ANY .NET project folder on disk (FAP-Studio
+        // style): the picked project becomes the working folder for Run,
+        // Build, and the sidebar lists — no workspace switch required.
+        vscode.commands.registerCommand('uimaker.openProject', async () => {
+            const picked = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Open .NET Project',
+                title: 'UI Maker: open a .NET project folder'
+            });
+            if (!picked?.length) { return; }
+            const root = picked[0].fsPath;
+            const dirs = findProjectDirsUnder(root);
+            if (!dirs.length) {
+                void vscode.window.showWarningMessage(
+                    `UI Maker: no .csproj/.vbproj found under ${path.basename(root)} (searched 3 levels deep).`);
+                return;
+            }
+            let dir = dirs[0];
+            if (dirs.length > 1) {
+                const pick = await vscode.window.showQuickPick(
+                    dirs.map(d => ({ label: path.basename(d), description: d, dir: d })),
+                    { placeHolder: 'Several projects found — pick the one to work on' });
+                if (!pick) { return; }
+                dir = pick.dir;
+            }
+            setWorkingFolder(dir);
+            touchRecentProject(dir);
+            await refreshProjectContext();
+            void vscode.window.showInformationMessage(
+                `UI Maker: working folder set to ${path.basename(dir)} — Run, Build, and the side panel now target it.`);
         }),
 
         // Re-open the given (or active) designable file in the designer editor.
@@ -155,13 +194,14 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(dotnet.onDidChangeState(() => updateRunStatusItems(dotnet)));
     updateRunStatusItems(dotnet);
 
-    // Show the buttons only when the workspace actually contains a .NET project,
-    // and keep watching in case one is created or removed later.
+    // Show the buttons only when a .NET project is reachable (workspace or an
+    // externally opened working folder), and keep watching for changes.
     void refreshProjectContext();
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.{csproj,vbproj}');
     watcher.onDidCreate(() => refreshProjectContext());
     watcher.onDidDelete(() => refreshProjectContext());
     context.subscriptions.push(watcher);
+    context.subscriptions.push(onDidChangeWorkingFolder(() => refreshProjectContext()));
 }
 
 export function deactivate(): void {
@@ -218,7 +258,8 @@ function updateRunStatusItems(dotnet: DotnetTools): void {
 /** Toggle status-bar buttons and the `uimaker.hasProject` context key. */
 async function refreshProjectContext(): Promise<void> {
     const found = await vscode.workspace.findFiles('**/*.{csproj,vbproj}', EXCLUDE_GLOB, 1);
-    const hasProject = found.length > 0;
+    // An external project opened via Open Project… counts too.
+    const hasProject = found.length > 0 || !!getWorkingFolder();
     await vscode.commands.executeCommand('setContext', 'uimaker.hasProject', hasProject);
     for (const item of statusItems) {
         if (hasProject) {
