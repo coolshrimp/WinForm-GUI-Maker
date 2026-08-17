@@ -1584,3 +1584,11 @@ html, body {
 #ff-zoom-label {
     cursor: pointer;
 }
+
+/* Drawn cursor icon inside cursor-picker items. */
+.ff-cursor-ic {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    opacity: 0.9;
+}

@@ -2282,6 +2282,33 @@
         input.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); } });
     }
 
+
+    /** Tiny drawn icons for each cursor (currentColor, theme-safe). */
+    const _curSvg = inner => `<svg class="ff-cursor-ic" viewBox="0 0 16 16" aria-hidden="true">${inner}</svg>`;
+    const _curArrow = '<path fill="currentColor" d="M4 1 L4 12.5 L7 9.9 L8.7 14 L10.6 13.2 L8.9 9.2 L12.6 9 Z"/>';
+    const _curGlass = '<path fill="none" stroke="currentColor" stroke-width="1.3" d="M4.5 2 H11.5 M4.5 14 H11.5 M5.5 2 C5.5 7 10.5 9 10.5 14 M10.5 2 C10.5 7 5.5 9 5.5 14"/>';
+    const _curDbl = a => _curSvg(`<g transform="rotate(${a} 8 8)"><path fill="currentColor" d="M8 1 L11 5 H9 V11 H11 L8 15 L5 11 H7 V5 H5 Z"/></g>`);
+    const CURSOR_ICONS = {
+        Default: _curSvg(_curArrow),
+        Arrow: _curSvg(_curArrow),
+        AppStarting: _curSvg(`<g transform="scale(0.78)">${_curArrow}</g><g transform="translate(7.5 6.5) scale(0.55)">${_curGlass}</g>`),
+        Wait: _curSvg(_curGlass),
+        WaitCursor: _curSvg(_curGlass),
+        Cross: _curSvg('<path d="M8 2 V14 M2 8 H14" stroke="currentColor" stroke-width="1.6" fill="none"/>'),
+        IBeam: _curSvg('<path d="M5.5 2 H10.5 M5.5 14 H10.5 M8 2 V14" stroke="currentColor" stroke-width="1.4" fill="none"/>'),
+        Help: _curSvg(`<g transform="scale(0.78)">${_curArrow}</g><text x="9.4" y="14" font-size="9.5" font-weight="700" fill="currentColor">?</text>`),
+        No: _curSvg('<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.1 11.9 L11.9 4.1" stroke="currentColor" stroke-width="1.5"/>'),
+        SizeAll: _curSvg('<path fill="currentColor" d="M8 0.5 L10.4 3.6 H8.8 V7.2 H12.4 V5.6 L15.5 8 L12.4 10.4 V8.8 H8.8 V12.4 H10.4 L8 15.5 L5.6 12.4 H7.2 V8.8 H3.6 V10.4 L0.5 8 L3.6 5.6 V7.2 H7.2 V3.6 H5.6 Z"/>'),
+        SizeNS: _curDbl(0),
+        SizeWE: _curDbl(90),
+        SizeNESW: _curDbl(45),
+        SizeNWSE: _curDbl(-45),
+        UpArrow: _curSvg('<path fill="currentColor" d="M8 1.5 L11.5 7 H9 V14 H7 V7 H4.5 Z"/>'),
+        HSplit: _curSvg('<path d="M2 6.6 H14 M2 9.4 H14" stroke="currentColor" stroke-width="1.2"/><path fill="currentColor" d="M8 0.8 L10.3 4.4 H5.7 Z M8 15.2 L5.7 11.6 H10.3 Z"/>'),
+        VSplit: _curSvg('<path d="M6.6 2 V14 M9.4 2 V14" stroke="currentColor" stroke-width="1.2"/><path fill="currentColor" d="M0.8 8 L4.4 5.7 V10.3 Z M15.2 8 L11.6 10.3 V5.7 Z"/>'),
+        Hand: _curSvg('<path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round" d="M6 14.5 C4.6 13 3.2 10.6 3.2 8.6 C3.2 7.5 4.7 7.3 5.1 8.4 L5.7 9.6 V3.2 C5.7 1.9 7.6 1.9 7.6 3.2 V7.3 C7.6 6.4 9.3 6.4 9.3 7.4 V8 C9.3 7.3 10.9 7.3 10.9 8.2 V8.8 C10.9 8.2 12.5 8.3 12.5 9.3 C12.5 11.4 11.7 13.1 10.5 14.5 Z"/>')
+    };
+
     /** WPF/WinForms cursor names -> CSS cursors (hover previews the real one). */
     const CURSOR_CSS = {
         Default: 'default', Arrow: 'default', AppStarting: 'progress',
@@ -2555,7 +2582,7 @@
             Cursor: () => ENUM_VALUES.Cursor.map(c => ({
                 value: c,
                 cursor: CURSOR_CSS[c] ?? 'default',
-                html: `${escapeHtml(c)}<span class="ff-combo-muted">hover previews</span>`
+                html: `${CURSOR_ICONS[c] ?? ''}${escapeHtml(c)}`
             }))
         };
         attachCombo(row, input, items[prop]);
@@ -6438,7 +6465,7 @@
             attachCombo(row, input, () => (WF_ENUM_VALUES.Cursors ?? []).map(c => ({
                 value: c,
                 cursor: CURSOR_CSS[c] ?? 'default',
-                html: `${escapeHtml(c)}<span class="ff-combo-muted">hover previews</span>`
+                html: `${CURSOR_ICONS[c] ?? ''}${escapeHtml(c)}`
             })));
             return { label: prop, cat: def.cat, node: row };
         }

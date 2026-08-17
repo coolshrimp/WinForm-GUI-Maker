@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.5
+
+**Cursor icons in the picker.** Every option in the Cursor dropdowns (WPF and
+WinForms) now shows a small drawn icon of that cursor — pointer, hand,
+I-beam, hourglass, crosshair, the resize arrows, splitters, no-entry — so
+you can see them all at a glance before hovering; hovering an option still
+previews the real cursor live. Icons are inline SVGs in the current theme
+color, crisp at any zoom.
+
 ## 0.19.4
 
 More visual pickers (user request):
