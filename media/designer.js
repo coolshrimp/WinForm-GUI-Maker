@@ -2193,6 +2193,88 @@
         propDescEl.innerHTML = `<b>${escapeHtml(name)}</b>${escapeHtml(desc || '')}`;
     }
 
+    // ------------------------------------------------- fancy editable combos
+    // datalist/select options cannot be styled, so rich pickers (color
+    // swatches, font previews) use a custom popup: the text input stays
+    // fully editable, the ▾ button (or typing) opens a filtered list.
+
+    let activeComboClose = null; // close the open popup before re-rendering
+
+    /**
+     * Attach a styled dropdown to a text input. `itemsProvider()` returns
+     * [{ value, html }]; picking one writes the value into the input and
+     * fires its change handler (so the row's normal commit path runs).
+     */
+    function attachCombo(row, input, itemsProvider) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ff-combo-btn';
+        btn.title = 'Show choices';
+        btn.textContent = '▾';
+        if (input.nextSibling) { row.insertBefore(btn, input.nextSibling); }
+        else { row.appendChild(btn); }
+
+        let pop = null;
+        const close = () => {
+            if (pop) { pop.remove(); pop = null; }
+            if (activeComboClose === close) { activeComboClose = null; }
+            document.removeEventListener('mousedown', onOutside, true);
+        };
+        const onOutside = e => {
+            if (pop && e.target !== input && e.target !== btn && !pop.contains(e.target)) { close(); }
+        };
+        const apply = value => {
+            input.value = value;
+            close();
+            input.dispatchEvent(new Event('change'));
+        };
+        const fill = filter => {
+            if (!pop) { return; }
+            pop.innerHTML = '';
+            for (const it of itemsProvider()) {
+                if (filter && !it.value.toLowerCase().includes(filter)) { continue; }
+                const r = document.createElement('div');
+                r.className = 'ff-combo-item';
+                r.innerHTML = it.html;
+                r.addEventListener('mousedown', e => { e.preventDefault(); apply(it.value); });
+                pop.appendChild(r);
+            }
+        };
+        const open = () => {
+            if (pop) { close(); return; }
+            if (activeComboClose) { activeComboClose(); }
+            activeComboClose = close;
+            pop = document.createElement('div');
+            pop.className = 'ff-combo-pop';
+            const r = input.getBoundingClientRect();
+            pop.style.left = `${r.left}px`;
+            pop.style.top = `${r.bottom + 2}px`;
+            pop.style.minWidth = `${Math.max(140, r.width)}px`;
+            document.body.appendChild(pop);
+            fill('');
+            // Flip upward when there is no room below.
+            if (typeof window !== 'undefined' && window.innerHeight
+                && r.bottom + pop.offsetHeight + 4 > window.innerHeight) {
+                pop.style.top = `${Math.max(4, r.top - pop.offsetHeight - 2)}px`;
+            }
+            document.addEventListener('mousedown', onOutside, true);
+        };
+        btn.addEventListener('mousedown', e => { e.preventDefault(); open(); });
+        input.addEventListener('input', () => {
+            if (!pop) { open(); }
+            fill(input.value.trim().toLowerCase());
+        });
+        input.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); } });
+    }
+
+    /** Swatch + name item HTML for a color choice. */
+    function colorItemHtml(value, css) {
+        const sw = css
+            ? `<span class="ff-sw" style="background:${css}"></span>`
+            : '<span class="ff-sw ff-sw-none"></span>';
+        return `${sw}${escapeHtml(value)}`;
+    }
+
     /** Get-or-create a shared <datalist>, returns its id. */
     function ensureDatalist(id, values) {
         if (!document.getElementById(id)) {
@@ -2209,6 +2291,7 @@
     }
 
     function renderPanel() {
+        if (activeComboClose) { activeComboClose(); }
         propsBody.innerHTML = '';
         if (propDescEl) { propDescEl.innerHTML = ''; }
 
@@ -2273,10 +2356,11 @@
             commit();
         };
         if (XAML_BRUSH_PROPS.has(prop)) { return xamlBrushRow(el, prop, write); }
+        if (['FontSize', 'FontFamily', 'FontWeight', 'FontStyle'].includes(prop)) {
+            return xamlFontRow(el, prop, write);
+        }
         if (ENUM_VALUES[prop]) { return xamlEnumRow(el, prop, write); }
         if (prop === 'Source' && el.localName === 'Image') { return xamlImagePathRow(el, prop, write); }
-        if (prop === 'FontSize') { return propRow(prop, el.getAttribute(prop) ?? '', write, XAML_FONT_SIZES); }
-        if (prop === 'FontFamily') { return propRow(prop, el.getAttribute(prop) ?? '', write, XAML_FONT_FAMILIES); }
         return propRow(prop, el.getAttribute(prop) ?? '', write);
     }
 
@@ -2336,12 +2420,17 @@
         input.value = imageBrush ? `(image) ${imageBrush.getAttribute('ImageSource') ?? ''}` : raw;
         input.placeholder = 'color, #hex, or {resource}';
         input.spellcheck = false;
-        input.setAttribute('list', brushDatalist());
         input.addEventListener('change', () => {
             const v = input.value.trim();
             if (v.startsWith('(image)')) { renderPanel(); return; } // display text, not a value
             write(v);
         });
+        attachCombo(row, input, () => [
+            ...[...styles.resources.entries()].map(([k, css]) =>
+                ({ value: `{StaticResource ${k}}`, html: colorItemHtml(`{StaticResource ${k}}`, css) })),
+            { value: 'Transparent', html: colorItemHtml('Transparent', '') },
+            ...WF_NAMED_COLORS.map(n => ({ value: n, html: colorItemHtml(n, n.toLowerCase()) }))
+        ]);
         input.addEventListener('keydown', e => {
             if (e.key === 'Enter') { input.blur(); }
             e.stopPropagation();
@@ -2369,6 +2458,52 @@
             clear.addEventListener('click', () => write(''));
             row.appendChild(clear);
         }
+        return row;
+    }
+
+    /**
+     * Editable font rows with live-preview dropdowns: families render in
+     * their own face, sizes at their actual size, weights/styles as
+     * themselves — while the text box still accepts anything (bindings,
+     * unusual values).
+     */
+    function xamlFontRow(el, prop, write) {
+        const row = document.createElement('div');
+        row.className = 'ff-prop-row';
+        const lab = document.createElement('label');
+        lab.textContent = prop;
+        row.appendChild(lab);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = el.getAttribute(prop) ?? '';
+        input.spellcheck = false;
+        input.addEventListener('change', () => write(input.value.trim()));
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { input.blur(); }
+            e.stopPropagation();
+        });
+        row.appendChild(input);
+
+        const items = {
+            FontSize: () => XAML_FONT_SIZES.map(s => ({
+                value: s,
+                html: `<span style="font-size:${Math.min(parseFloat(s) || 12, 36)}px;line-height:1.1">${s}</span>`
+            })),
+            FontFamily: () => XAML_FONT_FAMILIES.map(f => ({
+                value: f,
+                html: `<span style="font-family:'${f}'">${escapeHtml(f)}</span>`
+            })),
+            FontWeight: () => ENUM_VALUES.FontWeight.map(w => ({
+                value: w,
+                html: `<span style="font-weight:${cssFontWeight(w)}">${w}</span>`
+            })),
+            FontStyle: () => ENUM_VALUES.FontStyle.map(s => ({
+                value: s,
+                html: `<span style="font-style:${s.toLowerCase() === 'normal' ? 'normal' : s.toLowerCase()}">${s}</span>`
+            }))
+        };
+        attachCombo(row, input, items[prop]);
         return row;
     }
 
@@ -6284,7 +6419,12 @@
             input.value = display ?? '';
             input.placeholder = def.def ?? '';
             input.spellcheck = false;
-            input.setAttribute('list', ensureDatalist('ff-dl-colors', [...WF_SYSTEM_COLOR_NAMES, ...WF_NAMED_COLORS]));
+            attachCombo(row, input, () => [
+                ...WF_SYSTEM_COLOR_NAMES.map(n =>
+                    ({ value: n, html: colorItemHtml(n, WF_SYSTEM_COLORS[n] ?? '') })),
+                ...WF_NAMED_COLORS.map(n =>
+                    ({ value: n, html: colorItemHtml(n, n === 'Transparent' ? '' : n.toLowerCase()) }))
+            ]);
             input.addEventListener('change', () => {
                 const v = input.value.trim();
                 if (v === '') { remove(); return; }
@@ -6316,6 +6456,18 @@
             e.stopPropagation();
         });
         row.appendChild(input);
+        if (def.kind === 'font') {
+            // Family picker that keeps the size/style part of the value.
+            attachCombo(row, input, () => XAML_FONT_FAMILIES.map(f => {
+                const base = input.value.trim() || def.def || 'Segoe UI, 9pt';
+                const rest = base.includes(',') ? base.slice(base.indexOf(',')) : ', 9pt';
+                return {
+                    value: `${f}${rest}`,
+                    html: `<span style="font-family:'${f}'">${escapeHtml(f)}</span>`
+                        + `<span class="ff-combo-muted">${escapeHtml(rest)}</span>`
+                };
+            }));
+        }
         return { label: prop, cat: def.cat, node: row };
     }
 

@@ -132,6 +132,11 @@ Open any `.xaml` window in the UI Maker Designer:
   `Foreground`, `BorderBrush`, `Fill`, `Stroke`) accept a color name, hex, or
   `{StaticResource}` text, and `Background` has a 🖼 button that imports an
   image and writes an `ImageBrush` — so a picture background is two clicks.
+  Color and font rows use editable
+  combos with live previews: every color choice shows a swatch square (your
+  `{StaticResource}` brushes listed first), font families render in their own
+  face, sizes at their actual size, and weights/styles as themselves — while
+  the text box still accepts bindings and resources.
   Explicitly-set values render **bold**, and clearing a value removes it from
   the file — exactly like VS.
 - **Images and icons** — `Image`, `BackgroundImage`, and the form `Icon`

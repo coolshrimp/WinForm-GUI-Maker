@@ -1501,3 +1501,72 @@ html, body {
 .ff-winforms .ff-glyph {
     margin-right: 4px;
 }
+
+/* --------------------------------------------------- fancy editable combos */
+
+.ff-combo-btn {
+    flex: 0 0 auto;
+    width: 18px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border, #555);
+    border-radius: 3px;
+    color: inherit;
+    font-size: 9px;
+    cursor: pointer;
+}
+
+.ff-combo-btn:hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.25));
+}
+
+.ff-combo-pop {
+    position: fixed;
+    z-index: 1000;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--vscode-dropdown-background, #252526);
+    color: var(--vscode-dropdown-foreground, #cccccc);
+    border: 1px solid var(--vscode-dropdown-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+    padding: 2px;
+}
+
+.ff-combo-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 9px;
+    cursor: pointer;
+    white-space: nowrap;
+    border-radius: 3px;
+}
+
+.ff-combo-item:hover {
+    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
+.ff-combo-muted {
+    opacity: 0.55;
+    font-size: 11px;
+}
+
+/* Color swatch square inside combo items. */
+.ff-sw {
+    flex: 0 0 auto;
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border: 1px solid rgba(127, 127, 127, 0.65);
+    border-radius: 3px;
+}
+
+/* Transparent / unresolvable colors: little checkerboard. */
+.ff-sw-none {
+    background:
+        linear-gradient(45deg, #999 25%, transparent 25%, transparent 75%, #999 75%),
+        linear-gradient(45deg, #999 25%, #ddd 25%, #ddd 75%, #999 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 4px 4px;
+}

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.19.0
+
+**Rich pickers in the property grid** (user request). Native dropdowns can't
+style their options, so the panel gained a custom editable combo — the text
+box still accepts anything (bindings, resources, odd values), and the ▾
+button (or just typing, which filters live) opens a styled list:
+
+* **Color swatches on every choice** — brush/color rows list the project's
+  own `{StaticResource …}` brushes first, each with a live swatch square,
+  then all named colors with their actual color; Transparent and
+  unresolvable entries show a checkerboard. Works in both the WPF and
+  WinForms panels (system colors included).
+* **Fonts preview as themselves** — FontFamily lists each family rendered in
+  its own face, FontSize shows every size at its actual size, FontWeight
+  options render at their weight, FontStyle in its style.
+* **WinForms Font row** gets a family dropdown too — each face previewed,
+  and picking one keeps the existing `, 9pt, style=…` part of the value.
+* Popups follow the input, flip upward when out of room, close on outside
+  click/Escape, and typing filters the list.
+
 ## 0.18.7
 
 Fix: WinForms labels, checkboxes, and radio buttons rendered a few pixels
