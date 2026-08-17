@@ -338,6 +338,11 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
                 : new SidebarItem('Debug App', { icon: 'debug-alt', iconColor: 'charts.green', command: 'uimaker.debugToggle', tooltip: 'Build and launch under the debugger' }),
             new SidebarItem('Build Release (Publish)', { icon: 'package', command: 'uimaker.release', tooltip: 'Publish a Release build (honors the single .exe settings — see UI Maker settings)' }),
             new SidebarItem('Create Installer', { icon: 'package', iconColor: 'charts.purple', command: 'uimaker.createInstaller', tooltip: 'Package the publish output into a Windows installer (Inno Setup) — customizable, with remembered settings' }),
+            new SidebarItem('Extension Settings', {
+                icon: 'settings',
+                command: 'uimaker.openSettings',
+                tooltip: 'Open the full UI Maker settings page (all uimaker.* settings — installer scope, publish mode, XAML IntelliSense, and more)'
+            }),
             new SidebarItem('Project Properties', { icon: 'gear', command: 'uimaker.projectProperties', tooltip: 'Visual Studio-style project properties — output type, target framework, assembly name, namespace, icon, manifest, version info' }),
             new SidebarItem('NuGet Packages', { icon: 'archive', command: 'uimaker.nugetPackages', tooltip: 'Browse, install, update, and remove NuGet packages for this project (nuget.org)' }),
             new SidebarItem('App Settings', { icon: 'settings-gear', command: 'uimaker.appSettings', tooltip: 'Define the settings your app remembers (Properties.Settings) — names, types, User/Application scope, defaults' }),

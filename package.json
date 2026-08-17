@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.20.3",
+    "version": "0.20.5",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -143,6 +143,12 @@
             {
                 "command": "uimaker.installerSettingsScope",
                 "title": "Installer Settings: Uniform Template or Per-Project…",
+                "category": "UI Maker",
+                "icon": "$(settings-gear)"
+            },
+            {
+                "command": "uimaker.openSettings",
+                "title": "Open Settings (UI Maker)",
                 "category": "UI Maker",
                 "icon": "$(settings-gear)"
             },

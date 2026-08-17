@@ -167,6 +167,11 @@ export function activate(context: vscode.ExtensionContext): void {
             }
         }),
         vscode.commands.registerCommand('uimaker.installerSettingsScope', () => pickInstallerScope()),
+
+        // The full UI Maker settings page — same view as Extensions → UI Maker
+        // → the gear → Settings, but reachable from the sidebar and palette.
+        vscode.commands.registerCommand('uimaker.openSettings', () =>
+            vscode.commands.executeCommand('workbench.action.openSettings', '@ext:coolshrimp.uimaker')),
         vscode.commands.registerCommand('uimaker.nugetPackages', (project?: string) => openNugetPackages(dotnet, project)),
 
         // Classic .NET Framework project -> modern SDK format (fixes the

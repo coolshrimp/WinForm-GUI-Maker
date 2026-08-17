@@ -345,6 +345,8 @@ launches with UI Maker loaded.
 | `UI Maker: Debug / Stop Debugging` | Build and debug the app, or stop the session |
 | `UI Maker: Build Release (Publish)` | Publish a Release build (honors the single-exe settings) |
 | `UI Maker: Create Installer (Inno Setup)` | Package the publish output into a Windows installer — customizable, settings remembered (uniform template or per project) |
+| `UI Maker: Installer Settings — Uniform Template or Per-Project…` | Switch how installer settings are remembered (also via the Change… button on the Create Installer page) |
+| `UI Maker: Open Settings (UI Maker)` | Open the full UI Maker settings page (`@ext:coolshrimp.uimaker`) — also a sidebar row (**Extension Settings**, under Create Installer) |
 | `UI Maker: Stop Running App` | Terminate the app started by Run |
 | `UI Maker: App Settings` | Grid editor for the settings your app remembers (`Properties.Settings`) |
 | `UI Maker: Project Properties` | VS-style Application page — output type, framework, assembly name, icon, manifest, version info |

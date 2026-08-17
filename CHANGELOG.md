@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.20.5
+
+The sidebar row from 0.20.4 is replaced per feedback: instead of the
+scope quick-pick, an **Extension Settings** row (under Create Installer)
+opens the full UI Maker settings page — the same `@ext:coolshrimp.uimaker`
+view previously reachable only through Extensions → UI Maker → gear →
+Settings. All uimaker.* settings live there: installer scope, single-exe
+publish options, XAML IntelliSense, and the rest. Also added as a palette
+command: **UI Maker: Open Settings (UI Maker)**. The scope quick-pick
+still exists via the Create Installer page's Change… button and its own
+palette command.
+
+## 0.20.4
+
+The installer settings scope now has a visible home in the sidebar (user
+request — the palette command and webview button weren't discoverable):
+a new **Installer Settings Scope** row in Actions, right under Create
+Installer, showing the current mode (`uniform template` / `per-project`)
+as its description. Clicking it opens the same switcher quick-pick, and
+the row's label updates live whenever the setting changes from anywhere
+(the row, the Create Installer page's Change… button, the Command
+Palette, or the Settings UI).
+
 ## 0.20.3
 
 Safety hardening for multi-project parent folders: every file-creating
