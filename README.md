@@ -52,9 +52,10 @@ the far left) to open the side panel:
   configs), so opening a parent folder full of projects never lets one
   project's action touch another. Click the row to switch projects.
 - **Recent Projects** — every .NET project you open or create, tagged with its
-  type (`WinForms · .NET 8`, `WPF · .NET Framework 4.7.2`, …); click to switch.
-  Hover a project for one-click **Open in New Window**, **Open Folder in File
-  Explorer**, and **Remove**.
+  type (`WinForms · .NET 8`, `WPF · .NET Framework 4.7.2`, …); click one and
+  it becomes the **working folder** (Run, Build, and the file lists switch to
+  it) without touching your open workspace. Hover a project for one-click
+  **Open in New Window**, **Open Folder in File Explorer**, and **Remove**.
 - **XAML Windows** and **WinForms Forms** — every designable file in the
   *working project*, C# (`*.Designer.cs`) and Visual Basic (`*.Designer.vb`)
   alike; click one to open it straight in the visual designer. Use
@@ -327,7 +328,7 @@ launches with UI Maker loaded.
 | Command | What it does |
 |---|---|
 | `UI Maker: New .NET Desktop Project` | Scaffold a WPF, WinForms, or Console app (C#/VB) via `dotnet new` |
-| `UI Maker: Open Project (Any Folder)…` | Make any .NET project on disk the working folder — Run/Build/side panel target it without changing the workspace |
+| `UI Maker: Open Project (Any Folder)…` | Make any .NET project on disk the working folder — Run/Build/side panel target it without changing the workspace. Folders with sources but no project file get one generated (SDK-style, language/UI flavor auto-detected) |
 | `UI Maker: New WPF Window` | Add a `.xaml` + code-behind pair (`.xaml.cs` / `.xaml.vb`) to the project |
 | `UI Maker: New WinForms Form` | Add a Form in the project's language (`.cs` + `.Designer.cs`, or `.vb` + `.Designer.vb`) |
 | `UI Maker: Open in Designer` | Open the current `.xaml`, `*.Designer.cs`, or `*.Designer.vb` file in the visual designer |

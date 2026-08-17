@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.18.0
+
+**Recent Projects switch the working folder + auto-generated project files**
+(user requests from live testing):
+
+* **Clicking a Recent Project no longer hijacks your workspace** — it now
+  switches UI Maker's *working folder* (Run, Build, and the file lists all
+  retarget instantly), leaving your open folder and editors alone. The row's
+  hover buttons still offer **Open in New Window** / **Open Folder in File
+  Explorer** when you do want it as a workspace, and the "current" badge now
+  follows the working folder.
+* **Generate Project File** — pointing Open Project… at a folder of orphan
+  sources (a WinForms/WPF app with no `.csproj`/`.vbproj` — copied code,
+  legacy folders, loose source dumps) now offers to generate one: UI Maker
+  detects the language (C#/VB) and UI flavor (WinForms/WPF/both) from the
+  files, derives the RootNamespace from the namespaces the sources actually
+  declare, keeps a legacy `AssemblyInfo.cs` authoritative
+  (`GenerateAssemblyInfo=false`) to avoid duplicate-attribute errors, and
+  writes a minimal SDK-style project targeting an installed .NET SDK (or
+  net48 for classic-framework code). The folder then builds, runs, and
+  designs like any other project — no Visual Studio needed to rescue it.
+
 ## 0.17.0
 
 **Open Project — work on any project, from anywhere** (user request: run the

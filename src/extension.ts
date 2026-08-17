@@ -12,7 +12,7 @@
 import * as vscode from 'vscode';
 import { DesignerProvider } from './designerProvider';
 import { DotnetTools } from './dotnetTools';
-import { newProject } from './scaffold';
+import { newProject, generateProjectFile } from './scaffold';
 import { registerSidebar } from './sidebar';
 import { addXamlWindow, addWinForm, duplicateDesignFile } from './formFiles';
 import { addCsFile, addResourceFiles } from './resources';
@@ -77,9 +77,16 @@ export function activate(context: vscode.ExtensionContext): void {
             const root = picked[0].fsPath;
             const dirs = findProjectDirsUnder(root);
             if (!dirs.length) {
-                void vscode.window.showWarningMessage(
-                    `UI Maker: no .csproj/.vbproj found under ${path.basename(root)} (searched 3 levels deep).`);
-                return;
+                // Orphan sources (no project file): offer to generate one so
+                // the folder builds — the usual case for copied/legacy code.
+                const gen = 'Generate Project File';
+                const choice = await vscode.window.showWarningMessage(
+                    `UI Maker: no .csproj/.vbproj under "${path.basename(root)}". Generate one from the sources so it builds and runs?`,
+                    gen);
+                if (choice !== gen) { return; }
+                const proj = await generateProjectFile(root);
+                if (!proj) { return; }
+                dirs.push(path.dirname(proj));
             }
             let dir = dirs[0];
             if (dirs.length > 1) {

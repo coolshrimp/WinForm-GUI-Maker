@@ -23,7 +23,7 @@ import { DotnetTools } from './dotnetTools';
 import { folderTypeLabel } from './projectInfo';
 import {
     EXCLUDE_GLOB, getWorkingFolder, inWorkspace, listFilesUnder,
-    onDidChangeWorkingFolder, pickWorkingFolder, workspaceProjectDirs
+    onDidChangeWorkingFolder, pickWorkingFolder, setWorkingFolder, workspaceProjectDirs
 } from './workingFolder';
 
 const RECENTS_KEY = 'uimaker.recentProjects';
@@ -339,7 +339,7 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
 
     /** Recent .NET project folders — click to switch this window over. */
     private recentItems(): SidebarItem[] {
-        const active = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.toLowerCase();
+        const active = (getWorkingFolder() ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)?.toLowerCase();
         const recents = getRecents();
         if (!recents.length) {
             return [new SidebarItem('Projects you open or create appear here', { icon: 'info' })];
@@ -352,7 +352,7 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
                 command: isActive ? undefined : 'uimaker.recentOpen',
                 args: [r.path],
                 description: isActive ? (type ? `current · ${type}` : 'current') : (type || undefined),
-                tooltip: `${r.path}${type ? `\n${type}` : ''}\nClick to open this project in the current window`,
+                tooltip: `${r.path}${type ? `\n${type}` : ''}\nClick to make this the working project (Run, Build, and the file lists switch to it). Use the hover buttons to open it as a workspace.`,
                 contextValue: 'uimakerRecent'
             });
             item.projectPath = r.path;
@@ -450,8 +450,12 @@ export function registerSidebar(context: vscode.ExtensionContext, dotnet: Dotnet
                 if (pick) { removeRecent(folder); sidebar.refresh(); }
                 return;
             }
+            // Clicking a recent project switches UI Maker's WORKING FOLDER —
+            // the user may be sitting in another folder with files open, so
+            // the workspace is never hijacked. The row's "Open in New Window"
+            // button remains the way to open it as a workspace.
             touchRecentProject(folder);
-            await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(folder), { forceNewWindow: false });
+            setWorkingFolder(folder);
         }),
 
         vscode.commands.registerCommand('uimaker.recentOpenNewWindow', async (item: unknown) => {

@@ -10,6 +10,7 @@ import * as cp from 'child_process';
 import { promisify } from 'util';
 import { touchRecentProject } from './sidebar';
 import { installedSdkMajors, isLtsDotnet } from './projectInfo';
+import { listFilesUnder } from './workingFolder';
 
 const execFile = promisify(cp.execFile);
 
@@ -127,4 +128,106 @@ export async function newProject(): Promise<void> {
             { forceNewWindow: choice === newWindow }
         );
     }
+}
+
+/**
+ * Generate a minimal SDK-style project file for a folder of orphan sources —
+ * a WinForms/WPF app with no .csproj/.vbproj (copied code, legacy folders,
+ * loose source dumps). Detects the language and UI flavor from the files,
+ * derives the root namespace from the sources so Properties.Resources and
+ * friends keep working, asks for the target framework, and writes
+ * <Folder>.csproj so `dotnet build/run` and every UI Maker feature work.
+ * Returns the created project file path, or undefined when cancelled.
+ */
+export async function generateProjectFile(dir: string): Promise<string | undefined> {
+    const files = listFilesUnder(dir, 2000);
+    const cs = files.filter(f => /\.cs$/i.test(f));
+    const vb = files.filter(f => /\.vb$/i.test(f));
+    const xaml = files.filter(f => /\.xaml$/i.test(f));
+    if (!cs.length && !vb.length && !xaml.length) {
+        void vscode.window.showWarningMessage(
+            'UI Maker: no C#, VB, or XAML source files found in this folder — nothing to build a project from.');
+        return undefined;
+    }
+    const lang: 'cs' | 'vb' = vb.length > cs.length ? 'vb' : 'cs';
+    const sources = lang === 'vb' ? vb : cs;
+
+    // UI flavor + declared namespaces, from a bounded scan of the sources.
+    let winforms = false;
+    let wpf = xaml.length > 0;
+    const nsCounts = new Map<string, number>();
+    for (const f of sources.slice(0, 120)) {
+        let text: string;
+        try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
+        if (text.includes('System.Windows.Forms')) { winforms = true; }
+        if (/System\.Windows\.(Controls|Media|Window)/.test(text)) { wpf = true; }
+        const ns = /(?:^|\n)\s*[Nn]amespace\s+([A-Za-z_][\w.]*)/.exec(text)?.[1];
+        if (ns) { nsCounts.set(ns, (nsCounts.get(ns) ?? 0) + 1); }
+    }
+    if (!winforms && !wpf) { winforms = true; } // desktop default keeps the designer usable
+
+    // Target framework: what this machine's SDKs can build, plus classic 4.8.
+    const majors = await installedSdkMajors();
+    const offered = (majors.length ? majors : [8]).filter(m => m >= 6);
+    const tfmPick = await vscode.window.showQuickPick(
+        [
+            ...offered.map(m => ({
+                label: `.NET ${m} (net${m}.0-windows)`,
+                description: isLtsDotnet(m) ? 'Long-term support — recommended for old WinForms/WPF code' : undefined,
+                tfm: `net${m}.0-windows`
+            })),
+            {
+                label: '.NET Framework 4.8 (net48)',
+                description: 'Classic framework — for code that will not run on modern .NET',
+                tfm: 'net48'
+            }
+        ],
+        {
+            placeHolder: `Generate ${path.basename(dir)}.${lang}proj — choose the target framework `
+                + `(${winforms && wpf ? 'WinForms + WPF' : winforms ? 'WinForms' : 'WPF'}, ${lang === 'vb' ? 'Visual Basic' : 'C#'} detected)`
+        }
+    );
+    if (!tfmPick) { return undefined; }
+
+    const name = path.basename(dir).replace(/[^A-Za-z0-9_.]/g, '_').replace(/^(\d)/, '_$1') || 'App';
+    const projPath = path.join(dir, `${name}.${lang}proj`);
+    if (fs.existsSync(projPath)) {
+        void vscode.window.showWarningMessage(`UI Maker: ${path.basename(projPath)} already exists.`);
+        return projPath;
+    }
+
+    // Most common namespace declared in the sources wins as RootNamespace.
+    // VB prepends the root namespace to declared ones, so when VB files
+    // declare their own namespaces the root must be empty.
+    const topNs = [...nsCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const rootNs = lang === 'vb' ? (nsCounts.size ? '' : name) : (topNs ?? name);
+
+    // Legacy AssemblyInfo.cs files carry the same attributes the SDK now
+    // generates — keep the old file authoritative to avoid duplicate errors.
+    const hasAssemblyInfo = files.some(f => /assemblyinfo\.(cs|vb)$/i.test(f));
+
+    const lines = [
+        '<Project Sdk="Microsoft.NET.Sdk">',
+        '    <PropertyGroup>',
+        '        <OutputType>WinExe</OutputType>',
+        `        <TargetFramework>${tfmPick.tfm}</TargetFramework>`,
+        ...(winforms ? ['        <UseWindowsForms>true</UseWindowsForms>'] : []),
+        ...(wpf ? ['        <UseWPF>true</UseWPF>'] : []),
+        `        <AssemblyName>${name}</AssemblyName>`,
+        `        <RootNamespace>${rootNs}</RootNamespace>`,
+        ...(hasAssemblyInfo ? ['        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>'] : []),
+        '    </PropertyGroup>',
+        '</Project>',
+        ''
+    ];
+    try {
+        fs.writeFileSync(projPath, lines.join('\n'), 'utf8');
+    } catch (err) {
+        void vscode.window.showErrorMessage(
+            `UI Maker: could not write ${path.basename(projPath)} — ${err instanceof Error ? err.message : err}`);
+        return undefined;
+    }
+    void vscode.window.showInformationMessage(
+        `UI Maker: created ${path.basename(projPath)} (${tfmPick.tfm}${winforms ? ', WinForms' : ''}${wpf ? ', WPF' : ''}) — the folder now builds with dotnet.`);
+    return projPath;
 }
