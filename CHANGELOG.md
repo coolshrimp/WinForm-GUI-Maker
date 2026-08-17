@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.4
+
+Fix: **AutoSize checkboxes, radio buttons, and labels no longer wrap or clip
+their captions** on the WinForms canvas. These controls size to their text at
+runtime, but the designer was enforcing the Designer-file Size — a snapshot
+that is often too small (different DPI/font when it was written). AutoSize
+controls now grow naturally with the stored size as a floor, keeping captions
+on one line exactly like the running app. Explicit AutoSize=False and docked
+controls keep their stored dimensions.
+
 ## 0.18.3
 
 Fix: opening a project in a new window (single-project workspace) showed no

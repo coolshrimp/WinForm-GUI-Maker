@@ -4187,6 +4187,25 @@
         div.style.width = `${size.w}px`;
         div.style.height = `${size.h}px`;
 
+        // AutoSize controls grow to fit their text at runtime — the stored
+        // Size is only a design-time snapshot (often from another DPI/font),
+        // so honoring it wraps and clips captions. Let these size naturally,
+        // using the stored Size as a floor. CheckBox/RadioButton/LinkLabel
+        // default to AutoSize=true; Label only when declared (its WinForms
+        // default is false, though VS sets it true on every label it drops).
+        const autoSizeDefault = ctrl.type === 'CheckBox' || ctrl.type === 'RadioButton' || ctrl.type === 'LinkLabel';
+        const autoSize = ctrl.props.AutoSize !== undefined
+            ? /true/i.test(ctrl.props.AutoSize)
+            : autoSizeDefault;
+        if (autoSize && !dockRect
+            && ['Label', 'LinkLabel', 'CheckBox', 'RadioButton'].includes(ctrl.type)) {
+            div.style.width = 'auto';
+            div.style.height = 'auto';
+            div.style.minWidth = `${Math.min(size.w, 20)}px`;
+            div.style.minHeight = `${size.h}px`;
+            div.classList.add('ff-wf-autosize');
+        }
+
         // Docked controls get the rectangle the container's dock layout
         // computed — siblings push each other for space like the real engine.
         if (dockRect) {

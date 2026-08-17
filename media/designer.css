@@ -1424,3 +1424,11 @@ html, body {
 .ff-winforms .ff-look-separator {
     background: #d5d5d5;
 }
+
+/* AutoSize WinForms controls (labels, check/radio boxes): text on one line,
+ * never clipped — matching how the real control grows to fit at runtime. */
+.ff-wf-autosize,
+.ff-wf-autosize .ff-inner {
+    white-space: nowrap;
+    overflow: visible;
+}
