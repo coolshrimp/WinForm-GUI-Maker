@@ -1243,12 +1243,12 @@
                 break;
             case 'CheckBox':
                 inner.classList.add('ff-look-label');
-                inner.innerHTML = `<span class="ff-glyph">${el.getAttribute('IsChecked') === 'True' ? '☑' : '☐'}</span>`;
+                inner.innerHTML = `<span class="ff-glyph ${el.getAttribute('IsChecked') === 'True' ? 'ff-check-on' : 'ff-check-off'}"></span>`;
                 inner.append(content || 'CheckBox');
                 break;
             case 'RadioButton':
                 inner.classList.add('ff-look-label');
-                inner.innerHTML = `<span class="ff-glyph">${el.getAttribute('IsChecked') === 'True' ? '◉' : '○'}</span>`;
+                inner.innerHTML = `<span class="ff-glyph ${el.getAttribute('IsChecked') === 'True' ? 'ff-radio-on' : 'ff-radio-off'}"></span>`;
                 inner.append(content || 'RadioButton');
                 break;
             case 'ComboBox':
@@ -4463,12 +4463,12 @@
                 break;
             case 'CheckBox':
                 inner.classList.add('ff-look-label');
-                inner.innerHTML = `<span class="ff-glyph">${/^true$/i.test(ctrl.props.Checked?.trim() ?? '') ? '☑' : '☐'}</span>`;
+                inner.innerHTML = `<span class="ff-glyph ${/^true$/i.test(ctrl.props.Checked?.trim() ?? '') ? 'ff-check-on' : 'ff-check-off'}"></span>`;
                 inner.append(text || ctrl.name);
                 break;
             case 'RadioButton':
                 inner.classList.add('ff-look-label');
-                inner.innerHTML = `<span class="ff-glyph">${/^true$/i.test(ctrl.props.Checked?.trim() ?? '') ? '◉' : '○'}</span>`;
+                inner.innerHTML = `<span class="ff-glyph ${/^true$/i.test(ctrl.props.Checked?.trim() ?? '') ? 'ff-radio-on' : 'ff-radio-off'}"></span>`;
                 inner.append(text || ctrl.name);
                 break;
             case 'ComboBox':

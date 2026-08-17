@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.5
+
+Canvas fidelity, from overlaying designer vs runtime screenshots:
+
+* **Real check/radio glyphs** — CheckBox and RadioButton marks are now drawn
+  13px Windows-11-style boxes and circles (blue fill + white check when
+  checked) instead of undersized unicode characters.
+* **Correct default text size** — the canvas previously inherited the
+  editor's 13px UI font; controls now render with Segoe UI at 12px (9pt),
+  the actual WinForms/WPF default, so text metrics line up with the running
+  app. Explicit Font/FontSize properties still override per control.
+
 ## 0.18.4
 
 Fix: **AutoSize checkboxes, radio buttons, and labels no longer wrap or clip

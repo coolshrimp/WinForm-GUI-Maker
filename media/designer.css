@@ -279,6 +279,10 @@ html, body {
     overflow: hidden;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
     background: #fff;
+    /* Default control text: Segoe UI 9pt (12px) — what WinForms and WPF
+     * actually render with, instead of the editor's 13px UI font. */
+    font-family: "Segoe UI", "Segoe UI Variable Text", system-ui, sans-serif;
+    font-size: 12px;
 }
 
 /* Form resize grips on the window's right/bottom edges (like resizing the
@@ -398,6 +402,61 @@ html, body {
 
 .ff-glyph {
     margin-right: 5px;
+}
+
+/* Drawn CheckBox / RadioButton glyphs — correctly sized 13px marks in the
+ * Windows 11 style, instead of undersized unicode characters. */
+.ff-check-off, .ff-check-on, .ff-radio-off, .ff-radio-on {
+    flex: 0 0 auto;
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    box-sizing: border-box;
+    position: relative;
+}
+
+.ff-check-off {
+    background: #fff;
+    border: 1px solid #767676;
+    border-radius: 3px;
+}
+
+.ff-check-on {
+    background: #0067c0;
+    border: 1px solid #0067c0;
+    border-radius: 3px;
+}
+
+.ff-check-on::after {
+    content: '';
+    position: absolute;
+    left: 3.5px;
+    top: 0.5px;
+    width: 4px;
+    height: 7.5px;
+    border: solid #fff;
+    border-width: 0 1.6px 1.6px 0;
+    transform: rotate(45deg);
+}
+
+.ff-radio-off {
+    background: #fff;
+    border: 1px solid #767676;
+    border-radius: 50%;
+}
+
+.ff-radio-on {
+    background: #fff;
+    border: 1px solid #0067c0;
+    border-radius: 50%;
+}
+
+.ff-radio-on::after {
+    content: '';
+    position: absolute;
+    inset: 2.5px;
+    background: #0067c0;
+    border-radius: 50%;
 }
 
 /* Approximations of WPF default control chrome. */
