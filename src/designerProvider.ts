@@ -444,7 +444,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
             <button id="ff-btn-code" title="Open XAML source in a split editor">&lt;/&gt; View Code</button>
             <label class="ff-check"><input type="checkbox" id="ff-snap" checked> Snap</label>
             <label class="ff-field">Grid <input type="number" id="ff-grid" min="1" max="64" value="8"></label>
-            <label class="ff-field">Zoom
+            <label class="ff-field" id="ff-zoom-label" title="Click 'Zoom' to reset to 100%">Zoom
                 <select id="ff-zoom">
                     <option value="0.5">50%</option>
                     <option value="0.75">75%</option>

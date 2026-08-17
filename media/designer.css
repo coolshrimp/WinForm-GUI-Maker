@@ -1578,3 +1578,9 @@ html, body {
     width: max-content;
     letter-spacing: -0.2px;
 }
+
+
+/* The toolbar "Zoom" word doubles as a reset-to-100% button. */
+#ff-zoom-label {
+    cursor: pointer;
+}

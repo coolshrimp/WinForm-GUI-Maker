@@ -3468,8 +3468,52 @@
         setZoom(zoom + delta);
     }, { passive: false });
 
-    // Click the status-bar percentage to snap back to 100%.
-    zoomStatusEl?.addEventListener('click', () => setZoom(1));
+    // Clicking the toolbar "Zoom" word (not the dropdown) resets to 100%.
+    const zoomLabel = $('ff-zoom-label');
+    zoomLabel?.addEventListener('click', e => {
+        if (e.target === zoomLabel) { setZoom(1); }
+    });
+
+    // Status-bar percentage: click opens a drop-UP zoom menu; double-click
+    // snaps straight back to 100%.
+    let zoomPop = null;
+    function closeZoomPop() {
+        if (zoomPop) { zoomPop.remove(); zoomPop = null; }
+        document.removeEventListener('mousedown', zoomPopOutside, true);
+    }
+    function zoomPopOutside(e) {
+        if (zoomPop && e.target !== zoomStatusEl && !zoomPop.contains(e.target)) { closeZoomPop(); }
+    }
+    zoomStatusEl?.addEventListener('click', () => {
+        if (zoomPop) { closeZoomPop(); return; }
+        zoomPop = document.createElement('div');
+        zoomPop.className = 'ff-combo-pop';
+        for (const preset of [
+            { z: 0.5, label: '50%' }, { z: 0.75, label: '75%' },
+            { z: 1, label: '100% (Default)' }, { z: 1.25, label: '125%' },
+            { z: 1.5, label: '150%' }, { z: 2, label: '200%' }, { z: 3, label: '300%' }
+        ]) {
+            const item = document.createElement('div');
+            item.className = 'ff-combo-item';
+            item.textContent = preset.label;
+            if (preset.z === zoom) { item.style.fontWeight = '600'; }
+            item.addEventListener('mousedown', e => {
+                e.preventDefault();
+                closeZoomPop();
+                setZoom(preset.z);
+            });
+            zoomPop.appendChild(item);
+        }
+        document.body.appendChild(zoomPop);
+        const r = zoomStatusEl.getBoundingClientRect();
+        zoomPop.style.left = `${Math.max(4, r.right - zoomPop.offsetWidth)}px`;
+        zoomPop.style.top = `${Math.max(4, r.top - zoomPop.offsetHeight - 4)}px`;
+        document.addEventListener('mousedown', zoomPopOutside, true);
+    });
+    zoomStatusEl?.addEventListener('dblclick', () => {
+        closeZoomPop();
+        setZoom(1);
+    });
 
     $('ff-tab-props').addEventListener('click', () => {
         switchPanelTab('props');

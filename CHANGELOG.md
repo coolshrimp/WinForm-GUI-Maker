@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.3
+
+Zoom ergonomics (user request): clicking the **Zoom** word in the toolbar
+resets to 100%; the status-bar percentage now opens a **drop-up** preset
+menu (50%–300%, with "100% (Default)" and the current level highlighted),
+and double-clicking it snaps straight back to 100%.
+
 ## 0.19.2
 
 Fix: **color swatches and font previews now actually show their colors and
