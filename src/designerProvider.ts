@@ -427,7 +427,11 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
+          content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
+    <!-- 'unsafe-inline' styles: the canvas paints control chrome (progress
+         fills, slider thumbs) and picker previews (color swatches, font
+         faces) via inline style attributes; all interpolated text is
+         HTML-escaped before insertion. Scripts remain nonce-only. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${styleUri}" rel="stylesheet">
     <title>UI Maker Designer</title>

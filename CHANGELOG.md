@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.2
+
+Fix: **color swatches and font previews now actually show their colors and
+faces.** The webview's Content-Security-Policy blocked inline style
+attributes in generated markup, silently stripping the swatch colors and
+font styling from the 0.19.0 pickers — and, it turns out, ProgressBar fill
+widths and Slider thumb positions on the canvas too. Inline styles are now
+allowed (interpolated text stays HTML-escaped; scripts remain nonce-only),
+so swatches render their real color and progress bars/sliders draw at their
+actual values.
+
 ## 0.19.1
 
 Zoom + text-metric fixes from live testing:
