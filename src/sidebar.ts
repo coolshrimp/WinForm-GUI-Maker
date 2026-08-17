@@ -155,16 +155,22 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
      *   'all'   — the whole workspace (single project, or none at all)
      *   'pick'  — multi-project workspace with no working folder chosen yet
      */
-    private async resolveScope(): Promise<{ mode: 'dir' | 'all' | 'pick'; dir?: string; multi: boolean }> {
+    private async resolveScope(): Promise<{ mode: 'dir' | 'all' | 'pick'; dir?: string; multi: boolean; working?: string }> {
         const dirs = await workspaceProjectDirs();
         const working = getWorkingFolder();
         // A working project OUTSIDE the workspace (Open Project…) always wins:
         // findFiles cannot see it, so everything below switches to fs walks.
         if (working && fs.existsSync(working) && !inWorkspace(working)) {
-            return { mode: 'dir', dir: working, multi: dirs.length > 0 };
+            return { mode: 'dir', dir: working, multi: dirs.length > 0, working };
         }
-        if (dirs.length <= 1) { return { mode: 'all', multi: false }; }
-        if (working && fs.existsSync(working)) { return { mode: 'dir', dir: working, multi: true }; }
+        if (dirs.length <= 1) {
+            // Single-project workspace: the project IS the working folder —
+            // surface it in the Actions panel even though file lists scope
+            // to the whole workspace.
+            const wf = (working && fs.existsSync(working) ? working : dirs[0]) || undefined;
+            return { mode: 'all', multi: false, working: wf };
+        }
+        if (working && fs.existsSync(working)) { return { mode: 'dir', dir: working, multi: true, working }; }
         return { mode: 'pick', multi: true };
     }
 
@@ -286,14 +292,15 @@ export class UiMakerSidebar implements vscode.TreeDataProvider<SidebarItem> {
     }
 
     /** The command rows; Run and Debug reflect the current run state. */
-    private actionItems(scope: { mode: string; dir?: string; multi: boolean }): SidebarItem[] {
+    private actionItems(scope: { mode: string; dir?: string; multi: boolean; working?: string }): SidebarItem[] {
         const state = this.dotnet.state;
         const running = state === 'running';
         const debugging = state === 'debugging';
 
         // The working folder every action below targets. Shown first so it is
-        // always clear WHICH project Run/Build/App Settings will touch.
-        const working = scope.mode === 'dir' ? scope.dir : undefined;
+        // always clear WHICH project Run/Build/App Settings will touch —
+        // including single-project workspaces (new-window opens).
+        const working = scope.working ?? (scope.mode === 'dir' ? scope.dir : undefined);
         const workingRow = working
             ? new SidebarItem(`Working Folder: ${path.basename(working)}`, {
                 icon: 'root-folder-opened',

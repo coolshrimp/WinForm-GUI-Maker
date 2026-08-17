@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.3
+
+Fix: opening a project in a new window (single-project workspace) showed no
+**Working Folder** row in the Actions panel, so it looked like the project
+was not targeted even though Run/Build were using it. The row now always
+shows the active project — external working folders, multi-project picks,
+and single-project workspaces alike.
+
 ## 0.18.2
 
 Canvas quality-of-life (user requests):
