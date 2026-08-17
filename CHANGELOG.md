@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.20.1
+
+**Publish-mode assistant on Build Release** (user request). Release now asks
+how to publish, with the size/portability trade-off explained in plain
+words, the current default marked, and the choice written back as the new
+default:
+
+* **Folder (default)** — all files in a folder; smallest build; the target
+  PC's Windows offers to install the .NET Desktop Runtime automatically on
+  first run. This is the mode Create Installer packages best.
+* **Single EXE — smallest** — one portable .exe a few MB in size; the
+  runtime is not bundled, so the target PC gets a one-time install prompt
+  if .NET is missing.
+* **Single EXE — runs anywhere** — the .NET runtime is bundled so nothing
+  is ever prompted; large (~70–150 MB), now built with single-file
+  compression enabled to keep it as small as possible.
+* **Always use my settings — stop asking** flips the new
+  `uimaker.publish.askMode` setting off; the existing `uimaker.publish.*`
+  settings are then honored silently. Classic .NET Framework targets skip
+  the question (they always publish as folders).
+
 ## 0.20.0
 
 **Create an Installer + full Visual Basic parity** (user requests):

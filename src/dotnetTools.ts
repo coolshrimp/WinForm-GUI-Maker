@@ -404,6 +404,8 @@ export class DotnetTools implements vscode.Disposable {
         const generation = ++this.lifecycleGeneration;
         const project = await this.findProject();
         if (!project || generation !== this.lifecycleGeneration) { return; }
+        if (!await this.pickPublishMode(project)) { return; }
+        if (generation !== this.lifecycleGeneration) { return; }
         const targetFramework = await this.selectTargetFramework(project, 'publish');
         if (targetFramework === null || generation !== this.lifecycleGeneration) { return; }
         const pre = await this.preflight(project, targetFramework);
@@ -432,6 +434,60 @@ export class DotnetTools implements vscode.Disposable {
     }
 
     /**
+     * Publish-mode assistant shown before each Release (unless disabled):
+     * explains the size/portability trade-off, preselects the current
+     * settings, and writes the choice back so it becomes the default.
+     * Returns false when the user cancels.
+     */
+    private async pickPublishMode(project: string): Promise<boolean> {
+        const cfg = vscode.workspace.getConfiguration('uimaker');
+        if (!cfg.get<boolean>('publish.askMode', true)) { return true; }
+        const info = readProjectInfo(project);
+        if (info?.netFramework) { return true; } // classic targets publish as folders
+
+        const singleFile = cfg.get<boolean>('publish.singleFile', false);
+        const selfContained = cfg.get<boolean>('publish.selfContained', false);
+        const current = singleFile ? (selfContained ? 'portable' : 'single') : 'folder';
+        const mark = (id: string) => (id === current ? ' — current default' : '');
+        const pick = await vscode.window.showQuickPick(
+            [
+                {
+                    label: '$(folder) Folder (default)',
+                    description: 'all files in a folder' + mark('folder'),
+                    detail: 'Smallest build. Target PC needs the .NET Desktop Runtime — Windows offers to install it automatically on first run. Best with Create Installer.',
+                    id: 'folder'
+                },
+                {
+                    label: '$(file-binary) Single EXE — smallest',
+                    description: 'one portable .exe, runtime NOT bundled' + mark('single'),
+                    detail: 'A few MB. Target PC is prompted to install the .NET Desktop Runtime once if missing.',
+                    id: 'single'
+                },
+                {
+                    label: '$(package) Single EXE — runs anywhere',
+                    description: 'one .exe with the .NET runtime bundled' + mark('portable'),
+                    detail: 'No install prompts ever, but large (~70–150 MB). Compression is enabled to keep it as small as possible.',
+                    id: 'portable'
+                },
+                {
+                    label: '$(gear) Always use my settings — stop asking',
+                    description: 'honor uimaker.publish.* silently from now on',
+                    id: 'quiet'
+                }
+            ],
+            { placeHolder: 'How should this Release be published? (choice is remembered as the default)' }
+        );
+        if (!pick) { return false; }
+        if (pick.id === 'quiet') {
+            await cfg.update('publish.askMode', false, vscode.ConfigurationTarget.Global);
+            return true;
+        }
+        await cfg.update('publish.singleFile', pick.id !== 'folder', vscode.ConfigurationTarget.Global);
+        await cfg.update('publish.selfContained', pick.id === 'portable', vscode.ConfigurationTarget.Global);
+        return true;
+    }
+
+    /**
      * `dotnet publish` arguments honoring the UI Maker publish settings:
      * single .exe, self-contained runtime, target runtime identifier.
      * (.NET Framework targets ignore them — single-file needs modern .NET.)
@@ -450,8 +506,10 @@ export class DotnetTools implements vscode.Disposable {
         if (singleFile) {
             args.push('-r', runtime, '-p:PublishSingleFile=true', '--self-contained', String(selfContained));
             if (selfContained) {
-                // Bundle native libraries too, so the output really is one file.
+                // Bundle native libraries too, so the output really is one
+                // file, and compress the bundle to keep the size down.
                 args.push('-p:IncludeNativeLibrariesForSelfExtract=true');
+                args.push('-p:EnableCompressionInSingleFile=true');
             }
         } else if (selfContained) {
             args.push('-r', runtime, '--self-contained', 'true');

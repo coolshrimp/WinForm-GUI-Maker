@@ -1,8 +1,8 @@
 {
     "name": "uimaker",
-    "displayName": "UI Maker \u2014 .NET UI Designer",
+    "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.20.0",
+    "version": "0.20.1",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -94,7 +94,7 @@
             },
             {
                 "command": "uimaker.openProject",
-                "title": "Open Project (Any Folder)\u2026",
+                "title": "Open Project (Any Folder)…",
                 "category": "UI Maker",
                 "icon": "$(folder-opened)"
             },
@@ -429,6 +429,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Enable UI Maker XAML IntelliSense in the text editor: element/attribute/value completions, code snippets, hover documentation, and inline color swatches with a picker."
+                },
+                "uimaker.publish.askMode": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Ask how to publish on every Build Release (folder / single EXE / single EXE with bundled runtime). Turn off to silently use the settings below."
                 },
                 "uimaker.publish.singleFile": {
                     "type": "boolean",

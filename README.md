@@ -360,6 +360,7 @@ launches with UI Maker loaded.
 | `uimaker.gridSize` | `8` | Snap grid size in pixels on the design canvas |
 | `uimaker.snapToGrid` | `true` | Snap control positions/sizes to the grid |
 | `uimaker.xamlIntelliSense` | `true` | XAML completions, snippets, hover docs, and inline color swatches in the text editor |
+| `uimaker.publish.askMode` | `true` | Build Release asks how to publish (folder / single EXE / bundled runtime) and remembers the choice |
 | `uimaker.publish.singleFile` | `false` | Build Release (Publish) produces one portable `.exe` |
 | `uimaker.publish.selfContained` | `false` | Bundle the .NET runtime so the target PC needs nothing installed |
 | `uimaker.publish.runtime` | `win-x64` | Target runtime for single-file / self-contained publishing |
