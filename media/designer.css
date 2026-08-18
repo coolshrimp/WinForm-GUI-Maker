@@ -274,6 +274,18 @@ html, body {
     opacity: 0.55;
 }
 
+/* Drag-and-drop hints: the panel a release would drop into, and the flow
+   sibling the dragged control would be inserted before. */
+.ff-drop-into {
+    outline: 2px dashed var(--vscode-focusBorder, #007acc) !important;
+    outline-offset: -2px;
+}
+
+.ff-drop-before {
+    box-shadow: -3px 0 0 0 var(--vscode-focusBorder, #007acc),
+                0 -3px 0 0 var(--vscode-focusBorder, #007acc);
+}
+
 /* ------------------------------------------------------------------- canvas */
 
 #ff-canvas-host {
@@ -1623,4 +1635,59 @@ html, body {
     width: 16px;
     height: 16px;
     opacity: 0.9;
+}
+
+/* ------------------------------------------------- Modern (Styled) toolbox */
+
+/* Toggle switch (CheckBox with the injected UimToggleSwitch template). */
+.ff-toggle {
+    display: inline-block;
+    position: relative;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 18px;
+    margin-right: 7px;
+    border-radius: 9px;
+    background: #b9b9c3;
+    vertical-align: middle;
+    transition: background 0.1s;
+}
+
+.ff-toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.ff-toggle-on {
+    background: #7c4dff;
+}
+
+.ff-toggle-on .ff-toggle-thumb {
+    left: auto;
+    right: 2px;
+}
+
+/* Rounded accent button (UimModernButton template). */
+.ff-inner.ff-look-modern-btn {
+    border: none;
+    border-radius: 6px;
+    background: #7c4dff;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* Pill badge (UimPillBadge template). */
+.ff-inner.ff-look-pill {
+    border-radius: 999px;
+    background: #7c4dff;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    justify-content: center;
 }

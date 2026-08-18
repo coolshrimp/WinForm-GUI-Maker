@@ -78,6 +78,7 @@ function makeXmlElement(qname, ns) {
         get parentElement() { return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null; },
         get children() { return this.childNodes.filter(c => c.nodeType === 1); },
         get firstChild() { return this.childNodes[0] ?? null; },
+        get attributes() { return [...this.attrs].map(([name, value]) => ({ name, value })); },
         get textContent() {
             return this.childNodes.map(c => c.nodeType === 3 ? c.data : c.textContent).join('');
         },
@@ -127,6 +128,7 @@ function parseXmlDocument(text) {
     const doc = {
         _root: null,
         get documentElement() { return this._root; },
+        get childNodes() { return this._root ? [this._root] : []; },
         createElement(name) { return makeXmlElement(name, null); },
         createElementNS(ns, name) { return makeXmlElement(name, ns); },
         getElementsByTagName(t) {
@@ -181,6 +183,20 @@ function parseXmlDocument(text) {
     return doc;
 }
 
+// Serialize a mini-DOM subtree back to XML (enough for commit()/formatting).
+function serializeXmlNode(node) {
+    const escText = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const escAttr = s => escText(s).replace(/"/g, '&quot;');
+    if (node.nodeType === 3) { return escText(node.data); }
+    if (node.nodeType === 8) { return `<!--${node.data}-->`; }
+    if (node.nodeType !== 1) { return ''; }
+    const attrs = [...node.attrs].map(([k, v]) => ` ${k}="${escAttr(v)}"`).join('');
+    const kids = (node.childNodes ?? []).map(serializeXmlNode).join('');
+    return kids
+        ? `<${node.nodeName}${attrs}>${kids}</${node.nodeName}>`
+        : `<${node.nodeName}${attrs}/>`;
+}
+
 function createSandbox() {
     const messages = [];
     const byId = new Map();
@@ -212,9 +228,15 @@ function createSandbox() {
         requestAnimationFrame: fn => setTimeout(fn, 0),
         cancelAnimationFrame: clearTimeout,
         navigator: { clipboard: {} },
-        Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
+        Node: {
+            ELEMENT_NODE: 1, TEXT_NODE: 3, CDATA_SECTION_NODE: 4,
+            PROCESSING_INSTRUCTION_NODE: 7, COMMENT_NODE: 8, DOCUMENT_TYPE_NODE: 10
+        },
         DOMParser: class {
             parseFromString(text) { return parseXmlDocument(text); }
+        },
+        XMLSerializer: class {
+            serializeToString(node) { return serializeXmlNode(node); }
         },
         __UIMAKER_TEST__: true
     };

@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.23.0
+
+Design-surface overhaul for XAML (user request: "I'm not able to drag items
+in the grid… multi select and move together… add all the UI design features
+we can"):
+
+**Drag anything, anywhere.**
+
+- **Grid children all drag now.** Left/Top-aligned children keep their exact
+  margin math; centered/stretched children are *promoted* on the first drag —
+  pinned to `Left`/`Top` + `Margin` where you dropped them, keeping their
+  `Grid.Row`/`Grid.Column` (cell origins are computed from the rendered
+  grid tracks), exactly like Blend.
+- **Flow panels reorder by drag.** StackPanel / WrapPanel / DockPanel
+  children show a live insertion marker while dragging and reorder on drop;
+  arrow keys also move them earlier/later in the flow.
+- **Drag between panels.** A drag can carry a control into a *different*
+  panel — out of a WrapPanel into the Grid, into a Canvas, into another
+  StackPanel. The drop target highlights while you hover, and the layout
+  attributes are rewritten for the new parent (Canvas coords ↔ Grid
+  margin+cell ↔ flow order); releases outside the surface never re-parent.
+- **Group move.** Ctrl/Shift-click a multi-selection, drag any member, and
+  every movable member follows — in XAML as well as WinForms. Arrow-key
+  nudging moves the whole selection too (Shift = one grid step).
+- **Alignment tools for XAML.** The align/size/distribute toolbar (align
+  lefts/tops, same width/height/size, distribute) now works on XAML sibling
+  multi-selections positioned by Canvas coords or Left/Top margins.
+
+**Modern (Styled) toolbox section — the fancy controls.** ToggleSwitch,
+Modern Button (rounded accent), Card (rounded corners + drop shadow), and
+Pill Badge. These are plain WPF elements (CheckBox, Button, Border, Label)
+dressed by a Style/ControlTemplate that UI Maker injects into
+`Window.Resources` the first time one is dropped — zero dependencies, fully
+restylable, and previewed on the canvas (real switch track/thumb, rounded
+chrome, shadows). Existing `Border.Effect` → `DropShadowEffect` markup now
+previews as a shadow as well.
+
+**More host controls in the WPF toolbox.** ContentControl, Frame, Viewbox,
+and UniformGrid — the shapes apps use as placeholders/hosts that get filled
+from code-behind at runtime (e.g. an Explorer-preview host panel).
+
+Also: the toolbox tweaks in tests run against a harness that can now
+serialize XAML edits end-to-end, adding regression coverage for movability,
+reordering, style injection, and custom-control xmlns insertion.
+
 ## 0.22.0
 
 Two user requests:

@@ -84,8 +84,14 @@ Open any `.xaml` window in the UI Maker Designer:
 
 - **Toolbox** with a search box and Visual Studio's sections. WPF: Button,
   Label, TextBox, TextBlock, CheckBox, RadioButton, ComboBox, ListBox,
-  DataGrid, Image, ProgressBar, Slider, Border, GroupBox, DatePicker, and
-  more. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
+  DataGrid, Image, ProgressBar, Slider, Border, GroupBox, DatePicker,
+  ContentControl, Frame, Viewbox, UniformGrid, and
+  more — plus a **Modern (Styled)** section: **ToggleSwitch**, **Modern
+  Button** (rounded accent), **Card** (rounded border + drop shadow), and
+  **Pill Badge**. These are plain WPF elements dressed by a
+  Style/ControlTemplate that UI Maker writes into `Window.Resources` the
+  first time you drop one — no NuGet packages, restyle them freely, and the
+  canvas previews the switch/rounded look. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
   LinkLabel, TextBox, MaskedTextBox, RichTextBox, CheckBox, RadioButton,
   CheckedListBox, ComboBox, DomainUpDown, ListBox, ListView, TreeView,
   PictureBox, ProgressBar, TrackBar, NumericUpDown, DateTimePicker,
@@ -117,7 +123,18 @@ Open any `.xaml` window in the UI Maker Designer:
   default gray chrome.
 - **Design canvas** that mimics a real window (title bar, client area) with
   snap-to-grid placement, drag to move, 8-point resize handles — and grips on
-  the window's own edges to resize the form/window itself. Zoom with the
+  the window's own edges to resize the form/window itself. **Everything is
+  draggable in XAML too**: any Grid child moves (centered/stretched children
+  are pinned to Left/Top + Margin on the first drag, exactly like Blend, and
+  keep their Grid cell), children of StackPanel/WrapPanel/DockPanel
+  **drag-reorder** with a live insertion marker, and a drag can carry a
+  control **into a different panel** — pull a CheckBox out of a WrapPanel and
+  drop it anywhere in the Grid, or into a Canvas, and the right layout
+  attributes are rewritten for the new parent (target panel highlights while
+  you hover). **Multi-select moves as a group** (Ctrl/Shift+click, then drag
+  any member), arrow keys nudge the whole selection (Shift = one grid step),
+  and the **alignment/distribution toolbar** now works for XAML
+  multi-selections as well as WinForms. Zoom with the
   toolbar dropdown or **Shift+scroll** (25%–300%); the status bar shows the
   current percentage and clicking it resets to 100%.
 - **Properties window, Visual Studio style** — properties grouped under
@@ -431,10 +448,12 @@ deleted.
 ## Known limitations
 
 - Nested layouts (Grid rows/columns, StackPanel, DockPanel, TabControl,
-  UniformGrid, Viewbox, ScrollViewer, …) **render** faithfully, and any element can be selected,
-  resized, and edited in the panels — but drag-to-move is only offered for
-  Canvas children and absolutely-placed Grid children (`Left`/`Top`
-  alignment), because moving a stacked/docked child would rewrite its layout.
+  UniformGrid, Viewbox, ScrollViewer, …) **render** faithfully, and any
+  element can be selected, dragged (Grid children position, flow-panel
+  children reorder or re-parent), resized, and edited in the panels. Note
+  that dragging a centered/stretched Grid child pins it to `Left`/`Top` +
+  `Margin` (Blend's behavior) — its layout stops following window resizing
+  until you restore the alignment in the Properties panel.
 - Styles and brush resources resolve from the document and App.xaml (one
   level of merged dictionaries); a template's first `Border CornerRadius` is
   approximated. Triggers, bindings, and full `ControlTemplate` visuals are
@@ -478,7 +497,8 @@ deleted.
 - [x] Visual Basic WinForms designer (`*.Designer.vb` round-tripping, `Handles`-based events, VB scaffolding)
 - [x] Remaining VB parity: App Settings editor, classic→SDK conversion, `My.Resources` image import
 - [ ] Sub-menu (nested menu item) designing and item icons
-- [ ] Drag-reordering inside StackPanel / DockPanel children
+- [x] Drag-reordering inside StackPanel / WrapPanel / DockPanel children, drag re-parenting between panels, group move, XAML align tools
+- [x] "Modern (Styled)" toolbox section — ToggleSwitch, rounded buttons, cards, badges via injected styles
 - [x] "Create an Installer" for multi-file releases (Inno Setup script generation)
 - [x] Custom controls in the toolbox: automatic project scan + a Control Library for NuGet/DLL controls
 - [ ] Style/resource editing and live theme preview

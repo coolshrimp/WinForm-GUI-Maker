@@ -132,12 +132,133 @@
         Expander:    { icon: '▸', w: 220, h: 120, attrs: { Header: 'Expander', IsExpanded: 'True' }, props: ['Header', 'IsExpanded'], events: ['Expanded', 'Collapsed'], defaultEvent: 'Expanded' },
         Separator:   { icon: '─', w: 160, h: 4,   attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
         TabControl:  { icon: '⧉', w: 320, h: 200, attrs: {},                      props: [], events: ['SelectionChanged'], defaultEvent: 'SelectionChanged' },
+        ContentControl: { icon: '◻', w: 180, h: 100, attrs: {},                   props: [], events: ['Loaded'], defaultEvent: 'Loaded' },
+        Frame:       { icon: '🗔', w: 220, h: 160, attrs: {},                      props: ['Source'], events: ['Navigated', 'Loaded'], defaultEvent: 'Loaded' },
+        Viewbox:     { icon: '🔍', w: 160, h: 120, attrs: { Stretch: 'Uniform' },  props: ['Stretch'], events: [], defaultEvent: 'Loaded' },
+        UniformGrid: { icon: '▦', w: 220, h: 160, attrs: {},                      props: ['Rows', 'Columns'], events: [], defaultEvent: 'Loaded' },
         Grid:        { icon: '#',  w: 260, h: 180, attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
         StackPanel:  { icon: '☷', w: 220, h: 160, attrs: {},                      props: ['Orientation'], events: [], defaultEvent: 'Loaded' },
         WrapPanel:   { icon: '⠿', w: 220, h: 120, attrs: {},                      props: ['Orientation'], events: [], defaultEvent: 'Loaded' },
         DockPanel:   { icon: '◫', w: 260, h: 180, attrs: {},                      props: ['LastChildFill'], events: [], defaultEvent: 'Loaded' },
         Canvas:      { icon: '⬚', w: 260, h: 180, attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
         ScrollViewer:{ icon: '↕', w: 240, h: 160, attrs: {},                      props: ['VerticalScrollBarVisibility'], events: [], defaultEvent: 'Loaded' }
+    };
+
+    /**
+     * "Modern (Styled)" toolbox section: standard WPF elements dressed with a
+     * Style/ControlTemplate that is injected into <Window.Resources> the
+     * first time one is dropped — the fancy look with zero dependencies.
+     * `element` is the real element inserted; `styleKey`/`styleXml` describe
+     * the resource; `init` builds extra property-element children.
+     */
+    const MODERN_CONTROLS = {
+        ToggleSwitch: {
+            icon: '⭘', w: 90, h: 20, noSize: true, element: 'CheckBox',
+            attrs: { Content: 'Toggle', Style: '{StaticResource UimToggleSwitch}' },
+            props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked',
+            styleKey: 'UimToggleSwitch',
+            styleXml:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimToggleSwitch" TargetType="CheckBox">
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="CheckBox">
+                <StackPanel Orientation="Horizontal" Background="Transparent">
+                    <Border x:Name="UimTrack" Width="40" Height="20" CornerRadius="10" Background="#FFB9B9C3" VerticalAlignment="Center">
+                        <Ellipse x:Name="UimThumb" Width="14" Height="14" Fill="White" HorizontalAlignment="Left" Margin="3,0,3,0"/>
+                    </Border>
+                    <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                </StackPanel>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="UimTrack" Property="Background" Value="#FF7C4DFF"/>
+                        <Setter TargetName="UimThumb" Property="HorizontalAlignment" Value="Right"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`
+        },
+        ModernButton: {
+            icon: '▢', w: 110, h: 34, element: 'Button',
+            attrs: { Content: 'Button', Style: '{StaticResource UimModernButton}' },
+            props: ['Content'], events: ['Click', 'MouseDoubleClick'], defaultEvent: 'Click',
+            styleKey: 'UimModernButton',
+            styleXml:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimModernButton" TargetType="Button">
+    <Setter Property="Background" Value="#FF7C4DFF"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Padding" Value="14,7"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="Button">
+                <Border x:Name="UimBg" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="UimBg" Property="Opacity" Value="0.9"/>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Setter TargetName="UimBg" Property="Opacity" Value="0.75"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`
+        },
+        Card: {
+            icon: '▭', w: 220, h: 140, element: 'Border',
+            attrs: {
+                CornerRadius: '8', Background: '#FFFFFFFF',
+                BorderBrush: '#FFE3E3E8', BorderThickness: '1', Padding: '12'
+            },
+            props: ['CornerRadius', 'Background', 'BorderBrush', 'BorderThickness', 'Padding'],
+            events: [], defaultEvent: 'Loaded',
+            init(el) {
+                const effect = xamlDoc.createElementNS(PRES_NS, 'Border.Effect');
+                const shadow = xamlDoc.createElementNS(PRES_NS, 'DropShadowEffect');
+                shadow.setAttribute('BlurRadius', '12');
+                shadow.setAttribute('ShadowDepth', '2');
+                shadow.setAttribute('Direction', '270');
+                shadow.setAttribute('Opacity', '0.22');
+                effect.appendChild(shadow);
+                el.appendChild(effect);
+            }
+        },
+        PillBadge: {
+            icon: '⬭', w: 70, h: 22, noSize: true, element: 'Label',
+            attrs: { Content: 'NEW', Style: '{StaticResource UimPillBadge}' },
+            props: ['Content', 'Background', 'Foreground'], events: [], defaultEvent: 'Loaded',
+            styleKey: 'UimPillBadge',
+            styleXml:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimPillBadge" TargetType="Label">
+    <Setter Property="Background" Value="#FF7C4DFF"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="FontSize" Value="11"/>
+    <Setter Property="FontWeight" Value="Bold"/>
+    <Setter Property="Padding" Value="10,3"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="Label">
+                <Border Background="{TemplateBinding Background}" CornerRadius="999" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`
+        }
     };
 
     /** Extra property-panel entries for layout containers (not in the toolbox). */
@@ -868,8 +989,16 @@
                 select(el, true); // multi-select (delete/copy work on the group)
                 return;
             }
-            select(el);
-            startMove(e, el, div);
+            const wasGroup = multiSel.size > 1 && multiSel.has(el);
+            if (!wasGroup) {
+                select(el);
+            } else {
+                // Keep the group; just make this element the primary.
+                selected = el;
+                drawSelection();
+                renderPanel();
+            }
+            startMove(e, el, div, wasGroup);
         });
         div.addEventListener('dblclick', e => {
             e.preventDefault();
@@ -1261,13 +1390,26 @@
         const content = el.getAttribute('Content') ?? collapse(el.textContent);
         const text = el.getAttribute('Text') ?? '';
 
+        const styleRef = el.getAttribute('Style') ?? '';
+
         switch (type) {
             case 'Button':
                 inner.classList.add('ff-look-button');
+                // The injected "modern" template: rounded accent chrome.
+                if (styleRef.includes('UimModernButton')) {
+                    inner.classList.add('ff-look-modern-btn');
+                    const bg = resolveBrush(styleProp(el, 'Background'));
+                    if (bg) { inner.style.background = bg; }
+                }
                 inner.textContent = content || 'Button';
                 break;
             case 'Label': {
                 inner.classList.add('ff-look-label');
+                if (styleRef.includes('UimPillBadge')) {
+                    inner.classList.add('ff-look-pill');
+                    const bg = resolveBrush(styleProp(el, 'Background'));
+                    if (bg) { inner.style.background = bg; }
+                }
                 inner.textContent = content || '';
                 const pad = styleProp(el, 'Padding');
                 const p = parseMargin(pad || '5');
@@ -1290,6 +1432,12 @@
                 break;
             case 'CheckBox':
                 inner.classList.add('ff-look-label');
+                // The injected toggle-switch template: track + thumb.
+                if (styleRef.includes('UimToggleSwitch')) {
+                    inner.innerHTML = `<span class="ff-toggle ${el.getAttribute('IsChecked') === 'True' ? 'ff-toggle-on' : ''}"><span class="ff-toggle-thumb"></span></span>`;
+                    inner.append(content ?? '');
+                    break;
+                }
                 inner.innerHTML = `<span class="ff-glyph ${el.getAttribute('IsChecked') === 'True' ? 'ff-check-on' : 'ff-check-off'}"></span>`;
                 inner.append(content || 'CheckBox');
                 break;
@@ -1439,6 +1587,16 @@
             const p = parseMargin(pad);
             target.style.padding = `${p.t}px ${p.r}px ${p.b}px ${p.l}px`;
         }
+        // <Border.Effect><DropShadowEffect …/></Border.Effect> — approximate
+        // as a CSS box shadow so cards read as cards on the canvas.
+        const effect = propertyElement(el, 'Effect');
+        const shadow = effect && [...effect.children].find(c => c.localName === 'DropShadowEffect');
+        if (shadow) {
+            const blur = num(shadow.getAttribute('BlurRadius'), 5);
+            const depth = num(shadow.getAttribute('ShadowDepth'), 5);
+            const opacity = num(shadow.getAttribute('Opacity'), 1);
+            target.style.boxShadow = `0 ${Math.round(depth)}px ${Math.round(blur)}px rgba(0,0,0,${Math.min(1, opacity)})`;
+        }
     }
 
     function progressPct(el) {
@@ -1498,9 +1656,17 @@
         const p = el.parentNode;
         if (!p || p.nodeType !== Node.ELEMENT_NODE) { return null; }
         if (p.localName === 'Canvas') { return 'canvas'; }
-        if (p.localName === 'Grid'
-            && el.getAttribute('HorizontalAlignment') === 'Left'
-            && el.getAttribute('VerticalAlignment') === 'Top') { return 'margin'; }
+        if (p.localName === 'Grid') {
+            // Left/Top children move by exact margins; anything else is
+            // "promoted" to Left/Top + Margin on the first drag, like Blend.
+            return (el.getAttribute('HorizontalAlignment') === 'Left'
+                && el.getAttribute('VerticalAlignment') === 'Top') ? 'margin' : 'promote';
+        }
+        // Flow panels own the position, but the ORDER is draggable — and a
+        // drag can also carry the child into a different panel entirely.
+        if (p.localName === 'StackPanel' || p.localName === 'WrapPanel' || p.localName === 'DockPanel') {
+            return 'reorder';
+        }
         return null;
     }
 
@@ -1573,13 +1739,24 @@
         setStatus(`${getName(selected) || wfType(selected)} — ${Math.round(box.w)}×${Math.round(box.h)} ${place}${extra}`);
     }
 
-    /** Show the alignment toolbar only for a WinForms multi-selection. */
+    /** Show the alignment toolbar for multi-selections that can be aligned:
+     *  WinForms controls, or XAML siblings with numeric positions. */
     function updateAlignTools() {
         const tools = $('ff-align-tools');
         if (!tools) { return; }
         const usable = docMode === 'winforms'
-            && [...multiSel].filter(c => c.__wf && c !== wfForm).length >= 2;
+            ? [...multiSel].filter(c => c.__wf && c !== wfForm).length >= 2
+            : xamlAlignable().length >= 2;
         tools.hidden = !usable;
+    }
+
+    /** XAML selection members that can be aligned numerically: siblings of
+     *  the primary selection placed by Canvas coords or Left/Top margins. */
+    function xamlAlignable() {
+        if (!selected || selected.__wf) { return []; }
+        return [...multiSel].filter(c => !c.__wf
+            && c.parentNode === selected.parentNode
+            && (movability(c) === 'canvas' || movability(c) === 'margin'));
     }
 
     // Clicking empty canvas selects the window itself.
@@ -1596,8 +1773,7 @@
         const mode = movability(el);
         if (!mode) { return; } // selection only — parent panel owns the position
 
-        // Group move: every selected sibling with a Location follows the drag
-        // (WinForms only — panel-managed XAML children cannot move together).
+        // WinForms group move: every selected sibling with a Location follows.
         const groupItems = (group && mode === 'wf')
             ? [...multiSel]
                 .filter(c => c.__wf && c !== wfForm && wfPoint(c.props.Location))
@@ -1608,14 +1784,32 @@
                 }))
                 .filter(it => it.div)
             : null;
+        // XAML group move: every selected movable element follows the drag
+        // inside its own parent (re-parenting stays a single-element drag).
+        const xamlGroup = (group && mode !== 'wf')
+            ? [...multiSel]
+                .map(m => ({ el: m, div: visuals.find(v => v.el === m)?.div, mode: movability(m) }))
+                .filter(it => it.div && it.mode && it.mode !== 'wf')
+            : null;
 
-        const m0 = mode === 'margin' ? parseMargin(el.getAttribute('Margin')) : { l: 0, t: 0, r: 0, b: 0 };
+        const m0 = parseMargin(el.getAttribute?.('Margin'));
         const start =
             mode === 'wf' ? (wfPoint(el.props.Location) ?? { x: 0, y: 0 })
             : mode === 'canvas' ? { x: num(el.getAttribute('Canvas.Left'), 0), y: num(el.getAttribute('Canvas.Top'), 0) }
             : { x: m0.l, y: m0.t };
         const sx = e.clientX, sy = e.clientY;
         let moved = false;
+        const isXaml = mode !== 'wf';
+        // Preview by transform for the modes without numeric coordinates and
+        // for XAML groups; margins/left keep their exact-value preview.
+        const transformPreview = xamlGroup || mode === 'promote' || mode === 'reorder';
+        let dropHighlight = null;  // panel div highlighted as the drop target
+        let insertMark = null;     // sibling div marked as the insertion point
+
+        const clearHints = () => {
+            if (dropHighlight) { dropHighlight.classList.remove('ff-drop-into'); dropHighlight = null; }
+            if (insertMark) { insertMark.classList.remove('ff-drop-before'); insertMark = null; }
+        };
 
         const apply = (nx, ny) => {
             if (mode === 'margin') {
@@ -1630,6 +1824,13 @@
             const dx = (ev.clientX - sx) / zoom;
             const dy = (ev.clientY - sy) / zoom;
             if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) { return; }
+            if (!moved && isXaml) {
+                // The dragged element must not swallow the hit-testing that
+                // finds the panel underneath the pointer.
+                for (const d of xamlGroup ? xamlGroup.map(it => it.div) : [div]) {
+                    d.style.pointerEvents = 'none';
+                }
+            }
             moved = true;
             if (groupItems) {
                 for (const it of groupItems) {
@@ -1640,15 +1841,49 @@
                 setStatus(`${groupItems.length} controls — moving`);
                 return;
             }
-            const nx = snap(Math.max(0, start.x + dx));
-            const ny = snap(Math.max(0, start.y + dy));
-            apply(nx, ny);
+            if (xamlGroup) {
+                for (const it of xamlGroup) {
+                    it.div.style.transform = `translate(${dx}px, ${dy}px)`;
+                    it.div.style.opacity = '0.85';
+                }
+                drawSelection();
+                setStatus(`${xamlGroup.length} controls — moving`);
+                return;
+            }
+            if (transformPreview) {
+                div.style.transform = `translate(${dx}px, ${dy}px)`;
+                div.style.opacity = '0.85';
+            } else {
+                const nx = snap(Math.max(0, start.x + dx));
+                const ny = snap(Math.max(0, start.y + dy));
+                apply(nx, ny);
+                setStatus(`${getName(el) || wfType(el)} — (${nx}, ${ny})`);
+            }
+            // Show where a release would land: another panel, or a new spot
+            // between the current flow siblings.
+            if (isXaml) {
+                clearHints();
+                const target = dropPanelAt(ev.clientX, ev.clientY, el);
+                if (target && target.el !== el.parentNode) {
+                    dropHighlight = target.div;
+                    dropHighlight.classList.add('ff-drop-into');
+                    setStatus(`${getName(el) || el.localName} — drop into ${getName(target.el) || target.el.localName}`);
+                } else if (mode === 'reorder') {
+                    const ref = flowInsertRef(el.parentNode, ev.clientX, ev.clientY, el);
+                    const refDiv = ref ? visuals.find(v => v.el === ref)?.div : null;
+                    if (refDiv) {
+                        insertMark = refDiv;
+                        insertMark.classList.add('ff-drop-before');
+                    }
+                    setStatus(`${getName(el) || el.localName} — reordering`);
+                }
+            }
             drawSelectionAround(div);
-            setStatus(`${getName(el) || wfType(el)} — (${nx}, ${ny})`);
         };
         const onUp = ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
+            clearHints();
             if (!moved) {
                 // A plain click on a member of a multi-selection collapses it.
                 if (group) { select(el); }
@@ -1666,21 +1901,252 @@
                 wfApply(text);
                 return;
             }
+            if (mode === 'wf') {
+                const nx = snap(Math.max(0, start.x + dx));
+                const ny = snap(Math.max(0, start.y + dy));
+                wfApply(wfSetLine(el.name, 'Location', `new System.Drawing.Point(${nx}, ${ny})`));
+                return;
+            }
+
+            // ---- XAML drop ------------------------------------------------
+            // Capture visual rects BEFORE touching the model; commit()'s
+            // re-render rebuilds every div afterwards (which also discards
+            // the transform/pointer-events preview state).
+            if (xamlGroup) {
+                const rects = xamlGroup.map(it => ({ ...it, rect: it.div.getBoundingClientRect() }));
+                for (const it of rects) { placeElementAtVisual(it.el, it.rect); }
+                commit();
+                return;
+            }
+            const target = dropPanelAt(ev.clientX, ev.clientY, el);
+            const dRect = div.getBoundingClientRect();
+            if (target && target.el !== el.parentNode) {
+                moveElementInto(el, target, ev.clientX, ev.clientY, dRect);
+                selectedPath = null;
+                commit();
+                selectedPath = pathOf(el);
+                setStatus(`${getName(el) || el.localName} — moved into ${getName(target.el) || target.el.localName}`);
+                return;
+            }
+            if (mode === 'reorder') {
+                const ref = flowInsertRef(el.parentNode, ev.clientX, ev.clientY, el);
+                el.parentNode.insertBefore(el, ref);
+                selectedPath = null;
+                commit();
+                selectedPath = pathOf(el);
+                return;
+            }
+            if (mode === 'promote') {
+                // First drag inside a Grid: pin to Left/Top + Margin where
+                // the element visually sits, like Blend does.
+                const parentHit = visuals.find(v => v.el === el.parentNode);
+                if (parentHit) {
+                    placeInGrid(el, parentHit, dRect, false, ev.clientX, ev.clientY);
+                    commit();
+                }
+                return;
+            }
             const nx = snap(Math.max(0, start.x + dx));
             const ny = snap(Math.max(0, start.y + dy));
-            if (mode === 'wf') {
-                wfApply(wfSetLine(el.name, 'Location', `new System.Drawing.Point(${nx}, ${ny})`));
-            } else if (mode === 'canvas') {
+            if (mode === 'canvas') {
                 el.setAttribute('Canvas.Left', String(nx));
                 el.setAttribute('Canvas.Top', String(ny));
-                commit();
             } else {
                 el.setAttribute('Margin', `${nx},${ny},${m0.r},${m0.b}`);
-                commit();
             }
+            commit();
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
+    }
+
+    // ------------------------------------------- XAML drag-and-drop plumbing
+
+    /** True when `maybeAncestor` is `el` itself or one of its ancestors. */
+    function isSameOrAncestor(maybeAncestor, el) {
+        for (let n = el; n; n = n.parentNode) {
+            if (n === maybeAncestor) { return true; }
+        }
+        return false;
+    }
+
+    /** Deepest XAML layout panel under the pointer that can receive `el`
+     *  (never el itself or a descendant — a panel cannot be dropped into
+     *  its own subtree). Falls back to the layout root. */
+    function dropPanelAt(clientX, clientY, el) {
+        // Releases outside the design surface never re-parent anything.
+        const s = surfaceEl.getBoundingClientRect();
+        if (clientX < s.left || clientX > s.right || clientY < s.top || clientY > s.bottom) {
+            return null;
+        }
+        let node = document.elementFromPoint(clientX, clientY);
+        while (node && node !== surfaceEl) {
+            const hit = visuals.find(v => v.div === node);
+            if (hit && !hit.el.__wf && DROP_PANELS.includes(hit.el.localName)
+                && !isSameOrAncestor(el, hit.el)) {
+                return hit;
+            }
+            node = node.parentElement;
+        }
+        if (layoutRoot && !isSameOrAncestor(el, layoutRoot)) {
+            return visuals.find(v => v.el === layoutRoot) ?? null;
+        }
+        return null;
+    }
+
+    /** Used row/column track sizes of a rendered Grid div (unzoomed CSS px);
+     *  null when unavailable (e.g. the test harness's stub DOM). */
+    function gridGeometry(gridDiv) {
+        try {
+            const cs = getComputedStyle(gridDiv);
+            const tracks = v => String(v || '').split(' ').map(parseFloat).filter(Number.isFinite);
+            const rows = tracks(cs.gridTemplateRows);
+            const cols = tracks(cs.gridTemplateColumns);
+            if (!rows.length || !cols.length) { return null; }
+            return {
+                rows, cols,
+                padL: parseFloat(cs.paddingLeft) || 0,
+                padT: parseFloat(cs.paddingTop) || 0
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    /** Cell under an (unzoomed) point relative to the grid div's border box. */
+    function gridCellAt(geom, x, y) {
+        const walk = (tracksArr, v) => {
+            let acc = 0;
+            for (let i = 0; i < tracksArr.length; i++) {
+                if (v < acc + tracksArr[i] || i === tracksArr.length - 1) { return { index: i, origin: acc }; }
+                acc += tracksArr[i];
+            }
+            return { index: 0, origin: 0 };
+        };
+        const col = walk(geom.cols, x - geom.padL);
+        const row = walk(geom.rows, y - geom.padT);
+        return {
+            row: row.index, col: col.index,
+            originX: geom.padL + col.origin,
+            originY: geom.padT + row.origin
+        };
+    }
+
+    /**
+     * Pin a Grid child to Left/Top + Margin so it sits where `dRect` shows it.
+     * assignCell=true (re-parenting) picks the cell under the pointer; false
+     * (promoting in place) keeps the element's existing Grid.Row/Column.
+     */
+    function placeInGrid(el, gridHit, dRect, assignCell, clientX, clientY) {
+        const gRect = gridHit.div.getBoundingClientRect();
+        const relX = (dRect.left - gRect.left) / zoom;
+        const relY = (dRect.top - gRect.top) / zoom;
+        const geom = gridGeometry(gridHit.div);
+        let originX = 0, originY = 0;
+        if (geom) {
+            if (assignCell) {
+                const cell = gridCellAt(geom, (clientX - gRect.left) / zoom, (clientY - gRect.top) / zoom);
+                if (cell.row > 0) { el.setAttribute('Grid.Row', String(cell.row)); }
+                if (cell.col > 0) { el.setAttribute('Grid.Column', String(cell.col)); }
+                originX = cell.originX;
+                originY = cell.originY;
+            } else {
+                const cell = {
+                    row: int(el.getAttribute('Grid.Row')),
+                    col: int(el.getAttribute('Grid.Column'))
+                };
+                originX = geom.padL + geom.cols.slice(0, cell.col).reduce((a, b) => a + b, 0);
+                originY = geom.padT + geom.rows.slice(0, cell.row).reduce((a, b) => a + b, 0);
+            }
+        } else if (assignCell) {
+            el.removeAttribute('Grid.Row');
+            el.removeAttribute('Grid.Column');
+        }
+        el.setAttribute('HorizontalAlignment', 'Left');
+        el.setAttribute('VerticalAlignment', 'Top');
+        el.setAttribute('Margin',
+            `${snap(Math.max(0, relX - originX))},${snap(Math.max(0, relY - originY))},0,0`);
+    }
+
+    /** Move `el` into a different panel, keeping its on-screen position where
+     *  the target's layout model allows one. */
+    function moveElementInto(el, targetHit, clientX, clientY, dRect) {
+        const t = targetHit.el;
+        for (const a of ['Canvas.Left', 'Canvas.Top', 'Grid.Row', 'Grid.Column',
+            'Grid.RowSpan', 'Grid.ColumnSpan', 'DockPanel.Dock']) {
+            el.removeAttribute(a);
+        }
+        if (t.localName === 'Canvas') {
+            el.removeAttribute('Margin');
+            el.removeAttribute('HorizontalAlignment');
+            el.removeAttribute('VerticalAlignment');
+            const r = targetHit.div.getBoundingClientRect();
+            el.setAttribute('Canvas.Left', String(snap(Math.max(0, (dRect.left - r.left) / zoom))));
+            el.setAttribute('Canvas.Top', String(snap(Math.max(0, (dRect.top - r.top) / zoom))));
+            t.appendChild(el);
+        } else if (t.localName === 'Grid') {
+            t.appendChild(el);
+            placeInGrid(el, targetHit, dRect, true, clientX, clientY);
+        } else {
+            // Flow panel: the panel positions its children — insert at the
+            // spot under the pointer and drop absolute-placement leftovers.
+            el.removeAttribute('Margin');
+            el.removeAttribute('HorizontalAlignment');
+            el.removeAttribute('VerticalAlignment');
+            t.insertBefore(el, flowInsertRef(t, clientX, clientY, el));
+        }
+    }
+
+    /** The sibling a flow drop should insert BEFORE (null = append). */
+    function flowInsertRef(targetEl, clientX, clientY, exclude) {
+        const axis = targetEl.localName === 'StackPanel'
+            ? ((targetEl.getAttribute('Orientation') || 'Vertical') === 'Horizontal' ? 'x' : 'y')
+            : targetEl.localName === 'WrapPanel'
+                ? ((targetEl.getAttribute('Orientation') || 'Horizontal') === 'Vertical' ? 'wrap-v' : 'wrap')
+                : 'y'; // DockPanel and friends: document order, read top-down
+        for (const c of elementChildren(targetEl)) {
+            if (c === exclude) { continue; }
+            const d = visuals.find(v => v.el === c)?.div;
+            if (!d) { continue; }
+            const r = d.getBoundingClientRect();
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            const before =
+                axis === 'x' ? clientX < cx
+                : axis === 'y' ? clientY < cy
+                : axis === 'wrap' ? (clientY < r.top || (clientY <= r.bottom && clientX < cx))
+                : (clientX < r.left || (clientX <= r.right && clientY < cy));
+            if (before) { return c; }
+        }
+        return null;
+    }
+
+    /** Move a flow-panel child one slot earlier (back=true) or later. */
+    function reorderSibling(el, back) {
+        const parent = el.parentNode;
+        if (!parent) { return; }
+        const sibs = elementChildren(parent);
+        const i = sibs.indexOf(el);
+        const j = back ? i - 1 : i + 1;
+        if (i < 0 || j < 0 || j >= sibs.length) { return; }
+        parent.insertBefore(el, back ? sibs[j] : (sibs[j + 1] ?? null));
+        commit();
+    }
+
+    /** Rewrite an element's position attributes so it stays where its visual
+     *  currently sits (group drags: each member inside its own parent). */
+    function placeElementAtVisual(el, rect) {
+        const parent = el.parentNode;
+        const parentHit = parent ? visuals.find(v => v.el === parent) : null;
+        if (!parentHit) { return; }
+        if (parent.localName === 'Canvas') {
+            const r = parentHit.div.getBoundingClientRect();
+            el.setAttribute('Canvas.Left', String(snap(Math.max(0, (rect.left - r.left) / zoom))));
+            el.setAttribute('Canvas.Top', String(snap(Math.max(0, (rect.top - r.top) / zoom))));
+        } else if (parent.localName === 'Grid') {
+            placeInGrid(el, parentHit, rect, false, rect.left, rect.top);
+        }
+        // Flow-panel members keep their slot: order is a single-drag feature.
     }
 
     function startResize(e, el, dir) {
@@ -1842,6 +2308,70 @@
             }
         }
         wfApply(text);
+    }
+
+    /** XAML counterpart of wfAlign: aligns/distributes siblings positioned by
+     *  Canvas coords or Left/Top margins, sizes via Width/Height attributes. */
+    function xamlAlign(op) {
+        const items = xamlAlignable();
+        if (items.length < 2 || !items.includes(selected)) { return; }
+
+        const posOf = c => movability(c) === 'canvas'
+            ? { x: num(c.getAttribute('Canvas.Left'), 0), y: num(c.getAttribute('Canvas.Top'), 0) }
+            : (m => ({ x: m.l, y: m.t }))(parseMargin(c.getAttribute('Margin')));
+        const sizeOf = c => {
+            const d = visuals.find(v => v.el === c)?.div;
+            return {
+                w: num(styleProp(c, 'Width'), d ? d.offsetWidth : 100),
+                h: num(styleProp(c, 'Height'), d ? d.offsetHeight : 30)
+            };
+        };
+        const setPos = (c, x, y) => {
+            x = Math.max(0, Math.round(x));
+            y = Math.max(0, Math.round(y));
+            if (movability(c) === 'canvas') {
+                c.setAttribute('Canvas.Left', String(x));
+                c.setAttribute('Canvas.Top', String(y));
+            } else {
+                const m = parseMargin(c.getAttribute('Margin'));
+                c.setAttribute('Margin', `${x},${y},${m.r},${m.b}`);
+            }
+        };
+        const setSize = (c, w, h) => {
+            c.setAttribute('Width', String(Math.max(1, Math.round(w))));
+            c.setAttribute('Height', String(Math.max(1, Math.round(h))));
+        };
+
+        const ap = posOf(selected);
+        const asz = sizeOf(selected);
+        if (op === 'dist-h' || op === 'dist-v') {
+            const key = op === 'dist-h' ? 'x' : 'y';
+            const sorted = [...items].sort((a, b) => posOf(a)[key] - posOf(b)[key]);
+            const first = posOf(sorted[0])[key];
+            const last = posOf(sorted[sorted.length - 1])[key];
+            const step = (last - first) / (sorted.length - 1);
+            sorted.forEach((c, i) => {
+                const p = posOf(c);
+                if (op === 'dist-h') { setPos(c, first + step * i, p.y); }
+                else { setPos(c, p.x, first + step * i); }
+            });
+        } else {
+            for (const c of items) {
+                if (c === selected) { continue; }
+                const p = posOf(c);
+                const s = sizeOf(c);
+                switch (op) {
+                    case 'left':   setPos(c, ap.x, p.y); break;
+                    case 'right':  setPos(c, ap.x + asz.w - s.w, p.y); break;
+                    case 'top':    setPos(c, p.x, ap.y); break;
+                    case 'bottom': setPos(c, p.x, ap.y + asz.h - s.h); break;
+                    case 'same-w': setSize(c, asz.w, s.h); break;
+                    case 'same-h': setSize(c, s.w, asz.h); break;
+                    case 'same-size': setSize(c, asz.w, asz.h); break;
+                }
+            }
+        }
+        commit();
     }
 
     // ------------------------------------------------------------ form resize
@@ -2012,6 +2542,11 @@
             addCustomSections(WF_CUSTOM);
         } else {
             for (const [type, def] of Object.entries(CONTROLS)) { addTool(type, def); }
+            addSection('Modern (Styled)');
+            for (const [type, def] of Object.entries(MODERN_CONTROLS)) {
+                const item = addTool(type, def);
+                item.title = `${type} — a styled ${def.element}; the Style it needs is added to Window.Resources automatically. Drag onto the form, or double-click to add.`;
+            }
             addCustomSections(XAML_CUSTOM);
         }
     }
@@ -2056,8 +2591,11 @@
         if (!el) { return; }
         setName(el, uniqueName(type));
         for (const [k, v] of Object.entries(def.attrs)) { el.setAttribute(k, v); }
-        el.setAttribute('Width', String(def.w));
-        el.setAttribute('Height', String(def.h));
+        if (!def.noSize) {
+            el.setAttribute('Width', String(def.w));
+            el.setAttribute('Height', String(def.h));
+        }
+        def.init?.(el);
         if (layoutRoot.localName === 'Canvas') {
             el.setAttribute('Canvas.Left', '20');
             el.setAttribute('Canvas.Top', '20');
@@ -2114,8 +2652,11 @@
         for (const [k, v] of Object.entries(def.attrs)) {
             el.setAttribute(k, v);
         }
-        el.setAttribute('Width', String(def.w));
-        el.setAttribute('Height', String(def.h));
+        if (!def.noSize) {
+            el.setAttribute('Width', String(def.w));
+            el.setAttribute('Height', String(def.h));
+        }
+        def.init?.(el);
 
         const panel = target.el.localName;
         if (panel === 'Grid' || panel === 'Canvas') {
@@ -2148,6 +2689,12 @@
     /** Element for a toolbox type: presentation namespace for built-ins, the
      *  control's clr-namespace (declared on the root as needed) for customs. */
     function createXamlToolElement(type, def) {
+        // Modern (styled) entries insert a standard element and make sure the
+        // Style resource it references exists in the document.
+        if (def.element) {
+            if (def.styleKey) { ensureWindowStyle(def.styleKey, def.styleXml); }
+            return xamlDoc.createElementNS(PRES_NS, def.element);
+        }
         if (!def.custom) { return xamlDoc.createElementNS(PRES_NS, type); }
         if (!def.custom.xmlns) {
             setStatus(`UI Maker: ${type} has no xmlns — set its namespace in the Control Library.`);
@@ -2155,6 +2702,30 @@
         }
         const prefix = ensureXmlnsPrefix(def.custom.xmlns);
         return prefix ? xamlDoc.createElementNS(def.custom.xmlns, `${prefix}:${type}`) : null;
+    }
+
+    /** Guarantee a Style with x:Key exists: document resources win, app-level
+     *  resources are respected, otherwise it is added to <Window.Resources>. */
+    function ensureWindowStyle(key, styleXml) {
+        if (!xamlDoc || !windowEl || !styleXml) { return; }
+        for (const s of xamlDoc.getElementsByTagName('Style')) {
+            if (s.getAttribute('x:Key') === key) { return; }
+        }
+        if (appResourceTexts.some(t => t.includes(`x:Key="${key}"`))) { return; }
+        const resName = `${windowEl.localName}.Resources`;
+        let res = [...windowEl.children].find(c => c.localName === resName);
+        if (!res) {
+            res = xamlDoc.createElementNS(PRES_NS, resName);
+            // Resources belong before the visual content.
+            windowEl.insertBefore(res, windowEl.firstChild ?? null);
+        }
+        const parsed = new DOMParser().parseFromString(styleXml, 'text/xml');
+        if (parsed.getElementsByTagName('parsererror').length) { return; }
+        const node = xamlDoc.importNode
+            ? xamlDoc.importNode(parsed.documentElement, true)
+            : parsed.documentElement;
+        res.appendChild(node);
+        collectStyles();
     }
 
     /** Create a root Grid on demand so dropping onto an empty Window works. */
@@ -2980,15 +3551,29 @@
                 e.preventDefault();
                 return;
             }
-            if (mode === 'canvas') {
-                el2attr(selected, 'Canvas.Left', dx);
-                el2attr(selected, 'Canvas.Top', dy);
-            } else {
-                const m = parseMargin(selected.getAttribute('Margin'));
-                selected.setAttribute('Margin',
-                    `${Math.max(0, m.l + dx)},${Math.max(0, m.t + dy)},${m.r},${m.b}`);
+            if (mode === 'reorder') {
+                // Flow-panel child: arrows move it earlier/later in order.
+                reorderSibling(selected, e.key === 'ArrowLeft' || e.key === 'ArrowUp');
+                e.preventDefault();
+                return;
             }
-            commit();
+            // Nudge every positionally-movable member of the selection.
+            let changed = false;
+            for (const m of multiSel.size ? [...multiSel] : [selected]) {
+                if (m.__wf) { continue; }
+                const mm = movability(m);
+                if (mm === 'canvas') {
+                    el2attr(m, 'Canvas.Left', dx);
+                    el2attr(m, 'Canvas.Top', dy);
+                    changed = true;
+                } else if (mm === 'margin' || mm === 'promote') {
+                    const mg = parseMargin(m.getAttribute('Margin'));
+                    m.setAttribute('Margin',
+                        `${Math.max(0, mg.l + dx)},${Math.max(0, mg.t + dy)},${mg.r},${mg.b}`);
+                    changed = true;
+                }
+            }
+            if (changed) { commit(); }
             e.preventDefault();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
             if (selected.__wf) {
@@ -3550,7 +4135,11 @@
         ['ff-al-disth', 'dist-h'], ['ff-al-distv', 'dist-v']
     ]) {
         const btn = $(id);
-        if (btn) { btn.addEventListener('click', () => wfAlign(op)); }
+        if (btn) {
+            btn.addEventListener('click', () => {
+                if (docMode === 'winforms') { wfAlign(op); } else { xamlAlign(op); }
+            });
+        }
     }
     $('ff-snap').addEventListener('change', e => { config.snap = e.target.checked; render(); });
     $('ff-grid').addEventListener('change', e => {
@@ -4053,6 +4642,7 @@
     /** XAML toolbox definition for a custom WPF control. */
     function xamlDefOf(type) {
         if (CONTROLS[type]) { return CONTROLS[type]; }
+        if (MODERN_CONTROLS[type]) { return MODERN_CONTROLS[type]; }
         const custom = XAML_CUSTOM[type];
         if (!custom) { return undefined; }
         const baseDef = CONTROLS[custom.base];
@@ -6999,7 +7589,13 @@
             wfAddControl, wfDeleteControls, wfWireEvent, wfUnwireEvent,
             wfInitializeComponentBody, wfInsertField, wfAddComponent,
             wfCode, wfQuote, wfSerialize, wfDisplay, wfString, wfFont,
-            wfApply
+            wfApply,
+            // XAML designer internals under test.
+            addControlDefault, ensureWindowStyle, reorderSibling, elAtPath,
+            movabilityAt: pathStr => {
+                const target = pathStr === '' ? windowEl : elAtPath(pathStr);
+                return target ? movability(target) : null;
+            }
         };
     }
 })();
