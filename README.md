@@ -176,7 +176,9 @@ Open any `.xaml` window in the UI Maker Designer:
   the real layout engine, and TabControl drops with two ready pages.
 - Keyboard support: arrow keys nudge, `Shift`+arrows move by grid, `Delete` removes,
   `Ctrl+D` duplicates, `Ctrl+X`/`Ctrl+C`/`Ctrl+V` cut, copy & paste —
-  including onto a *different* form. Structural containers/items are guarded
+  including onto a *different* form, and even into a designer in a
+  **different VS Code window/project** (the copy rides the Windows
+  clipboard). Structural containers/items are guarded
   from shallow Cut/Duplicate operations until deep cloning can preserve their
   children. `Esc` closes menus and clears the selection.
 
@@ -361,6 +363,7 @@ launches with UI Maker loaded.
 |---|---|---|
 | `uimaker.gridSize` | `8` | Snap grid size in pixels on the design canvas |
 | `uimaker.snapToGrid` | `true` | Snap control positions/sizes to the grid |
+| `uimaker.panelScale` | `100` | Toolbox/Properties panel size in percent (fonts + icons, accessibility) — ~80 Small, 100 Medium, ~125 Large; or Shift/Ctrl+scroll over a panel; double-click a panel title to reset |
 | `uimaker.xamlIntelliSense` | `true` | XAML completions, snippets, hover docs, and inline color swatches in the text editor |
 | `uimaker.publish.askMode` | `true` | Build Release asks how to publish (folder / single EXE / bundled runtime) and remembers the choice |
 | `uimaker.publish.singleFile` | `false` | Build Release (Publish) produces one portable `.exe` |

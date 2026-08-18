@@ -40,6 +40,8 @@ export class DotnetTools implements vscode.Disposable {
     private runProcess: cp.ChildProcess | undefined;
     /** Debug session started by this instance (name alone is not unique). */
     private debugSession: vscode.DebugSession | undefined;
+    /** What the last Run/Debug launched — lets Stop verify the app really died. */
+    private runTarget: { exeName: string; projectDir: string; elevated: boolean } | undefined;
     /** Completion events can beat executeTask()'s returned Thenable. */
     private readonly endedTaskProcesses = new WeakMap<vscode.TaskExecution, { exitCode: number | undefined }>();
     private output: vscode.OutputChannel | undefined;
@@ -143,6 +145,11 @@ export class DotnetTools implements vscode.Disposable {
         const pre = await this.preflight(project, targetFramework);
         if (!pre || generation !== this.lifecycleGeneration) { return; }
         this.stopCurrent();
+        this.runTarget = {
+            exeName: `${this.assemblyNameOf(project)}.exe`,
+            projectDir: path.dirname(project),
+            elevated: this.requiresElevation(project)
+        };
 
         // Classic projects: build with MSBuild, then launch the exe directly
         // (dotnet run does not understand non-SDK projects).
@@ -245,7 +252,7 @@ export class DotnetTools implements vscode.Disposable {
     private launchExeElevated(exe: string): void {
         this.output ??= vscode.window.createOutputChannel('UI Maker: Run');
         this.output.appendLine(`[UI Maker] ${path.basename(exe)} requests administrator rights — launching with a UAC prompt.`);
-        this.output.appendLine('[UI Maker] note: Stop cannot force-close an elevated app; close its window instead.');
+        this.output.appendLine('[UI Maker] note: closing an elevated app from Stop needs a UAC confirmation — you will be asked.');
         const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
         const child = cp.spawn('powershell', [
             '-NoProfile', '-Command',
@@ -292,8 +299,76 @@ export class DotnetTools implements vscode.Disposable {
     }
 
     stop(): void {
-        this.lifecycleGeneration++;
+        const generation = ++this.lifecycleGeneration;
+        const target = this.runTarget;
         this.stopCurrent();
+        // The synchronous teardown above can miss two cases on Windows:
+        //   * dotnet run — terminating the task kills the console host, but a
+        //     detached WinForms/WPF window can survive it;
+        //   * elevated apps — a non-elevated taskkill gets Access Denied.
+        // Verify the process actually died and escalate if it didn't.
+        void this.verifyStopped(target, generation);
+    }
+
+    /**
+     * A second, asynchronous pass behind Stop: confirm the launched .exe is
+     * gone, force-kill the verified tree if not, and — when the app runs as
+     * administrator — offer an elevated close through a UAC prompt.
+     * Every await re-checks the lifecycle generation so a restart (Run right
+     * after Stop) can never have its fresh instance shot down by this pass.
+     */
+    private async verifyStopped(
+        target: { exeName: string; projectDir: string; elevated: boolean } | undefined,
+        generation: number
+    ): Promise<void> {
+        if (!target || process.platform !== 'win32') { return; }
+        await delay(900);
+        if (generation !== this.lifecycleGeneration) { return; }
+
+        // Pass 1: path-verified survivors (normal apps) — kill the whole tree.
+        let pids = await listProjectProcessIds(target.exeName, target.projectDir);
+        if (generation !== this.lifecycleGeneration) { return; }
+        if (pids.length) {
+            this.output?.appendLine(`[UI Maker] ${target.exeName} survived Stop (PID ${pids.join(', ')}) — force-closing.`);
+            await killProcessIds(pids);
+            await delay(600);
+            if (generation !== this.lifecycleGeneration) { return; }
+            pids = await listProjectProcessIds(target.exeName, target.projectDir);
+        }
+
+        // Pass 2: elevated survivors. Their executable path is unreadable from
+        // a non-elevated query, so they never appear above — match by image
+        // name with an unreadable path, and only when THIS launch was elevated.
+        let elevatedPids: number[] = [];
+        if (!pids.length && target.elevated) {
+            elevatedPids = (await listNamedProcesses(target.exeName))
+                .filter(p => !p.exePath)
+                .map(p => p.pid);
+        }
+        if (generation !== this.lifecycleGeneration) { return; }
+        if (!pids.length && !elevatedPids.length) { return; }
+
+        const all = [...pids, ...elevatedPids];
+        const closeIt = 'Close It (Admin)';
+        const leave = 'Leave It Running';
+        const why = elevatedPids.length
+            ? 'it runs as administrator, so Windows needs a UAC confirmation to close it'
+            : 'it did not respond to a normal close';
+        const choice = await vscode.window.showWarningMessage(
+            `UI Maker: ${target.exeName} is still running (PID ${all.join(', ')}) — ${why}.`,
+            closeIt, leave
+        );
+        if (choice !== closeIt || generation !== this.lifecycleGeneration) { return; }
+        await killProcessIdsElevated(all);
+        await delay(800);
+        const left = target.elevated
+            ? (await listNamedProcesses(target.exeName)).filter(p => !p.exePath).length
+            : (await listProjectProcessIds(target.exeName, target.projectDir)).length;
+        if (left) {
+            vscode.window.showWarningMessage(`UI Maker: ${target.exeName} could not be closed (UAC declined?). Close its window manually.`);
+        } else {
+            this.output?.appendLine(`[UI Maker] ${target.exeName} closed.`);
+        }
     }
 
     /** Stop tracked state without invalidating the operation that requested it. */
@@ -322,6 +397,11 @@ export class DotnetTools implements vscode.Disposable {
         const pre = await this.preflight(project, targetFramework);
         if (!pre || generation !== this.lifecycleGeneration) { return; }
         this.stopCurrent();
+        this.runTarget = {
+            exeName: `${this.assemblyNameOf(project)}.exe`,
+            projectDir: path.dirname(project),
+            elevated: this.requiresElevation(project)
+        };
 
         // Build first; a failed build should surface errors, not a debugger.
         const exitCode = pre.msbuild
@@ -942,6 +1022,53 @@ function killProcessIds(pids: number[]): Promise<void> {
         const args = ['/F', '/T'];
         for (const pid of pids) { args.push('/PID', String(pid)); }
         cp.execFile('taskkill', args, () => resolve());
+    });
+}
+
+/**
+ * Every running process with this image name, including ones whose
+ * executable path cannot be read (elevated processes look like that from a
+ * non-elevated query — Name is visible, ExecutablePath comes back empty).
+ */
+function listNamedProcesses(imageName: string): Promise<{ pid: number; exePath: string }[]> {
+    return new Promise(resolve => {
+        // Static PowerShell source only — never interpolate the name.
+        const script =
+            'Get-CimInstance Win32_Process | ' +
+            'ForEach-Object { Write-Output ("$($_.ProcessId)|$($_.Name)|$($_.ExecutablePath)") }';
+        cp.execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
+            { windowsHide: true, timeout: 15000 }, (err, stdout) => {
+                if (err) { resolve([]); return; }
+                const wanted = imageName.toLowerCase();
+                const out: { pid: number; exePath: string }[] = [];
+                for (const line of stdout.split(/\r?\n/)) {
+                    const first = line.indexOf('|');
+                    const second = line.indexOf('|', first + 1);
+                    if (first < 1 || second < 0) { continue; }
+                    const pid = Number(line.slice(0, first).trim());
+                    const name = line.slice(first + 1, second).trim().toLowerCase();
+                    const exePath = line.slice(second + 1).trim();
+                    if (pid && name === wanted) { out.push({ pid, exePath }); }
+                }
+                resolve(out);
+            });
+    });
+}
+
+/**
+ * Force-kill process trees WITH elevation — taskkill relaunched through a
+ * UAC prompt (Start-Process -Verb RunAs). Resolves when the elevated
+ * taskkill finishes or the user declines the prompt.
+ */
+function killProcessIdsElevated(pids: number[]): Promise<void> {
+    return new Promise(resolve => {
+        const argList = ['/F', '/T'];
+        for (const pid of pids) { argList.push('/PID', String(pid)); }
+        const psArgs = argList.map(a => `'${a}'`).join(',');
+        cp.execFile('powershell', [
+            '-NoProfile', '-Command',
+            `Start-Process -FilePath taskkill -ArgumentList ${psArgs} -Verb RunAs -WindowStyle Hidden -Wait`
+        ], { windowsHide: true, timeout: 60000 }, () => resolve());
     });
 }
 

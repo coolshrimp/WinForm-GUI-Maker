@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.21.0
+
+Three user requests:
+
+**Stop App now actually stops the app.** Stop used to report success while
+the process kept running in two cases: `dotnet run` launches, where killing
+the console host can leave a detached WinForms/WPF window alive, and apps
+whose manifest demands administrator rights, which a normal taskkill cannot
+touch (Access Denied). Stop now runs a verification pass behind the scenes:
+it re-checks whether the app's .exe (matched by full path under the project
+— never an unrelated same-name app) is still alive, force-kills the process
+tree if so, and when the survivor is elevated it offers **Close It (Admin)**
+— one UAC confirmation and the app is gone. A restart (Run right after
+Stop) can never have its fresh instance shot down: every step re-checks the
+lifecycle generation first.
+
+**Copy controls between VS Code windows.** Ctrl+C in a designer now mirrors
+the copied controls to the Windows clipboard (with a marker — normal text
+copy/paste is untouched), and Ctrl+V asks for the freshest clipboard before
+pasting. Copy a footer Label, a TextBox, a whole multi-selection in one
+project's designer and paste it into a designer in a completely separate
+VS Code window/project. Same rules as before apply across windows: WinForms
+controls paste into forms of the same language (C#↔C#, VB↔VB), XAML
+elements into XAML windows.
+
+**Toolbox & Properties panel sizing (accessibility).** New setting
+`uimaker.panelScale` (60–200 %, default 100) scales the fonts *and* icons of
+the designer's two side panels — roughly 80 = Small, 100 = Medium,
+125 = Large. Or just hold Shift (or Ctrl) and scroll over either panel, the
+same gesture the canvas uses for zoom; the value is saved globally so every
+window keeps it. Reset by double-clicking a panel title or setting it back
+to 100. The canvas itself is not affected.
+
 ## 0.20.5
 
 The sidebar row from 0.20.4 is replaced per feedback: instead of the

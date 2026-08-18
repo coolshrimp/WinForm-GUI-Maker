@@ -16,6 +16,9 @@ import { escapeRegExp, isCSharpIdentifier, renameCSharpIdentifier } from './csha
 import { isVbIdentifier, parseVbHandles, renameVbIdentifier } from './vbText';
 import { decideDesignerEdit } from './designerSync';
 
+/** OS-clipboard marker for cross-window designer copy/paste. */
+const CLIP_MARKER = 'UIMAKER-CLIP:v1:';
+
 export class DesignerProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'uimaker.designer';
 
@@ -77,6 +80,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 type: 'config',
                 gridSize: cfg.get<number>('gridSize', 8),
                 snap: cfg.get<boolean>('snapToGrid', true),
+                panelScale: cfg.get<number>('panelScale', 100),
                 docName: path.basename(document.uri.fsPath)
             });
         };
@@ -163,6 +167,7 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 type: 'config',
                 gridSize: cfg.get<number>('gridSize', 8),
                 snap: cfg.get<boolean>('snapToGrid', true),
+                panelScale: cfg.get<number>('panelScale', 100),
                 docName: path.basename(document.uri.fsPath)
             });
         };
@@ -180,9 +185,34 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     break;
 
                 // Designer clipboard (copy on one form, paste on another).
+                // Mirrored to the OS clipboard with a marker so controls can
+                // be pasted into a designer in ANOTHER VS Code window/project.
                 case 'setClipboard':
                     DesignerProvider.clipboard = msg.data;
+                    void vscode.env.clipboard.writeText(CLIP_MARKER + JSON.stringify(msg.data));
                     break;
+
+                // Paste asks the host for the freshest clipboard: prefer the
+                // OS clipboard (cross-instance) over this window's copy.
+                case 'requestClipboard': {
+                    try {
+                        const text = await vscode.env.clipboard.readText();
+                        if (text.startsWith(CLIP_MARKER)) {
+                            DesignerProvider.clipboard = JSON.parse(text.slice(CLIP_MARKER.length));
+                        }
+                    } catch { /* unreadable clipboard — fall back to the in-window copy */ }
+                    void panel.webview.postMessage({ type: 'clipboard', data: DesignerProvider.clipboard, paste: true });
+                    break;
+                }
+
+                // Toolbox/Properties accessibility zoom — persist globally so
+                // every designer (and other windows) picks it up via config.
+                case 'setPanelScale': {
+                    const scale = Math.max(60, Math.min(200, Math.round(Number(msg.value) || 100)));
+                    await vscode.workspace.getConfiguration('uimaker')
+                        .update('panelScale', scale === 100 ? undefined : scale, vscode.ConfigurationTarget.Global);
+                    break;
+                }
 
                 // Control rename: the webview already rewrote the designer
                 // file; mirror the identifier rename into the code-behind.

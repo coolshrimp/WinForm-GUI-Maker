@@ -380,6 +380,7 @@
             config.docName = msg.docName ?? config.docName;
             $('ff-grid').value = String(config.gridSize);
             $('ff-snap').checked = config.snap;
+            if (typeof msg.panelScale === 'number') { applyPanelScale(msg.panelScale, false); }
             render();
         } else if (msg.type === 'imageSet') {
             // Host imported an image for a property — write the assignment.
@@ -408,8 +409,10 @@
             for (const [k, v] of Object.entries(msg.images ?? {})) { imageCache.set(k, v); }
             if (docMode === 'winforms') { wfRender(); } else if (xamlDoc) { render(); }
         } else if (msg.type === 'clipboard') {
-            // Shared clipboard from the host — enables cross-form paste.
+            // Shared clipboard from the host — cross-form AND cross-window
+            // paste (the host checks the OS clipboard for designer data).
             if (msg.data) { clipboard = msg.data; }
+            if (msg.paste) { performPaste(); }
         }
     }
 
@@ -3031,6 +3034,13 @@
     }
 
     function pasteClipboard() {
+        // Ask the host for the freshest clipboard first — the OS clipboard
+        // can hold controls copied in another VS Code window (other project).
+        // The host answers with a 'clipboard' message carrying paste:true.
+        vscode.postMessage({ type: 'requestClipboard' });
+    }
+
+    function performPaste() {
         if (!clipboard) { setStatus('UI Maker: nothing to paste yet — copy a control first (Ctrl+C).'); return; }
 
         if (clipboard.mode === 'wf' && docMode === 'winforms' && wfForm) {
@@ -3582,6 +3592,47 @@
         closeZoomPop();
         setZoom(1);
     });
+
+    // ---- panel size: Toolbox/Properties accessibility zoom -----------------
+    // Scales fonts AND icons of the two side panels (not the canvas) via CSS
+    // zoom. Persisted through the host into the uimaker.panelScale setting,
+    // so it survives restarts and syncs across windows. Reset: set it to 100
+    // in settings, or double-click either panel title.
+
+    let panelScale = 100;
+    let panelScaleSaveTimer = null;
+
+    /** Apply a panel scale percent (clamped to 60–200); optionally persist. */
+    function applyPanelScale(pct, save) {
+        const next = Math.min(200, Math.max(60, Math.round((Number(pct) || 100) / 5) * 5));
+        panelScale = next;
+        document.documentElement.style.setProperty('--ff-panel-zoom', String(next / 100));
+        if (!save) { return; }
+        setStatus(`UI Maker: panel size ${next}% (default 100 — uimaker.panelScale in settings, or double-click a panel title to reset).`);
+        // Debounced — a wheel gesture fires dozens of events; write once.
+        clearTimeout(panelScaleSaveTimer);
+        panelScaleSaveTimer = setTimeout(() => {
+            vscode.postMessage({ type: 'setPanelScale', value: panelScale });
+        }, 400);
+    }
+
+    for (const panelId of ['ff-toolbox', 'ff-props']) {
+        const panel = $(panelId);
+        if (!panel) { continue; }
+        // Hold Shift (or Ctrl) and scroll over the panel to resize its UI —
+        // the same gesture the canvas uses for zoom.
+        panel.addEventListener('wheel', e => {
+            if (!e.shiftKey && !e.ctrlKey) { return; }
+            e.preventDefault();
+            e.stopPropagation();
+            const delta = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) > 0 ? -5 : 5;
+            applyPanelScale(panelScale + delta, true);
+        }, { passive: false });
+        // Double-click the panel title to reset to 100%.
+        panel.querySelector('.ff-panel-title')?.addEventListener('dblclick', () => {
+            applyPanelScale(100, true);
+        });
+    }
 
     $('ff-tab-props').addEventListener('click', () => {
         switchPanelTab('props');

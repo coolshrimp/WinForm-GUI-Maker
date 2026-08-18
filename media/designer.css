@@ -212,6 +212,10 @@ html, body {
     border-right: 1px solid var(--vscode-panel-border, #444);
     background: var(--vscode-sideBar-background);
     overflow-y: auto;
+    /* Accessibility sizing for panel fonts/icons — uimaker.panelScale,
+       or Shift/Ctrl + wheel over the panel. zoom (not transform) so the
+       layout reflows and nothing overlaps. */
+    zoom: var(--ff-panel-zoom, 1);
 }
 
 .ff-tool {
@@ -953,6 +957,8 @@ html, body {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    /* Accessibility sizing — see #ff-toolbox. */
+    zoom: var(--ff-panel-zoom, 1);
 }
 
 .ff-tabs {
