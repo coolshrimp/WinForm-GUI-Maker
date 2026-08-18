@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.1
+
+The Toolbox and Properties panel sizes are now independent (user request):
+`uimaker.panelScale` is replaced by **`uimaker.toolboxScale`** and
+**`uimaker.propertiesScale`** (each 60–200 %, default 100). Shift/Ctrl +
+scroll over a panel resizes only that panel, and double-clicking a panel's
+title resets only it.
+
 ## 0.21.0
 
 Three user requests:

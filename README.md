@@ -363,7 +363,8 @@ launches with UI Maker loaded.
 |---|---|---|
 | `uimaker.gridSize` | `8` | Snap grid size in pixels on the design canvas |
 | `uimaker.snapToGrid` | `true` | Snap control positions/sizes to the grid |
-| `uimaker.panelScale` | `100` | Toolbox/Properties panel size in percent (fonts + icons, accessibility) — ~80 Small, 100 Medium, ~125 Large; or Shift/Ctrl+scroll over a panel; double-click a panel title to reset |
+| `uimaker.toolboxScale` | `100` | Toolbox panel size in percent (fonts + icons, accessibility) — ~80 Small, 100 Medium, ~125 Large; or Shift/Ctrl+scroll over the panel; double-click its title to reset |
+| `uimaker.propertiesScale` | `100` | Properties panel size in percent — independent of the Toolbox; same gestures |
 | `uimaker.xamlIntelliSense` | `true` | XAML completions, snippets, hover docs, and inline color swatches in the text editor |
 | `uimaker.publish.askMode` | `true` | Build Release asks how to publish (folder / single EXE / bundled runtime) and remembers the choice |
 | `uimaker.publish.singleFile` | `false` | Build Release (Publish) produces one portable `.exe` |

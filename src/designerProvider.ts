@@ -80,7 +80,8 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 type: 'config',
                 gridSize: cfg.get<number>('gridSize', 8),
                 snap: cfg.get<boolean>('snapToGrid', true),
-                panelScale: cfg.get<number>('panelScale', 100),
+                toolboxScale: cfg.get<number>('toolboxScale', 100),
+                propertiesScale: cfg.get<number>('propertiesScale', 100),
                 docName: path.basename(document.uri.fsPath)
             });
         };
@@ -167,7 +168,8 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                 type: 'config',
                 gridSize: cfg.get<number>('gridSize', 8),
                 snap: cfg.get<boolean>('snapToGrid', true),
-                panelScale: cfg.get<number>('panelScale', 100),
+                toolboxScale: cfg.get<number>('toolboxScale', 100),
+                propertiesScale: cfg.get<number>('propertiesScale', 100),
                 docName: path.basename(document.uri.fsPath)
             });
         };
@@ -205,12 +207,14 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     break;
                 }
 
-                // Toolbox/Properties accessibility zoom — persist globally so
-                // every designer (and other windows) picks it up via config.
+                // Toolbox/Properties accessibility zoom — persisted globally
+                // so every designer (and other windows) picks it up via
+                // config. The two panels are independent settings.
                 case 'setPanelScale': {
+                    const key = msg.panel === 'toolbox' ? 'toolboxScale' : 'propertiesScale';
                     const scale = Math.max(60, Math.min(200, Math.round(Number(msg.value) || 100)));
                     await vscode.workspace.getConfiguration('uimaker')
-                        .update('panelScale', scale === 100 ? undefined : scale, vscode.ConfigurationTarget.Global);
+                        .update(key, scale === 100 ? undefined : scale, vscode.ConfigurationTarget.Global);
                     break;
                 }
 

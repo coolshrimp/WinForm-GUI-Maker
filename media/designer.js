@@ -380,7 +380,8 @@
             config.docName = msg.docName ?? config.docName;
             $('ff-grid').value = String(config.gridSize);
             $('ff-snap').checked = config.snap;
-            if (typeof msg.panelScale === 'number') { applyPanelScale(msg.panelScale, false); }
+            if (typeof msg.toolboxScale === 'number') { applyPanelScale('toolbox', msg.toolboxScale, false); }
+            if (typeof msg.propertiesScale === 'number') { applyPanelScale('props', msg.propertiesScale, false); }
             render();
         } else if (msg.type === 'imageSet') {
             // Host imported an image for a property — write the assignment.
@@ -3594,43 +3595,48 @@
     });
 
     // ---- panel size: Toolbox/Properties accessibility zoom -----------------
-    // Scales fonts AND icons of the two side panels (not the canvas) via CSS
-    // zoom. Persisted through the host into the uimaker.panelScale setting,
-    // so it survives restarts and syncs across windows. Reset: set it to 100
-    // in settings, or double-click either panel title.
+    // Scales fonts AND icons of a side panel (not the canvas) via CSS zoom.
+    // The two panels are INDEPENDENT: uimaker.toolboxScale and
+    // uimaker.propertiesScale, persisted through the host so they survive
+    // restarts and sync across windows. Reset: set 100 in settings, or
+    // double-click the panel's title.
 
-    let panelScale = 100;
-    let panelScaleSaveTimer = null;
+    const panelScales = {
+        toolbox: { pct: 100, cssVar: '--ff-toolbox-zoom', setting: 'uimaker.toolboxScale', label: 'Toolbox', timer: null },
+        props:   { pct: 100, cssVar: '--ff-props-zoom',   setting: 'uimaker.propertiesScale', label: 'Properties', timer: null }
+    };
 
-    /** Apply a panel scale percent (clamped to 60–200); optionally persist. */
-    function applyPanelScale(pct, save) {
+    /** Apply a scale percent (clamped to 60–200) to one panel; optionally persist. */
+    function applyPanelScale(which, pct, save) {
+        const p = panelScales[which];
+        if (!p) { return; }
         const next = Math.min(200, Math.max(60, Math.round((Number(pct) || 100) / 5) * 5));
-        panelScale = next;
-        document.documentElement.style.setProperty('--ff-panel-zoom', String(next / 100));
+        p.pct = next;
+        document.documentElement.style.setProperty(p.cssVar, String(next / 100));
         if (!save) { return; }
-        setStatus(`UI Maker: panel size ${next}% (default 100 — uimaker.panelScale in settings, or double-click a panel title to reset).`);
+        setStatus(`UI Maker: ${p.label} panel size ${next}% (default 100 — ${p.setting} in settings, or double-click its title to reset).`);
         // Debounced — a wheel gesture fires dozens of events; write once.
-        clearTimeout(panelScaleSaveTimer);
-        panelScaleSaveTimer = setTimeout(() => {
-            vscode.postMessage({ type: 'setPanelScale', value: panelScale });
+        clearTimeout(p.timer);
+        p.timer = setTimeout(() => {
+            vscode.postMessage({ type: 'setPanelScale', panel: which, value: p.pct });
         }, 400);
     }
 
-    for (const panelId of ['ff-toolbox', 'ff-props']) {
+    for (const [which, panelId] of [['toolbox', 'ff-toolbox'], ['props', 'ff-props']]) {
         const panel = $(panelId);
         if (!panel) { continue; }
         // Hold Shift (or Ctrl) and scroll over the panel to resize its UI —
-        // the same gesture the canvas uses for zoom.
+        // the same gesture the canvas uses for zoom. Only THIS panel changes.
         panel.addEventListener('wheel', e => {
             if (!e.shiftKey && !e.ctrlKey) { return; }
             e.preventDefault();
             e.stopPropagation();
             const delta = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) > 0 ? -5 : 5;
-            applyPanelScale(panelScale + delta, true);
+            applyPanelScale(which, panelScales[which].pct + delta, true);
         }, { passive: false });
-        // Double-click the panel title to reset to 100%.
+        // Double-click the panel title to reset this panel to 100%.
         panel.querySelector('.ff-panel-title')?.addEventListener('dblclick', () => {
-            applyPanelScale(100, true);
+            applyPanelScale(which, 100, true);
         });
     }
 
