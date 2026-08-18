@@ -789,6 +789,7 @@
 
             if (node.localName !== 'Style') { continue; }
             const setters = {};
+            let toggle = null;
             for (const s of node.children) {
                 if (s.localName !== 'Setter') { continue; }
                 const p = (s.getAttribute('Property') || '').split('.').pop();
@@ -800,16 +801,84 @@
                     const border = findDescendantElement(s, 'Border');
                     const cr = border?.getAttribute('CornerRadius');
                     if (cr && !cr.includes('{') && !('CornerRadius' in setters)) { setters.CornerRadius = cr; }
+                    // Toggle-switch templates (a track holding a sliding
+                    // thumb) get a real switch preview — see detectToggle.
+                    toggle = detectToggleTemplate(s);
                     continue;
                 }
                 if (p && v !== null) { setters[p] = v; }
             }
             const basedOn = resourceKey(node.getAttribute('BasedOn'));
-            const entry = { setters, basedOn };
+            const entry = { setters, basedOn, toggle };
             const target = (node.getAttribute('TargetType') || '').split(':').pop();
             if (key) { styles.byKey.set(key, entry); }
             else if (target) { styles.byType.set(target, entry); }
         }
+    }
+
+    /**
+     * Recognize a toggle-switch ControlTemplate inside a Style's Template
+     * setter — the shapes people actually write: a rounded track Border
+     * holding an Ellipse thumb, and/or an IsChecked trigger that slides a
+     * named part (HorizontalAlignment / Margin / RenderTransform). Returns
+     * raw brush strings for the track, the checked track, and the thumb so
+     * the canvas can draw the switch in the app's own colors.
+     */
+    function detectToggleTemplate(templateSetter) {
+        const ellipse = findDescendantElement(templateSetter, 'Ellipse');
+        let onBrush = null;
+        let slides = false;
+        let hasCheckedTrigger = false;
+        const walk = n => {
+            for (const c of n.children) {
+                if (c.localName === 'Trigger'
+                    && (c.getAttribute('Property') || '').split('.').pop() === 'IsChecked'
+                    && (c.getAttribute('Value') || '').toLowerCase() === 'true') {
+                    hasCheckedTrigger = true;
+                    for (const st of c.children) {
+                        if (st.localName !== 'Setter') { continue; }
+                        const p = (st.getAttribute('Property') || '').split('.').pop();
+                        if ((p === 'Background' || p === 'Fill') && !onBrush) {
+                            onBrush = st.getAttribute('Value');
+                        }
+                        if (p === 'HorizontalAlignment' || p === 'Margin' || p === 'RenderTransform') {
+                            slides = true;
+                        }
+                    }
+                }
+                walk(c);
+            }
+        };
+        walk(templateSetter);
+        // Ellipse-in-a-Border reads as a switch even when the checked state
+        // is animated via VisualStates instead of Triggers.
+        const track = findDescendantElement(templateSetter, 'Border');
+        if (!(ellipse && track) && !(hasCheckedTrigger && slides)) { return null; }
+        return {
+            track: track?.getAttribute('Background') ?? null,
+            on: onBrush,
+            thumb: ellipse?.getAttribute('Fill') ?? null
+        };
+    }
+
+    /** Toggle-template info for an element's effective style (BasedOn-aware),
+     *  or null when its style is not a toggle switch. */
+    function styleToggleInfo(el) {
+        const seen = new Set();
+        let entry = null;
+        const key = resourceKey(el.getAttribute('Style'));
+        if (key) { entry = styles.byKey.get(key) ?? null; }
+        if (!entry && !key) { entry = styles.byType.get(el.localName) ?? null; }
+        while (entry) {
+            if (entry.toggle) { return entry.toggle; }
+            if (!entry.basedOn || seen.has(entry.basedOn)) { break; }
+            seen.add(entry.basedOn);
+            const typeRef = /^\{\s*x:Type\s+(?:\w+:)?(\w+)\s*\}$/.exec(entry.basedOn);
+            entry = typeRef
+                ? (styles.byType.get(typeRef[1]) ?? null)
+                : (styles.byKey.get(entry.basedOn) ?? null);
+        }
+        return null;
     }
 
     /** First descendant element with the given localName (depth-first). */
@@ -1274,6 +1343,25 @@
         }
     }
 
+    /** Draw a toggle switch (track + thumb + label) into `inner`, using the
+     *  template's own brushes when they resolve. */
+    function renderToggleSwitch(inner, el, label, toggle) {
+        const on = el.getAttribute('IsChecked') === 'True';
+        const track = document.createElement('span');
+        track.className = `ff-toggle${on ? ' ff-toggle-on' : ''}`;
+        const trackBrush = on
+            ? (resolveBrush(toggle.on) || '')
+            : (resolveBrush(toggle.track) || '');
+        if (trackBrush) { track.style.background = trackBrush; }
+        const thumb = document.createElement('span');
+        thumb.className = 'ff-toggle-thumb';
+        const thumbBrush = resolveBrush(toggle.thumb);
+        if (thumbBrush) { thumb.style.background = thumbBrush; }
+        track.appendChild(thumb);
+        inner.appendChild(track);
+        inner.append(label);
+    }
+
     /** Clean SVG placeholder for image controls with no (resolvable) image. */
     const IMAGE_PLACEHOLDER_SVG =
         '<svg class="ff-img-ph" viewBox="0 0 24 24" aria-hidden="true">'
@@ -1430,17 +1518,33 @@
                 inner.classList.add('ff-look-input');
                 inner.textContent = '••••••';
                 break;
-            case 'CheckBox':
+            case 'CheckBox': {
                 inner.classList.add('ff-look-label');
-                // The injected toggle-switch template: track + thumb.
-                if (styleRef.includes('UimToggleSwitch')) {
-                    inner.innerHTML = `<span class="ff-toggle ${el.getAttribute('IsChecked') === 'True' ? 'ff-toggle-on' : ''}"><span class="ff-toggle-thumb"></span></span>`;
-                    inner.append(content ?? '');
+                // Any toggle-switch template — the injected UimToggleSwitch
+                // or the app's own Style/ControlTemplate — draws as a switch.
+                const toggle = styleRef.includes('UimToggleSwitch') ? {} : styleToggleInfo(el);
+                if (toggle) {
+                    renderToggleSwitch(inner, el, content ?? '', toggle);
                     break;
                 }
                 inner.innerHTML = `<span class="ff-glyph ${el.getAttribute('IsChecked') === 'True' ? 'ff-check-on' : 'ff-check-off'}"></span>`;
                 inner.append(content || 'CheckBox');
                 break;
+            }
+            case 'ToggleButton': {
+                // Toggle-styled templates preview as a switch; otherwise a
+                // ToggleButton is chrome-wise a button.
+                const toggle = styleToggleInfo(el);
+                if (toggle) {
+                    inner.classList.add('ff-look-label');
+                    renderToggleSwitch(inner, el, content ?? '', toggle);
+                } else {
+                    inner.classList.add('ff-look-button');
+                    if (el.getAttribute('IsChecked') === 'True') { inner.style.filter = 'brightness(0.92)'; }
+                    inner.textContent = content || 'ToggleButton';
+                }
+                break;
+            }
             case 'RadioButton':
                 inner.classList.add('ff-look-label');
                 inner.innerHTML = `<span class="ff-glyph ${el.getAttribute('IsChecked') === 'True' ? 'ff-radio-on' : 'ff-radio-off'}"></span>`;
@@ -7595,6 +7699,10 @@
             movabilityAt: pathStr => {
                 const target = pathStr === '' ? windowEl : elAtPath(pathStr);
                 return target ? movability(target) : null;
+            },
+            toggleInfoAt: pathStr => {
+                const target = elAtPath(pathStr);
+                return target ? styleToggleInfo(target) : null;
             }
         };
     }

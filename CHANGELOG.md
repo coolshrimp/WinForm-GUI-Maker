@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.23.1
+
+**Your own toggle switches now look like toggles on the canvas** (user
+report: "my project has a toggle check box but it's not showing in Designer
+as a toggle"). The designer previously only knew how to draw its own
+injected UimToggleSwitch style; a CheckBox restyled by the app's own
+Style/ControlTemplate fell back to a plain checkbox glyph. The style
+collector now recognizes toggle-switch templates generically — a rounded
+track Border holding an Ellipse thumb, and/or an IsChecked trigger that
+slides a named part (HorizontalAlignment / Margin / RenderTransform) — from
+the document's resources, App.xaml, and merged dictionaries, through keyed,
+implicit (TargetType), and BasedOn-chained styles. Detected toggles render
+as a real switch using the template's own brushes: track color, checked
+color from the IsChecked trigger, thumb fill. Plain restyled checkboxes
+(colors/fonts only) stay checkboxes. `ToggleButton` elements get the same
+treatment (switch when toggle-templated, button chrome otherwise).
+
 ## 0.23.0
 
 Design-surface overhaul for XAML (user request: "I'm not able to drag items

@@ -120,7 +120,11 @@ Open any `.xaml` window in the UI Maker Designer:
   implicit styles (`TargetType` without a key), `BasedOn` chains, gradient
   brushes, and template corner rounding all apply, so a dark-themed app
   previews dark — the canvas matches the running app instead of showing
-  default gray chrome.
+  default gray chrome. **Toggle-switch templates are recognized too**: a
+  CheckBox (or ToggleButton) whose Style/ControlTemplate is a rounded track
+  with a sliding thumb previews as a real switch in the template's own
+  colors, whether the style lives in the window, App.xaml, or a merged
+  dictionary.
 - **Design canvas** that mimics a real window (title bar, client area) with
   snap-to-grid placement, drag to move, 8-point resize handles — and grips on
   the window's own edges to resize the form/window itself. **Everything is
