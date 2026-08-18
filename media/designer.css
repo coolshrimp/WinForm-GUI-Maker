@@ -249,6 +249,31 @@ html, body {
     border-top: 1px solid var(--vscode-panel-border, #444);
 }
 
+/* Rescan button on the "Project Controls" section header. */
+.ff-tool-refresh {
+    float: right;
+    margin: -2px 0 0;
+    padding: 0 4px;
+    background: none;
+    border: none;
+    color: var(--vscode-foreground);
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+.ff-tool-refresh:hover {
+    opacity: 1;
+}
+
+/* Hint shown while the project defines no custom controls yet. */
+.ff-tool-hint {
+    padding: 4px 10px 6px;
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0.55;
+}
+
 /* ------------------------------------------------------------------- canvas */
 
 #ff-canvas-host {

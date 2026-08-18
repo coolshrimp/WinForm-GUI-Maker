@@ -2,9 +2,12 @@
 // Packages" window).
 //
 // Browse / Installed / Updates tabs against nuget.org:
+//   * Browse     — nuget.org search (the same azuresearch service VS uses).
+//                  Opens first, pre-filled with the most popular packages
+//                  (an empty azuresearch query returns them by relevance),
+//                  and searches as the user types.
 //   * Installed  — PackageReference entries read from the project file
 //                  (packages.config for classic projects, read-only).
-//   * Browse     — nuget.org search (the same azuresearch service VS uses).
 //   * Updates    — installed packages whose latest stable is newer.
 // Install / update / uninstall shell out to `dotnet add|remove package`,
 // which edits the project file and restores in one step. Classic (non-SDK)
@@ -453,12 +456,12 @@ function buildHtml(project: string): string {
 <div class="project">Project: <code>${esc(path.basename(project))}</code> · packages install with <code>dotnet add package</code> (edits the project file and restores)</div>
 
 <div class="tabs">
-    <button id="tab-browse">Browse</button>
-    <button id="tab-installed" class="active">Installed</button>
+    <button id="tab-browse" class="active">Browse</button>
+    <button id="tab-installed">Installed</button>
     <button id="tab-updates">Updates</button>
 </div>
 
-<div class="searchrow" id="browse-controls" style="display:none">
+<div class="searchrow" id="browse-controls">
     <input type="text" id="q" placeholder="Search nuget.org  (e.g. Newtonsoft.Json, serial port, sqlite)">
     <label class="check"><input type="checkbox" id="prerelease"> Include prerelease</label>
     <button class="act" id="go">Search</button>
@@ -469,7 +472,7 @@ function buildHtml(project: string): string {
 
 <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    let tab = 'installed';
+    let tab = 'browse';
     let installed = [];          // [{id, version}]
     let canModify = false;
     let lastSearch = [];
@@ -493,7 +496,13 @@ function buildHtml(project: string): string {
         document.getElementById('browse-controls').style.display = t === 'browse' ? 'flex' : 'none';
         setStatus('');
         if (t === 'installed') { vscode.postMessage({ type: 'installed' }); renderInstalled(); }
-        if (t === 'browse') { renderSearch(); document.getElementById('q').focus(); }
+        if (t === 'browse') {
+            renderSearch();
+            document.getElementById('q').focus();
+            // Nothing searched yet — fill the tab with nuget.org's most
+            // popular packages instead of leaving it blank.
+            if (!lastSearch.length && !document.getElementById('q').value.trim()) { doSearch(); }
+        }
         if (t === 'updates') { setStatus('Checking nuget.org for newer versions…'); listEl.innerHTML = ''; vscode.postMessage({ type: 'updates' }); }
     }
     tabs.browse.addEventListener('click', () => setTab('browse'));
@@ -631,11 +640,19 @@ function buildHtml(project: string): string {
 
     function doSearch() {
         const q = document.getElementById('q').value.trim();
-        setStatus('Searching nuget.org…');
+        setStatus(q ? 'Searching nuget.org…' : 'Loading popular packages…');
         vscode.postMessage({ type: 'search', q, prerelease: document.getElementById('prerelease').checked });
     }
     document.getElementById('go').addEventListener('click', doSearch);
     document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') { doSearch(); } });
+    document.getElementById('prerelease').addEventListener('change', doSearch);
+
+    // Live search-as-you-type; stale responses are dropped host-side.
+    let searchTimer = null;
+    document.getElementById('q').addEventListener('input', () => {
+        if (searchTimer) { clearTimeout(searchTimer); }
+        searchTimer = setTimeout(doSearch, 350);
+    });
 
     window.addEventListener('message', e => {
         const msg = e.data;
@@ -646,7 +663,9 @@ function buildHtml(project: string): string {
         } else if (msg.type === 'searchResult') {
             lastSearch = msg.items;
             if (tab === 'browse') {
-                setStatus(msg.items.length ? '' : 'No packages matched "' + msg.q + '".');
+                setStatus(msg.items.length
+                    ? (msg.q ? '' : 'Popular packages on nuget.org — type to search for more.')
+                    : 'No packages matched "' + msg.q + '".');
                 renderSearch();
             }
         } else if (msg.type === 'updatesResult') {
@@ -667,8 +686,11 @@ function buildHtml(project: string): string {
         }
     });
 
-    // Default tab shows the currently installed packages.
+    // Boot: the Browse tab opens with nuget.org's popular packages; the
+    // installed list loads alongside so "installed" badges are correct.
     vscode.postMessage({ type: 'installed' });
+    doSearch();
+    document.getElementById('q').focus();
 </script>
 </body>
 </html>`;

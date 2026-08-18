@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.22.0
+
+Two user requests:
+
+**Custom C# controls in the designer + a Control Library.** UI Maker builds
+C# apps, so your own controls now work like the built-in ones:
+
+- **Project Controls (automatic)** — the project source is scanned for
+  classes deriving from a control base (`UserControl`, `Button`, `Panel`,
+  any WinForms control — inheritance chains like
+  `FancyButton : RJButton : Button` resolve too, in C# *and* VB) and for WPF
+  `UserControl` XAML files. They appear in a new **Project Controls**
+  toolbox section with a **↻ rescan** button; the list also refreshes when a
+  designer tab regains focus. Dropping one generates correct code — a
+  fully-qualified instantiation (`this.rjButton1 = new
+  CustomControls.RJControls.RJButton();`), the typed field declaration, and
+  `Controls.Add` — in the file's own dialect (classic/modern, C#/VB).
+- **Custom Library (registered)** — controls living in NuGet packages or
+  referenced DLLs (Guna.UI2, ReaLTaiizor, Krypton, …) are invisible to a
+  source scan, so the new **Control Library** panel (side panel → Actions)
+  registers them by hand: full type name, the base they look like, default
+  size, WinForms or WPF. Saved to the `uimaker.customControls` workspace
+  setting (shareable via `.vscode/settings.json`), and shown in a **Custom
+  Library** toolbox section for every form.
+- On the canvas, a custom control renders with the **look of its designer
+  base** (an `RJButton : Button` draws as a Button; its true owner-drawn
+  chrome shows at Run) and falls back to a neutral labelled box when the
+  base is unknown. Properties, events (inherited from the base's catalog),
+  move/resize, rename, duplicate, copy/paste, and delete all work; custom
+  Panel-likes accept dropped children. WPF customs insert with the right
+  `xmlns:` declaration (`clr-namespace:…;assembly=…`) added automatically.
+- Forms that already used custom controls keep opening exactly as before —
+  parsing was always tolerant; now the toolbox can create them too.
+
+**NuGet Packages panel opens useful instead of empty.** The panel now opens
+on the **Browse** tab pre-filled with nuget.org's most popular packages
+(instead of a bare Installed list until a search was typed), searches as you
+type (350 ms debounce, stale responses dropped), and re-searches when the
+prerelease toggle changes. Installed badges still load alongside.
+
 ## 0.21.1
 
 The Toolbox and Properties panel sizes are now independent (user request):

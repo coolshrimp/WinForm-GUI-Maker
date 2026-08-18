@@ -20,6 +20,7 @@ import { openGuide } from './guide';
 import { openAppSettings } from './appSettings';
 import { openProjectProperties } from './projectProperties';
 import { openNugetPackages } from './nugetPackages';
+import { openControlLibrary } from './controlLibrary';
 import { initInstaller, openInstallerCreator, pickInstallerScope, revealFolder } from './installer';
 import { convertToSdkStyle } from './convertToSdk';
 import { registerXamlIntellisense } from './xamlIntellisense';
@@ -173,6 +174,9 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('uimaker.openSettings', () =>
             vscode.commands.executeCommand('workbench.action.openSettings', '@ext:coolshrimp.uimaker')),
         vscode.commands.registerCommand('uimaker.nugetPackages', (project?: string) => openNugetPackages(dotnet, project)),
+
+        // Custom controls: project scan results + hand-registered library.
+        vscode.commands.registerCommand('uimaker.controlLibrary', (project?: string) => openControlLibrary(dotnet, project)),
 
         // Classic .NET Framework project -> modern SDK format (fixes the
         // C# Dev Kit "project file is in unsupported format" warning).

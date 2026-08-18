@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.21.1",
+    "version": "0.22.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -248,6 +248,12 @@
                 "icon": "$(archive)"
             },
             {
+                "command": "uimaker.controlLibrary",
+                "title": "Control Library (Custom Controls)",
+                "category": "UI Maker",
+                "icon": "$(extensions)"
+            },
+            {
                 "command": "uimaker.convertToSdk",
                 "title": "Convert Project to SDK Style (fix 'unsupported format')",
                 "category": "UI Maker",
@@ -480,6 +486,48 @@
                         "win-arm64"
                     ],
                     "description": "Target runtime used for single-file or self-contained publishing."
+                },
+                "uimaker.customControls": {
+                    "type": "array",
+                    "default": [],
+                    "description": "Custom controls registered by hand (controls that live in a NuGet package or referenced DLL, which the project scan cannot see). Each entry adds a control to the designer toolbox's Custom Library section. Manage this list visually with the Control Library panel (UI Maker side panel → Control Library).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "type"
+                        ],
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "description": "Full type name, e.g. Guna.UI2.WinForms.Guna2Button."
+                            },
+                            "designer": {
+                                "type": "string",
+                                "enum": [
+                                    "winforms",
+                                    "wpf"
+                                ],
+                                "default": "winforms",
+                                "description": "Which designer shows the control."
+                            },
+                            "base": {
+                                "type": "string",
+                                "description": "Control base class it derives from (e.g. Button, UserControl) — the canvas renders it with this look."
+                            },
+                            "assembly": {
+                                "type": "string",
+                                "description": "WPF only: assembly name for the xmlns declaration (clr-namespace:…;assembly=…)."
+                            },
+                            "width": {
+                                "type": "number",
+                                "description": "Default width when dropped."
+                            },
+                            "height": {
+                                "type": "number",
+                                "description": "Default height when dropped."
+                            }
+                        }
+                    }
                 },
                 "uimaker.installer.settingsScope": {
                     "type": "string",

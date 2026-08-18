@@ -265,11 +265,35 @@ see below.
 
 ### 📦 NuGet package manager
 **NuGet Packages** (side panel → Actions) is the *Manage NuGet Packages*
-window: **Browse** searches nuget.org (with an *include prerelease* toggle),
+window: it opens on **Browse**, pre-filled with nuget.org's most popular
+packages, and **searches as you type** (with an *include prerelease* toggle).
 **Installed** lists the project's `PackageReference`s with one-click
 uninstall, and **Updates** checks every installed package against the latest
 stable release. Install/update/uninstall run `dotnet add|remove package`, so
 the project file and restore stay consistent.
+
+### 🧩 Custom controls & Control Library
+Your own C# / VB controls work in the designer like the built-in ones:
+
+- **Project Controls (automatic)** — every class in the working project that
+  derives from a control base (`UserControl`, `Button`, `Panel`, any WinForms
+  control — including chains like `FancyButton : RJButton : Button`) and every
+  WPF `UserControl` (`.xaml` with `x:Class`) appears in a **Project Controls**
+  toolbox section. Drag one onto a form and the generated code uses the full
+  type name (`this.rjButton1 = new CustomControls.RJButton();`), the field is
+  declared with the right type, and the canvas renders the control with the
+  look of its designer base. The section has a **↻ rescan** button, and the
+  list also refreshes whenever a designer tab regains focus.
+- **Custom Library (registered)** — controls that live in a NuGet package or a
+  referenced DLL (Guna.UI2, ReaLTaiizor, Krypton, …) can't be found by a
+  source scan, so register them once in the **Control Library** panel (side
+  panel → Actions): full type name, which base they look like, and a default
+  size. They then show up in a **Custom Library** toolbox section for every
+  form. Entries are stored in the `uimaker.customControls` workspace setting,
+  so the whole team gets them via `.vscode/settings.json`.
+- Forms that *already use* custom controls open fine: unknown types render as
+  a neutral placeholder (or as their base's look once known), and moving,
+  resizing, renaming, events, and deleting work like any other control.
 
 ### ⬆️ Convert classic projects to SDK style
 Old .NET Framework projects use a project format modern tooling can't load —
@@ -353,6 +377,7 @@ launches with UI Maker loaded.
 | `UI Maker: App Settings` | Grid editor for the settings your app remembers (`Properties.Settings`) |
 | `UI Maker: Project Properties` | VS-style Application page — output type, framework, assembly name, icon, manifest, version info |
 | `UI Maker: NuGet Packages` | Browse / install / update / remove nuget.org packages for the working project |
+| `UI Maker: Control Library (Custom Controls)` | Custom controls for the toolbox — the ones found in the project source, plus controls you register from NuGet packages / referenced DLLs |
 | `UI Maker: Convert Project to SDK Style` | Rewrite a classic .NET Framework `.csproj` in the modern SDK format (backup kept) |
 | `UI Maker: Open Working Folder` | Show the current project folder in File Explorer |
 | `UI Maker: Guide: How to Build an App` | Open the built-in guide (project anatomy, required vs. optional files) |
@@ -371,6 +396,7 @@ launches with UI Maker loaded.
 | `uimaker.publish.selfContained` | `false` | Bundle the .NET runtime so the target PC needs nothing installed |
 | `uimaker.publish.runtime` | `win-x64` | Target runtime for single-file / self-contained publishing |
 | `uimaker.installer.settingsScope` | `uniform` | Create Installer memory: one shared template for all projects, or per-project settings for multi-brand work |
+| `uimaker.customControls` | `[]` | Custom controls registered for the toolbox's **Custom Library** section (full type name, designer, base look, default size) — managed visually by the Control Library panel |
 
 ## How it works
 
@@ -432,6 +458,9 @@ deleted.
 - The classic-project converter deliberately stops before writing when it finds
   custom imports/targets, conditional target frameworks, framework profiles,
   or package install-script/content semantics it cannot migrate safely.
+- Custom controls render with the **look of their designer base** (an
+  `RJButton : Button` draws as a Button) — the canvas cannot execute your
+  `OnPaint` code, so rounded corners and custom chrome only show at **Run**.
 - Saving from the designer normalizes the XAML formatting (like most visual designers).
 - The visual preview is an approximation — always confirm with **Run**.
 - Windows-only targets (WPF/WinForms are Windows frameworks).
@@ -451,6 +480,7 @@ deleted.
 - [ ] Sub-menu (nested menu item) designing and item icons
 - [ ] Drag-reordering inside StackPanel / DockPanel children
 - [x] "Create an Installer" for multi-file releases (Inno Setup script generation)
+- [x] Custom controls in the toolbox: automatic project scan + a Control Library for NuGet/DLL controls
 - [ ] Style/resource editing and live theme preview
 - [ ] Marketplace publishing and prebuilt VSIX releases
 

@@ -15,6 +15,7 @@ import { projectDirOf, setWorkingFolder } from './workingFolder';
 import { escapeRegExp, isCSharpIdentifier, renameCSharpIdentifier } from './csharpText';
 import { isVbIdentifier, parseVbHandles, renameVbIdentifier } from './vbText';
 import { decideDesignerEdit } from './designerSync';
+import { customControlsMessage } from './customControls';
 
 /** OS-clipboard marker for cross-window designer copy/paste. */
 const CLIP_MARKER = 'UIMAKER-CLIP:v1:';
@@ -74,6 +75,12 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         const postUpdate = () => {
             void panel.webview.postMessage(designerUpdateMessage(document));
         };
+        // Custom controls found in the project + the registered library —
+        // the "Project Controls" / "Custom Library" toolbox sections.
+        const postCustomControls = () => {
+            void panel.webview.postMessage(
+                customControlsMessage(projDir ?? path.dirname(document.uri.fsPath)));
+        };
         const postConfig = () => {
             const cfg = vscode.workspace.getConfiguration('uimaker');
             void panel.webview.postMessage({
@@ -111,10 +118,14 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
 
         subs.push(vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('uimaker')) { postConfig(); }
+            if (e.affectsConfiguration('uimaker.customControls')) { postCustomControls(); }
         }));
 
         subs.push(panel.onDidChangeViewState(() => {
             if (panel.active) {
+                // Pick up control classes added while the tab was hidden
+                // (cheap: the scan is mtime-cached).
+                postCustomControls();
                 DesignerProvider.activeDocumentUri = document.uri;
                 // The designer is not a text editor, so the working-folder
                 // tracker cannot see it — follow the designed file here.
@@ -176,11 +187,16 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
         const postUpdate = () => {
             void panel.webview.postMessage(designerUpdateMessage(document));
         };
+        const postCustomControls = () => {
+            const projDir = findProjectDir(document.uri.fsPath) ?? path.dirname(document.uri.fsPath);
+            void panel.webview.postMessage(customControlsMessage(projDir));
+        };
         switch (msg?.type) {
                 // Webview finished loading — send settings and initial content.
                 case 'ready':
                     postConfig();
                     postUpdate();
+                    postCustomControls();
                     if (DesignerProvider.clipboard) {
                         void panel.webview.postMessage({ type: 'clipboard', data: DesignerProvider.clipboard });
                     }
@@ -353,6 +369,11 @@ export class DesignerProvider implements vscode.CustomTextEditorProvider {
                     }
                     break;
                 }
+
+                // Toolbox refresh button: rescan the project for controls.
+                case 'refreshCustomControls':
+                    postCustomControls();
+                    break;
 
                 // Split view: open the XAML source next to the designer.
                 case 'openCode':

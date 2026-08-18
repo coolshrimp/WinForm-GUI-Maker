@@ -414,6 +414,9 @@
             // paste (the host checks the OS clipboard for designer data).
             if (msg.data) { clipboard = msg.data; }
             if (msg.paste) { performPaste(); }
+        } else if (msg.type === 'customControls') {
+            // Project/library custom controls — refresh the toolbox sections.
+            setCustomControls(msg);
         }
     }
 
@@ -1952,12 +1955,47 @@
                 }
             });
             host.appendChild(item);
+            return item;
         };
-        const addSection = label => {
+        const addSection = (label, withRefresh) => {
             const head = document.createElement('div');
             head.className = 'ff-tool-section';
             head.textContent = label;
+            if (withRefresh) {
+                const refresh = document.createElement('button');
+                refresh.className = 'ff-tool-refresh';
+                refresh.textContent = '↻';
+                refresh.title = 'Rescan the project for custom controls';
+                refresh.addEventListener('click', e => {
+                    e.stopPropagation();
+                    vscode.postMessage({ type: 'refreshCustomControls' });
+                });
+                head.appendChild(refresh);
+            }
             host.appendChild(head);
+        };
+
+        // Custom controls appear under VS-style "Project Controls" (found in
+        // the project source) and "Custom Library" (registered by hand)
+        // sections; hover shows the full type and its designer base.
+        const addCustomSections = catalog => {
+            const entries = Object.keys(catalog).sort().map(type => [type, catalog[type]]);
+            for (const sec of ['Project Controls', 'Custom Library']) {
+                const source = sec === 'Custom Library' ? 'library' : 'project';
+                const tools = entries.filter(([, c]) => c.source === source);
+                if (sec === 'Project Controls') { addSection(sec, true); }
+                else if (tools.length) { addSection(sec); }
+                for (const [type, c] of tools) {
+                    const item = addTool(type, { icon: '🧩' });
+                    item.title = `${c.qualified ?? type}${c.base ? ` (inherits ${c.base})` : ''} — drag onto the form, or double-click to add`;
+                }
+                if (sec === 'Project Controls' && !tools.length) {
+                    const hint = document.createElement('div');
+                    hint.className = 'ff-tool-hint';
+                    hint.textContent = 'No custom controls found in this project yet. Classes deriving from a control base (e.g. UserControl, Button) appear here — see Control Library in the side panel.';
+                    host.appendChild(hint);
+                }
+            }
         };
 
         if (docMode === 'winforms') {
@@ -1971,8 +2009,10 @@
                 addSection(sec);
                 for (const [type, def] of tools) { addTool(type, def); }
             }
+            addCustomSections(WF_CUSTOM);
         } else {
             for (const [type, def] of Object.entries(CONTROLS)) { addTool(type, def); }
+            addCustomSections(XAML_CUSTOM);
         }
     }
 
@@ -2009,10 +2049,11 @@
             return;
         }
         // XAML: synthesize a drop into the layout root at a default margin.
-        if (!xamlDoc || !windowEl || !CONTROLS[type]) { return; }
+        if (!xamlDoc || !windowEl || !xamlDefOf(type)) { return; }
         if (!ensureLayoutRoot()) { return; }
-        const def = CONTROLS[type];
-        const el = xamlDoc.createElementNS(PRES_NS, type);
+        const def = xamlDefOf(type);
+        const el = createXamlToolElement(type, def);
+        if (!el) { return; }
         setName(el, uniqueName(type));
         for (const [k, v] of Object.entries(def.attrs)) { el.setAttribute(k, v); }
         el.setAttribute('Width', String(def.w));
@@ -2065,9 +2106,10 @@
             target = rootHit ?? { el: layoutRoot, div: surfaceEl };
         }
 
-        const def = CONTROLS[type];
+        const def = xamlDefOf(type);
         if (!def) { return; } // stale drag payload from another mode
-        const el = xamlDoc.createElementNS(PRES_NS, type);
+        const el = createXamlToolElement(type, def);
+        if (!el) { return; }
         setName(el, uniqueName(type));
         for (const [k, v] of Object.entries(def.attrs)) {
             el.setAttribute(k, v);
@@ -2102,6 +2144,18 @@
         commit();
         selectedPath = pathOf(selected);
     });
+
+    /** Element for a toolbox type: presentation namespace for built-ins, the
+     *  control's clr-namespace (declared on the root as needed) for customs. */
+    function createXamlToolElement(type, def) {
+        if (!def.custom) { return xamlDoc.createElementNS(PRES_NS, type); }
+        if (!def.custom.xmlns) {
+            setStatus(`UI Maker: ${type} has no xmlns — set its namespace in the Control Library.`);
+            return null;
+        }
+        const prefix = ensureXmlnsPrefix(def.custom.xmlns);
+        return prefix ? xamlDoc.createElementNS(def.custom.xmlns, `${prefix}:${type}`) : null;
+    }
 
     /** Create a root Grid on demand so dropping onto an empty Window works. */
     function ensureLayoutRoot() {
@@ -2413,7 +2467,7 @@
         }
         const names = isWindow
             ? WINDOW_PROPS
-            : [...(CONTROLS[el.localName]?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS];
+            : [...(xamlDefOf(el.localName)?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS];
 
         for (const prop of names) {
             const node = xamlPropRow(el, prop);
@@ -2674,7 +2728,7 @@
     function renderEventsTab(el, isWindow) {
         const events = isWindow
             ? WINDOW_EVENTS
-            : [...(CONTROLS[el.localName]?.events ?? []), 'Loaded'];
+            : [...(xamlDefOf(el.localName)?.events ?? []), 'Loaded'];
 
         const hint = document.createElement('div');
         hint.className = 'ff-events-hint';
@@ -2743,12 +2797,12 @@
 
     function wireDefaultEvent(el) {
         if (el.__wf) {
-            const wdef = WF_CONTROLS[el.type] ?? WF_TRAY[el.type];
+            const wdef = wfDefOf(el.type) ?? WF_TRAY[el.type];
             switchPanelTab('events');
             wfWireEvent(el, wdef?.defaultEvent ?? 'Click', el.events[wdef?.defaultEvent ?? 'Click'] || '');
             return;
         }
-        const def = CONTROLS[el.localName];
+        const def = xamlDefOf(el.localName);
         if (!def) { return; }
         // Switch to the events tab so the user sees what happened.
         switchPanelTab('events');
@@ -3019,7 +3073,7 @@
                 return false;
             }
             const items = controls
-                .filter(c => c.__wf && c !== wfForm && (WF_CONTROLS[c.type] || WF_TRAY[c.type]))
+                .filter(c => c.__wf && c !== wfForm && (wfDefOf(c.type) || WF_TRAY[c.type]))
                 .map(c => ({ type: c.type, props: { ...c.props } }));
             if (!items.length) { return false; }
             // props carry raw source-language code, so the paste target must
@@ -3054,7 +3108,7 @@
             let pasted = 0;
             for (const item of clipboard.items) {
                 if (WF_TRAY[item.type]) { wfAddComponent(item.type); pasted++; continue; }
-                if (!WF_CONTROLS[item.type]) { continue; }
+                if (!wfDefOf(item.type)) { continue; }
                 if (wfPasteControl(item)) { pasted++; }
             }
             if (pasted) { setStatus(`UI Maker: pasted ${pasted} control${pasted === 1 ? '' : 's'}.`); }
@@ -3092,7 +3146,7 @@
             if (prop === 'Location' || prop === 'Name' || prop === 'TabIndex') { continue; }
             props.push([prop, code]);
         }
-        return wfInsertControl(item.type, name, props, null);
+        return wfInsertControl(item.type, name, props, null, null, WF_CUSTOM[item.type]?.qualified);
     }
 
     function cutSelection() {
@@ -3200,7 +3254,7 @@
     /** Menu for one WinForms control, tray component, or TabPage. */
     function wfControlMenu(ctrl) {
         const isTray = !!WF_TRAY[ctrl.type];
-        const def = WF_CONTROLS[ctrl.type] ?? WF_TRAY[ctrl.type];
+        const def = wfDefOf(ctrl.type) ?? WF_TRAY[ctrl.type];
         const items = [{ label: `${ctrl.name} : ${ctrl.type}`, header: true }];
 
         // Content verbs first, like the VS designer's smart commands.
@@ -3235,7 +3289,7 @@
         items.push({ label: '</> View Code', action: openCode });
         items.push('—');
         items.push(...clipboardEntries());
-        if (!isTray && ctrl.type !== 'TabPage' && WF_CONTROLS[ctrl.type]) {
+        if (!isTray && ctrl.type !== 'TabPage' && wfDefOf(ctrl.type)) {
             items.push({ label: 'Duplicate', key: 'Ctrl+D', action: () => wfDuplicateControl(ctrl) });
         }
         items.push({ label: 'Delete', key: 'Del', danger: true, action: deleteSelected });
@@ -3277,8 +3331,8 @@
                 items.push('—');
             }
         }
-        if (CONTROLS[type]) {
-            items.push({ label: `⚡ Handle ${CONTROLS[type].defaultEvent}`, action: () => wireDefaultEvent(el) });
+        if (xamlDefOf(type)) {
+            items.push({ label: `⚡ Handle ${xamlDefOf(type).defaultEvent}`, action: () => wireDefaultEvent(el) });
         }
         items.push({ label: '</> View Code', action: openCode });
         items.push('—');
@@ -3923,6 +3977,118 @@
     const WF_FORM_EVENTS = ['Load', 'Shown', 'FormClosing', 'Resize', 'KeyDown'];
     const WF_CONTAINERS = ['GroupBox', 'Panel', 'TabPage', 'FlowLayoutPanel', 'TableLayoutPanel', 'SplitContainer'];
 
+    // ------------------------------------------------------- custom controls
+    //
+    // Controls the host discovered in the project (classes deriving from a
+    // WinForms control base, WPF UserControls) or that the user registered in
+    // the Control Library. They render as their designer base on the canvas
+    // and generate fully-qualified instantiations ("new Ns.RJButton()").
+    let WF_CUSTOM = {};   // short name -> { qualified, base, source, width?, height? }
+    let XAML_CUSTOM = {}; // short name -> { xmlns, base, source, width?, height? }
+
+    function setCustomControls(msg) {
+        WF_CUSTOM = {};
+        XAML_CUSTOM = {};
+        for (const c of msg.winforms ?? []) {
+            // Built-in names always win — shadowing Button would corrupt
+            // parsing/generation of every stock control.
+            if (!c?.name || WF_CONTROLS[c.name] || WF_TRAY[c.name]) { continue; }
+            WF_CUSTOM[c.name] = {
+                qualified: c.qualified || c.name,
+                base: c.base || 'Control',
+                source: c.source || 'project',
+                width: c.width,
+                height: c.height
+            };
+        }
+        for (const c of msg.wpf ?? []) {
+            if (!c?.name || CONTROLS[c.name]) { continue; }
+            XAML_CUSTOM[c.name] = {
+                xmlns: c.xmlns || (c.ns ? `clr-namespace:${c.ns}` : ''),
+                base: c.base || 'UserControl',
+                source: c.source || 'project',
+                width: c.width,
+                height: c.height
+            };
+        }
+        buildToolbox();
+        // Re-render so custom controls already on the canvas pick up the
+        // look of their designer base.
+        if (docMode === 'winforms' && wfForm) { wfRender(); }
+        else if (docMode === 'xaml' && xamlDoc) { render(); }
+    }
+
+    /** Known WinForms type this custom type renders/behaves as (base chain). */
+    function wfCustomRenderType(type) {
+        let current = type;
+        for (let hop = 0; hop < 8; hop++) {
+            const c = WF_CUSTOM[current];
+            if (!c) { return WF_CONTROLS[current] ? current : null; }
+            current = c.base;
+        }
+        return null;
+    }
+
+    /** Toolbox/canvas definition for a type: built-in or custom-derived. */
+    function wfDefOf(type) {
+        if (WF_CONTROLS[type]) { return WF_CONTROLS[type]; }
+        const custom = WF_CUSTOM[type];
+        if (!custom) { return undefined; }
+        const baseType = wfCustomRenderType(type);
+        const baseDef = baseType ? WF_CONTROLS[baseType] : null;
+        return {
+            sec: custom.source === 'library' ? 'Custom Library' : 'Project Controls',
+            icon: '🧩',
+            w: custom.width ?? baseDef?.w ?? 150,
+            h: custom.height ?? baseDef?.h ?? 46,
+            text: baseDef?.text ?? '',
+            noSize: baseDef?.noSize,
+            props: baseDef?.props ?? ['Text'],
+            events: baseDef?.events ?? ['Click'],
+            defaultEvent: baseDef?.defaultEvent ?? 'Click',
+            custom
+        };
+    }
+
+    /** XAML toolbox definition for a custom WPF control. */
+    function xamlDefOf(type) {
+        if (CONTROLS[type]) { return CONTROLS[type]; }
+        const custom = XAML_CUSTOM[type];
+        if (!custom) { return undefined; }
+        const baseDef = CONTROLS[custom.base];
+        return {
+            icon: '🧩',
+            w: custom.width ?? baseDef?.w ?? 160,
+            h: custom.height ?? baseDef?.h ?? 100,
+            attrs: {},
+            props: baseDef?.props ?? [],
+            events: baseDef?.events ?? [],
+            defaultEvent: baseDef?.defaultEvent ?? 'Loaded',
+            custom
+        };
+    }
+
+    /** Existing root prefix for an xmlns URI, or a fresh declared one. */
+    function ensureXmlnsPrefix(uri) {
+        if (!windowEl) { return null; }
+        for (const attr of windowEl.attributes ?? []) {
+            if (attr.name.startsWith('xmlns:') && attr.value === uri) {
+                return attr.name.slice(6);
+            }
+        }
+        // Stub DOMs (tests) expose attrs as a Map instead of attributes.
+        if (!windowEl.attributes && windowEl.attrs) {
+            for (const [k, v] of windowEl.attrs) {
+                if (k.startsWith('xmlns:') && v === uri) { return k.slice(6); }
+            }
+        }
+        const taken = name => windowEl.getAttribute(`xmlns:${name}`) !== null;
+        let prefix = 'local';
+        for (let i = 1; taken(prefix); i++) { prefix = `custom${i}`; }
+        windowEl.setAttribute(`xmlns:${prefix}`, uri);
+        return prefix;
+    }
+
     // ---------------------------------------------------- wf property catalog
     //
     // Visual Studio-style property grid metadata. Every property the grid can
@@ -4312,7 +4478,7 @@
                 // Restore the catalog's event casing (VB is case-insensitive).
                 const catalog = owner === wfForm
                     ? WF_FORM_EVENTS
-                    : ((WF_CONTROLS[owner.type] ?? WF_TRAY[owner.type])?.events ?? []);
+                    : ((wfDefOf(owner.type) ?? WF_TRAY[owner.type])?.events ?? []);
                 const canonical = catalog.find(e => e.toLowerCase() === eventName.toLowerCase()) ?? eventName;
                 owner.events[canonical] = h.handler;
             }
@@ -4626,7 +4792,10 @@
         inner.className = 'ff-inner';
 
         const ownSize = wfSizeVal(ctrl.props.Size) ?? { w: 200, h: 100 };
-        switch (ctrl.type) {
+        // Custom controls render as their designer base (RJButton : Button
+        // draws like a Button); unresolvable bases fall to the neutral box.
+        const look = WF_CONTROLS[ctrl.type] ? ctrl.type : wfCustomRenderType(ctrl.type);
+        switch (look ?? ctrl.type) {
             case 'GroupBox': {
                 div.classList.add('ff-wf-group');
                 const header = document.createElement('span');
@@ -5503,7 +5672,7 @@
                 snap(Math.max(0, (e.clientY - r.top) / zoom - 100)));
             return;
         }
-        const def = WF_CONTROLS[type];
+        const def = wfDefOf(type);
         if (!def) { return; }
 
         // Deepest WinForms container under the pointer, else the form itself.
@@ -5512,7 +5681,8 @@
         let node = document.elementFromPoint(e.clientX, e.clientY);
         while (node && node !== surfaceEl) {
             const hit = visuals.find(v => v.div === node);
-            if (hit && hit.el.__wf && WF_CONTAINERS.includes(hit.el.type)) {
+            if (hit && hit.el.__wf && (WF_CONTAINERS.includes(hit.el.type)
+                || WF_CONTAINERS.includes(wfCustomRenderType(hit.el.type)))) {
                 parent = hit.el;
                 parentDiv = hit.div;
                 break;
@@ -5545,7 +5715,7 @@
 
     /** Insert a brand-new control: field, instantiation, block, Controls.Add. */
     function wfAddControl(type, x, y, parentName) {
-        const def = WF_CONTROLS[type];
+        const def = wfDefOf(type);
         if (!def) { return; }
         const name = wfUniqueName(type);
         const props = [
@@ -5558,12 +5728,12 @@
         if (def.text) { props.push(['Text', `"${name}"`]); }
         // Fixed extras VS also writes on drop (e.g. TableLayoutPanel counts).
         for (const [p, code] of def.extra ?? []) { props.push([p, code]); }
-        return wfInsertControl(type, name, props, parentName);
+        return wfInsertControl(type, name, props, parentName, null, def.custom?.qualified);
     }
 
     /** Copy of an existing control, offset one grid step, in the same parent. */
     function wfDuplicateControl(src) {
-        if (!WF_CONTROLS[src.type]) {
+        if (!wfDefOf(src.type)) {
             setStatus(`UI Maker: duplicate is not supported for ${src.type} controls.`);
             return;
         }
@@ -5606,7 +5776,7 @@
                 return;
             }
         }
-        if (!wfInsertControl(src.type, name, props, parentName, cell)) { return; }
+        if (!wfInsertControl(src.type, name, props, parentName, cell, WF_CUSTOM[src.type]?.qualified)) { return; }
         setStatus(`UI Maker: duplicated ${src.name} as ${name}.`);
     }
 
@@ -5616,14 +5786,17 @@
      * `props` is an ordered [prop, code] list; code uses qualified names and
      * is rewritten to match the file's dialect.
      */
-    function wfInsertControl(type, name, props, parentName, cell = null) {
+    function wfInsertControl(type, name, props, parentName, cell = null, qualifiedType = null) {
         const eol = wfEol();
         let text = xamlText;
         const ind = wfIndent(text);
+        // Custom controls always keep their full namespace — unlike the
+        // System.Windows.Forms prefix, it is not covered by the file's usings.
+        const qualified = qualifiedType ?? `System.Windows.Forms.${type}`;
 
         // 1) Instantiation — before the first Suspend/BeginInit line.
         const withNew = wfInsertBeforeSuspend(text,
-            `${ind}${wfRef(name)} = ${wfCode(`new System.Windows.Forms.${type}()`)}${wfSemi()}`);
+            `${ind}${wfRef(name)} = ${wfCode(`new ${qualified}()`)}${wfSemi()}`);
         if (!withNew) {
             setStatus('UI Maker: could not find a place to insert the control.');
             return false;
@@ -5682,7 +5855,7 @@
         }
 
         // 4) Field declaration — after the last existing designer field.
-        const withField = wfInsertField(text, `System.Windows.Forms.${type}`, name);
+        const withField = wfInsertField(text, qualified, name);
         if (!withField) {
             setStatus('UI Maker: insertion was cancelled because a safe designer-field anchor was not found.');
             return false;
@@ -6417,7 +6590,7 @@
             ? ['Name', ...WF_FORM_PROPS]
             : WF_TRAY[el.type]
                 ? ['Name', ...WF_TRAY[el.type].props, 'Tag']
-                : [...new Set(['Name', ...(WF_CONTROLS[el.type]?.props ?? ['Text']), ...WF_COMMON_PROPS])];
+                : [...new Set(['Name', ...(wfDefOf(el.type)?.props ?? ['Text']), ...WF_COMMON_PROPS])];
         renderGrid(names.map(prop => wfGridRow(target, prop, isForm, type)));
     }
 
@@ -6686,7 +6859,7 @@
         const target = isForm ? wfForm : el;
         const events = isForm
             ? WF_FORM_EVENTS
-            : ((WF_CONTROLS[el.type] ?? WF_TRAY[el.type])?.events ?? ['Click']);
+            : ((wfDefOf(el.type) ?? WF_TRAY[el.type])?.events ?? ['Click']);
 
         const hint = document.createElement('div');
         hint.className = 'ff-events-hint';
@@ -6803,6 +6976,7 @@
         globalThis.__uimakerTest = {
             setDoc(name, text) { config.docName = name; xamlText = text; parseAndRender(); },
             setVbHandles(entries) { wfVbHandles = entries; },
+            setCustomControls,
             setAppResources(texts) {
                 appResourceTexts = texts;
                 if (docMode === 'xaml' && xamlText) { parseAndRender(); }
