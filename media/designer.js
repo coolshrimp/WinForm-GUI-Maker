@@ -1333,8 +1333,12 @@
     // <Setter Property Value> pairs from any *.Resources block under the root.
     // Enough to preview styled TextBlocks/Borders the way VS renders them.
 
+    /** Brush→Color resource references awaiting resolution (two-pass). */
+    let pendingResourceRefs = [];
+
     function collectStyles() {
         styles = { byKey: new Map(), byType: new Map(), resources: new Map() };
+        pendingResourceRefs = [];
         if (!windowEl) { return; }
         // Application-level resources first, so the document's own definitions
         // override them (same precedence as WPF resource lookup).
@@ -1352,6 +1356,17 @@
             if (!child.localName.endsWith('.Resources')) { continue; }
             collectStylesFrom(child);
         }
+        // Second pass: brushes declared as REFERENCES to Color resources
+        // (<SolidColorBrush Color="{StaticResource BgColor}"/>) resolve once
+        // every container has been read; chains resolve iteratively.
+        for (let pass = 0; pass < 8 && pendingResourceRefs.length; pass++) {
+            pendingResourceRefs = pendingResourceRefs.filter(([key, ref]) => {
+                const css = styles.resources.get(ref);
+                if (css === undefined) { return true; } // still unresolved
+                styles.resources.set(key, css);
+                return false;
+            });
+        }
     }
 
     function collectStylesFrom(container) {
@@ -1359,15 +1374,27 @@
             if (node.localName === 'ResourceDictionary') { collectStylesFrom(node); continue; }
             const key = node.getAttributeNS(X_NS, 'Key') || node.getAttribute('x:Key');
 
-            // Brush/color resources referenced via {StaticResource}.
+            // Brush/color resources referenced via {StaticResource}. A brush
+            // may itself reference a Color resource — queued for the second
+            // resolution pass in collectStyles.
             if (key && node.localName === 'SolidColorBrush') {
-                const css = toCssColor(node.getAttribute('Color') || collapse(node.textContent));
-                if (css) { styles.resources.set(key, css); }
+                const raw = node.getAttribute('Color') || collapse(node.textContent);
+                const ref = resourceKey(raw);
+                if (ref) { pendingResourceRefs.push([key, ref]); }
+                else {
+                    const css = toCssColor(raw);
+                    if (css) { styles.resources.set(key, css); }
+                }
                 continue;
             }
             if (key && node.localName === 'Color') {
-                const css = toCssColor(collapse(node.textContent));
-                if (css) { styles.resources.set(key, css); }
+                const raw = collapse(node.textContent);
+                const ref = resourceKey(raw);
+                if (ref) { pendingResourceRefs.push([key, ref]); }
+                else {
+                    const css = toCssColor(raw);
+                    if (css) { styles.resources.set(key, css); }
+                }
                 continue;
             }
             if (key && (node.localName === 'LinearGradientBrush' || node.localName === 'RadialGradientBrush')) {
@@ -1486,7 +1513,9 @@
         const walk = n => {
             for (const c of n.children) {
                 if (c.localName === 'GradientStop') {
-                    const color = toCssColor(c.getAttribute('Color') || '');
+                    const raw = c.getAttribute('Color') || '';
+                    const ref = resourceKey(raw);
+                    const color = ref ? (styles.resources.get(ref) ?? '') : toCssColor(raw);
                     if (color) { stops.push({ color, offset: num(c.getAttribute('Offset'), stops.length ? 1 : 0) }); }
                 } else { walk(c); }
             }
@@ -2542,6 +2571,17 @@
     // Clicking empty canvas selects the window itself.
     surfaceEl.addEventListener('mousedown', () => {
         select(null);
+    });
+
+    // Content-filled layouts leave no blank surface to click, so the mock
+    // window's TITLE BAR and the empty canvas area around the window also
+    // select the Window/Form — like clicking the root in Visual Studio.
+    $('ff-titlebar')?.addEventListener('mousedown', e => {
+        e.preventDefault();
+        select(null);
+    });
+    $('ff-canvas-host')?.addEventListener('mousedown', e => {
+        if (e.target === $('ff-canvas-host')) { select(null); }
     });
 
     // Keep the overlay glued to the control when an inner ScrollViewer scrolls.

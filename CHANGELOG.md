@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.27.2
+
+Two fixes found while designing a real app (HashcatGUI):
+
+**Theme colors defined as brush→color chains now load.** App.xaml resources
+written as `<Color x:Key="BgColor">…</Color>` +
+`<SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>` — the
+common palette pattern — used to fall back to white on the canvas because
+only literal brush colors were resolved. Resource collection now runs a
+second pass that resolves brush→color references (chains included), and
+gradient stops may reference Color resources too. Dark-themed apps preview
+dark again.
+
+**The Window is clickable again.** When the layout fills the whole window
+there was no blank surface left to click, so selecting the Window meant
+right-click → Properties. Clicking the mock window's **title bar** — or the
+empty canvas area around the window — now selects the Window/Form directly,
+like clicking the root in Visual Studio.
+
 ## 0.27.1
 
 **The "anchor" rows, VS-style** (user follow-up: "no anchor options for tabs,
