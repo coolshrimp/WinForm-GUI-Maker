@@ -662,13 +662,68 @@
     const COMMON_PROPS = ['Width', 'Height', 'MinWidth', 'MinHeight', 'MaxWidth', 'MaxHeight',
         'Margin', 'Padding', 'HorizontalAlignment', 'VerticalAlignment',
         'Grid.Row', 'Grid.Column', 'Grid.RowSpan', 'Grid.ColumnSpan', 'Panel.ZIndex',
-        'Background', 'Foreground', 'BorderBrush', 'BorderThickness', 'Opacity',
+        'DockPanel.Dock', 'Background', 'Foreground', 'BorderBrush', 'BorderThickness', 'Opacity',
         'FontSize', 'FontFamily', 'FontWeight', 'FontStyle',
-        'Cursor', 'IsEnabled', 'Visibility', 'ToolTip', 'Tag'];
+        'Cursor', 'IsEnabled', 'Visibility', 'ToolTip', 'Tag',
+        'AllowDrop', 'ClipToBounds', 'FlowDirection', 'Focusable', 'IsHitTestVisible',
+        'IsTabStop', 'TabIndex', 'SnapsToDevicePixels', 'UseLayoutRounding',
+        'RenderTransformOrigin', 'Uid'];
 
     /** Window-level properties/events shown when nothing is selected. */
-    const WINDOW_PROPS = ['Title', 'Width', 'Height', 'Background', 'FontSize', 'FontFamily',
-        'ResizeMode', 'WindowStartupLocation', 'WindowStyle', 'WindowState', 'SizeToContent', 'Topmost'];
+    const WINDOW_PROPS = ['Title', 'Width', 'Height', 'MinWidth', 'MinHeight', 'MaxWidth', 'MaxHeight',
+        'Background', 'FontSize', 'FontFamily',
+        'ResizeMode', 'WindowStartupLocation', 'WindowStyle', 'WindowState', 'SizeToContent',
+        'Topmost', 'ShowInTaskbar', 'Opacity', 'Icon', 'FlowDirection'];
+
+    /**
+     * VS property-window parity: extra per-type entries merged into the
+     * toolbox catalog (kept separate so the table above stays readable).
+     */
+    const XAML_EXTRA_PROPS = {
+        Button: ['Command', 'CommandParameter', 'IsDefault', 'IsCancel', 'ClickMode', 'HorizontalContentAlignment', 'VerticalContentAlignment'],
+        Label: ['HorizontalContentAlignment', 'VerticalContentAlignment'],
+        TextBlock: ['TextAlignment', 'TextTrimming', 'LineHeight', 'TextDecorations'],
+        TextBox: ['IsReadOnly', 'CharacterCasing', 'TextAlignment', 'MinLines', 'MaxLines',
+            'HorizontalScrollBarVisibility', 'VerticalScrollBarVisibility'],
+        PasswordBox: ['PasswordChar'],
+        CheckBox: ['IsThreeState', 'Command', 'CommandParameter', 'ClickMode', 'HorizontalContentAlignment', 'VerticalContentAlignment'],
+        RadioButton: ['Command', 'CommandParameter', 'ClickMode'],
+        ComboBox: ['ItemsSource', 'DisplayMemberPath', 'MaxDropDownHeight', 'IsDropDownOpen', 'IsReadOnly', 'StaysOpenOnEdit'],
+        ListBox: ['SelectionMode', 'ItemsSource', 'DisplayMemberPath'],
+        ListView: ['SelectionMode', 'ItemsSource', 'DisplayMemberPath'],
+        TreeView: ['ItemsSource'],
+        DataGrid: ['ItemsSource', 'CanUserAddRows', 'CanUserDeleteRows', 'CanUserReorderColumns',
+            'CanUserResizeColumns', 'CanUserSortColumns', 'GridLinesVisibility', 'HeadersVisibility', 'SelectionMode'],
+        Image: ['StretchDirection'],
+        ProgressBar: ['Orientation'],
+        Slider: ['Orientation', 'TickPlacement', 'IsSnapToTickEnabled', 'IsDirectionReversed', 'SmallChange', 'LargeChange'],
+        RichTextBox: ['IsReadOnly', 'AcceptsTab'],
+        Expander: ['ExpandDirection'],
+        TabControl: ['TabStripPlacement', 'SelectedIndex'],
+        Grid: ['ShowGridLines'],
+        WrapPanel: ['ItemWidth', 'ItemHeight'],
+        ScrollViewer: ['HorizontalScrollBarVisibility', 'CanContentScroll'],
+        Frame: ['NavigationUIVisibility'],
+        ContentControl: ['Content'],
+        Viewbox: ['StretchDirection'],
+        DatePicker: ['SelectedDateFormat', 'FirstDayOfWeek', 'IsTodayHighlighted', 'DisplayDateStart', 'DisplayDateEnd'],
+        Calendar: ['DisplayDate', 'FirstDayOfWeek', 'IsTodayHighlighted']
+    };
+    for (const [extraType, extra] of Object.entries(XAML_EXTRA_PROPS)) {
+        const def = CONTROLS[extraType];
+        if (def) { def.props = [...new Set([...def.props, ...extra])]; }
+    }
+
+    /** Boolean properties without a dedicated ENUM_VALUES entry — rendered as
+     *  (default)/True/False dropdowns like every other enum. */
+    const XAML_BOOL_PROPS = new Set([
+        'IsDefault', 'IsCancel', 'IsThreeState', 'IsReadOnly', 'AllowDrop', 'ClipToBounds',
+        'Focusable', 'IsTabStop', 'IsHitTestVisible', 'SnapsToDevicePixels', 'UseLayoutRounding',
+        'ShowGridLines', 'IsSnapToTickEnabled', 'IsDirectionReversed', 'CanUserAddRows',
+        'CanUserDeleteRows', 'CanUserReorderColumns', 'CanUserResizeColumns', 'CanUserSortColumns',
+        'IsTodayHighlighted', 'AcceptsTab', 'IsDropDownOpen', 'StaysOpenOnEdit', 'CanContentScroll',
+        'ShowInTaskbar'
+    ]);
     const WINDOW_EVENTS = ['Loaded', 'Closing', 'KeyDown', 'KeyUp'];
 
     /** Suggested values for enum-like attributes (rendered as datalists). */
@@ -699,6 +754,24 @@
         FontStyle: ['Normal', 'Italic', 'Oblique'],
         SelectionMode: ['Single', 'Multiple', 'Extended'],
         DisplayMode: ['Month', 'Year', 'Decade'],
+        ClickMode: ['Release', 'Press', 'Hover'],
+        TabStripPlacement: ['Top', 'Bottom', 'Left', 'Right'],
+        CharacterCasing: ['Normal', 'Lower', 'Upper'],
+        TextTrimming: ['None', 'CharacterEllipsis', 'WordEllipsis'],
+        TextAlignment: ['Left', 'Center', 'Right', 'Justify'],
+        TextDecorations: ['None', 'Underline', 'Strikethrough', 'OverLine', 'Baseline'],
+        FlowDirection: ['LeftToRight', 'RightToLeft'],
+        StretchDirection: ['Both', 'UpOnly', 'DownOnly'],
+        TickPlacement: ['None', 'TopLeft', 'BottomRight', 'Both'],
+        ExpandDirection: ['Down', 'Up', 'Left', 'Right'],
+        GridLinesVisibility: ['All', 'Horizontal', 'None', 'Vertical'],
+        HeadersVisibility: ['All', 'Column', 'Row', 'None'],
+        SelectedDateFormat: ['Short', 'Long'],
+        FirstDayOfWeek: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        HorizontalContentAlignment: ['Left', 'Center', 'Right', 'Stretch'],
+        VerticalContentAlignment: ['Top', 'Center', 'Bottom', 'Stretch'],
+        'DockPanel.Dock': ['Left', 'Top', 'Right', 'Bottom'],
+        NavigationUIVisibility: ['Automatic', 'Visible', 'Hidden'],
         Cursor: ['Arrow', 'Hand', 'Wait', 'Cross', 'IBeam', 'No', 'SizeAll', 'SizeNS', 'SizeWE', 'Help', 'AppStarting']
     };
 
@@ -733,7 +806,35 @@
         IsEnabled: 'Behavior', Visibility: 'Behavior', ToolTip: 'Behavior',
         ResizeMode: 'Window Style', WindowStartupLocation: 'Layout',
         WindowStyle: 'Window Style', WindowState: 'Window Style',
-        SizeToContent: 'Layout', Topmost: 'Window Style'
+        SizeToContent: 'Layout', Topmost: 'Window Style',
+        'DockPanel.Dock': 'Layout', FlowDirection: 'Layout',
+        RenderTransformOrigin: 'Transform', Uid: 'Common',
+        AllowDrop: 'Behavior', ClipToBounds: 'Layout', Focusable: 'Behavior',
+        IsHitTestVisible: 'Behavior', IsTabStop: 'Behavior', TabIndex: 'Behavior',
+        SnapsToDevicePixels: 'Appearance', UseLayoutRounding: 'Appearance',
+        Command: 'Common', CommandParameter: 'Common', ClickMode: 'Behavior',
+        IsDefault: 'Behavior', IsCancel: 'Behavior', IsThreeState: 'Behavior',
+        HorizontalContentAlignment: 'Layout', VerticalContentAlignment: 'Layout',
+        TextAlignment: 'Text', TextTrimming: 'Text', TextDecorations: 'Text',
+        LineHeight: 'Text', CharacterCasing: 'Text', MinLines: 'Text', MaxLines: 'Text',
+        IsReadOnly: 'Behavior', PasswordChar: 'Behavior', AcceptsTab: 'Behavior',
+        ItemsSource: 'Data', DisplayMemberPath: 'Data', SelectedIndex: 'Common',
+        SelectionMode: 'Behavior', MaxDropDownHeight: 'Layout', IsDropDownOpen: 'Behavior',
+        StaysOpenOnEdit: 'Behavior', TabStripPlacement: 'Common',
+        CanUserAddRows: 'Behavior', CanUserDeleteRows: 'Behavior',
+        CanUserReorderColumns: 'Behavior', CanUserResizeColumns: 'Behavior',
+        CanUserSortColumns: 'Behavior', GridLinesVisibility: 'Appearance',
+        HeadersVisibility: 'Appearance', StretchDirection: 'Appearance',
+        Orientation: 'Layout', TickPlacement: 'Appearance', IsSnapToTickEnabled: 'Behavior',
+        IsDirectionReversed: 'Behavior', SmallChange: 'Behavior', LargeChange: 'Behavior',
+        ExpandDirection: 'Layout', ShowGridLines: 'Appearance',
+        ItemWidth: 'Layout', ItemHeight: 'Layout',
+        HorizontalScrollBarVisibility: 'Behavior', VerticalScrollBarVisibility: 'Behavior',
+        CanContentScroll: 'Behavior', NavigationUIVisibility: 'Appearance',
+        SelectedDateFormat: 'Appearance', FirstDayOfWeek: 'Behavior',
+        IsTodayHighlighted: 'Appearance', DisplayDateStart: 'Behavior',
+        DisplayDateEnd: 'Behavior', DisplayDate: 'Behavior',
+        ShowInTaskbar: 'Window Style', Icon: 'Window Style'
     };
 
     /** Grid help-pane text for common XAML attributes. */
@@ -803,7 +904,73 @@
         Orientation: 'Vertical or Horizontal layout direction.',
         LastChildFill: 'Give the final child all remaining DockPanel space.',
         VerticalScrollBarVisibility: 'Auto, Visible, Hidden, or Disabled.',
-        HorizontalScrollBarVisibility: 'Auto, Visible, Hidden, or Disabled.'
+        HorizontalScrollBarVisibility: 'Auto, Visible, Hidden, or Disabled.',
+        // ---- VS parity additions (defaults per the WPF documentation)
+        'DockPanel.Dock': 'Which DockPanel edge this child docks to. Default: Left.',
+        FlowDirection: 'Layout/text direction. Default: LeftToRight.',
+        AllowDrop: 'Whether this element can be a drag-and-drop target. Default: False.',
+        ClipToBounds: 'Clip child content to this element’s bounds. Default: False.',
+        Focusable: 'Whether the element can receive keyboard focus. Default varies by control (True for inputs).',
+        IsHitTestVisible: 'Whether the element is visible to mouse hit testing. Default: True.',
+        IsTabStop: 'Whether Tab stops on this control. Default: True.',
+        TabIndex: 'Tab order position. Default: 2147483647 (document order).',
+        SnapsToDevicePixels: 'Align drawing to whole device pixels for crisp edges. Default: False.',
+        UseLayoutRounding: 'Round layout measurements to whole pixels. Default: False.',
+        RenderTransformOrigin: 'Relative center for RenderTransform, e.g. 0.5,0.5. Default: 0,0.',
+        Uid: 'The x:Uid used by localization tooling.',
+        Command: 'The ICommand executed on invoke, e.g. {Binding SaveCommand}.',
+        CommandParameter: 'The value passed to Command when it executes.',
+        ClickMode: 'When Click fires: Release (default), Press, or Hover.',
+        IsDefault: 'Activate this button with Enter. Default: False.',
+        IsCancel: 'Activate this button with Escape. Default: False.',
+        IsThreeState: 'Allow the indeterminate (null) state. Default: False.',
+        HorizontalContentAlignment: 'How the control’s content aligns horizontally. Default: Left (Center for buttons).',
+        VerticalContentAlignment: 'How the control’s content aligns vertically. Default: Top (Center for buttons).',
+        TextAlignment: 'Horizontal text alignment. Default: Left.',
+        TextTrimming: 'How overflowing text is trimmed. Default: None.',
+        TextDecorations: 'Underline, Strikethrough, OverLine, or Baseline.',
+        LineHeight: 'Line height in pixels. Default: NaN (font-determined).',
+        CharacterCasing: 'Force typed text to Lower/Upper. Default: Normal.',
+        MinLines: 'Minimum visible text lines. Default: 1.',
+        MaxLines: 'Maximum visible text lines. Default: unlimited.',
+        IsReadOnly: 'Prevent user edits (still selectable). Default: False.',
+        PasswordChar: 'The masking character. Default: ●.',
+        AcceptsTab: 'Insert a tab instead of moving focus. Default: False.',
+        ItemsSource: 'The collection this list binds to, e.g. {Binding Items}.',
+        DisplayMemberPath: 'Property of each item to display, e.g. Name.',
+        SelectedIndex: 'Index of the selected item. Default: -1 (none).',
+        SelectionMode: 'Single, Multiple, or Extended selection. Default: Single (DataGrid/ListView: Extended).',
+        MaxDropDownHeight: 'Maximum popup height in pixels. Default: 1/3 of screen height.',
+        IsDropDownOpen: 'Whether the dropdown popup is open. Default: False.',
+        StaysOpenOnEdit: 'Keep the dropdown open while editing text. Default: False.',
+        TabStripPlacement: 'Which side the tab headers sit on. Default: Top.',
+        CanUserAddRows: 'Show the new-item row. Default: True.',
+        CanUserDeleteRows: 'Allow Delete to remove rows. Default: True.',
+        CanUserReorderColumns: 'Allow drag-reordering columns. Default: True.',
+        CanUserResizeColumns: 'Allow resizing columns. Default: True.',
+        CanUserSortColumns: 'Allow click-to-sort on headers. Default: True.',
+        GridLinesVisibility: 'Which grid lines are drawn. Default: All.',
+        HeadersVisibility: 'Which headers are shown. Default: Column.',
+        StretchDirection: 'Whether content may only scale up, down, or both. Default: Both.',
+        TickPlacement: 'Where slider ticks are drawn. Default: None.',
+        IsSnapToTickEnabled: 'Snap the thumb to tick values. Default: False.',
+        IsDirectionReversed: 'Reverse the direction of increasing value. Default: False.',
+        SmallChange: 'Value change for arrow keys. Default: 0.1.',
+        LargeChange: 'Value change for Page Up/Down or track clicks. Default: 1.',
+        ExpandDirection: 'Which way the expander opens. Default: Down.',
+        ShowGridLines: 'Draw dashed lines on row/column boundaries (design aid). Default: False.',
+        ItemWidth: 'Fixed width for every WrapPanel item. Default: NaN (auto).',
+        ItemHeight: 'Fixed height for every WrapPanel item. Default: NaN (auto).',
+        CanContentScroll: 'Scroll by logical items instead of pixels. Default: False.',
+        NavigationUIVisibility: 'Frame back/forward chrome. Default: Automatic.',
+        SelectedDateFormat: 'Short (default) or Long date display.',
+        FirstDayOfWeek: 'First day shown in the calendar. Default: Sunday (culture-dependent).',
+        IsTodayHighlighted: 'Highlight today’s date. Default: True.',
+        DisplayDateStart: 'Earliest date shown, e.g. 2020-01-01.',
+        DisplayDateEnd: 'Latest date shown.',
+        DisplayDate: 'The month/year initially displayed.',
+        ShowInTaskbar: 'Show a taskbar button for this window. Default: True.',
+        Icon: 'Path to the window icon, e.g. Assets/app.ico.'
     };
 
     // ------------------------------------------------------------------ state
@@ -3730,12 +3897,13 @@
             return xamlFontRow(el, prop, write);
         }
         if (ENUM_VALUES[prop]) { return xamlEnumRow(el, prop, write); }
+        if (XAML_BOOL_PROPS.has(prop)) { return xamlEnumRow(el, prop, write, ['True', 'False']); }
         if (prop === 'Source' && el.localName === 'Image') { return xamlImagePathRow(el, prop, write); }
         return propRow(prop, el.getAttribute(prop) ?? '', write);
     }
 
     /** Dropdown row for enum/boolean attributes, VS-style with a default entry. */
-    function xamlEnumRow(el, prop, write) {
+    function xamlEnumRow(el, prop, write, valueList = null) {
         const row = document.createElement('div');
         row.className = 'ff-prop-row';
         const lab = document.createElement('label');
@@ -3743,7 +3911,7 @@
         row.appendChild(lab);
 
         const raw = el.getAttribute(prop) ?? '';
-        const values = ENUM_VALUES[prop];
+        const values = valueList ?? ENUM_VALUES[prop];
         const sel = document.createElement('select');
         const reset = document.createElement('option');
         reset.value = '';
@@ -4818,7 +4986,7 @@
         setZoom(parseFloat(e.target.value) || 1);
     });
 
-    // ---- zoom: toolbar select + Shift/Ctrl+scroll + status-bar readout -----
+    // ---- zoom: toolbar select + Ctrl+scroll + status-bar readout -----------
 
     const zoomStatusEl = $('ff-zoom-status');
 
@@ -4849,11 +5017,12 @@
         render();
     }
 
-    // Hold Shift (or Ctrl) and scroll over the canvas to zoom.
+    // Visual Studio wheel model: plain scroll = vertical, Shift+scroll =
+    // horizontal (the browser's native behavior — untouched), Ctrl+scroll =
+    // zoom.
     $('ff-canvas-host')?.addEventListener('wheel', e => {
-        if (!e.shiftKey && !e.ctrlKey) { return; }
+        if (!e.ctrlKey) { return; }
         e.preventDefault();
-        // Shift+wheel reports the delta on X in most browsers.
         const delta = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) > 0 ? -0.05 : 0.05;
         setZoom(zoom + delta);
     }, { passive: false });
@@ -4936,10 +5105,10 @@
     for (const [which, panelId] of [['toolbox', 'ff-toolbox'], ['props', 'ff-props']]) {
         const panel = $(panelId);
         if (!panel) { continue; }
-        // Hold Shift (or Ctrl) and scroll over the panel to resize its UI —
-        // the same gesture the canvas uses for zoom. Only THIS panel changes.
+        // Ctrl+scroll over the panel resizes its UI — the same gesture the
+        // canvas uses for zoom (Shift+scroll stays horizontal scrolling).
         panel.addEventListener('wheel', e => {
-            if (!e.shiftKey && !e.ctrlKey) { return; }
+            if (!e.ctrlKey) { return; }
             e.preventDefault();
             e.stopPropagation();
             const delta = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) > 0 ? -5 : 5;

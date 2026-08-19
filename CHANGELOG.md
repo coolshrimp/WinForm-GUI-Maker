@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.27.0
+
+**Visual Studio property parity for the WPF Properties panel** (user request
+after comparing side-by-side with VS):
+
+- **~60 new properties**, validated the way VS validates them (enum
+  dropdowns, True/False dropdowns with a "(default)" entry, color pickers),
+  each with a description-pane entry that states the WPF default:
+  - *Every control:* DockPanel.Dock, FlowDirection, AllowDrop, ClipToBounds,
+    Focusable, IsHitTestVisible, IsTabStop, TabIndex, SnapsToDevicePixels,
+    UseLayoutRounding, RenderTransformOrigin, Uid
+  - *Buttons/toggles:* Command, CommandParameter, IsDefault, IsCancel,
+    ClickMode, IsThreeState, Horizontal/VerticalContentAlignment
+  - *Text:* TextAlignment, TextTrimming, TextDecorations, LineHeight,
+    CharacterCasing, Min/MaxLines, IsReadOnly, scrollbar visibilities,
+    PasswordChar, AcceptsTab
+  - *Lists & data:* ItemsSource, DisplayMemberPath, SelectionMode,
+    SelectedIndex, ComboBox dropdown properties, the full DataGrid CanUser*
+    family, GridLinesVisibility, HeadersVisibility
+  - *TabControl:* **TabStripPlacement** (the "missing anchor for tabs") and
+    SelectedIndex
+  - *Sliders/progress:* Orientation, TickPlacement, IsSnapToTickEnabled,
+    IsDirectionReversed, Small/LargeChange
+  - *Misc:* Expander.ExpandDirection, Grid.ShowGridLines, WrapPanel
+    Item sizes, Image/Viewbox StretchDirection, Frame.NavigationUIVisibility,
+    DatePicker/Calendar date properties
+  - *Window:* Min/Max sizes, ShowInTaskbar, Opacity, Icon, FlowDirection
+  (WinForms already had VS parity — Anchor/Dock and friends apply to every
+  control there, TabControl included.)
+- **Wheel gestures now match Visual Studio**: plain scroll pans vertically,
+  **Shift+scroll pans horizontally**, and **Ctrl+scroll zooms** the canvas
+  (or resizes the Toolbox/Properties panel when over one). Shift+scroll no
+  longer zooms.
+
 ## 0.26.0
 
 **Projects stay Visual Studio-compatible** (user request: opening a UI Maker

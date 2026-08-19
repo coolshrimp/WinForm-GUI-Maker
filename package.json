@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.26.0",
+    "version": "0.27.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -454,14 +454,14 @@
                     "default": 100,
                     "minimum": 60,
                     "maximum": 200,
-                    "description": "Size of the designer's Toolbox panel as a percent (fonts and icons) — accessibility. ~80 ≈ Small, 100 = Medium (default), ~125 ≈ Large. Or hold Shift (or Ctrl) and scroll over the Toolbox; double-click its title to reset."
+                    "description": "Size of the designer's Toolbox panel as a percent (fonts and icons) — accessibility. ~80 ≈ Small, 100 = Medium (default), ~125 ≈ Large. Or hold Ctrl and scroll over the Toolbox; double-click its title to reset."
                 },
                 "uimaker.propertiesScale": {
                     "type": "number",
                     "default": 100,
                     "minimum": 60,
                     "maximum": 200,
-                    "description": "Size of the designer's Properties panel as a percent (fonts and icons) — accessibility, independent of the Toolbox. ~80 ≈ Small, 100 = Medium (default), ~125 ≈ Large. Or hold Shift (or Ctrl) and scroll over the panel; double-click its title to reset."
+                    "description": "Size of the designer's Properties panel as a percent (fonts and icons) — accessibility, independent of the Toolbox. ~80 ≈ Small, 100 = Medium (default), ~125 ≈ Large. Or hold Ctrl and scroll over the panel; double-click its title to reset."
                 },
                 "uimaker.xamlIntelliSense": {
                     "type": "boolean",

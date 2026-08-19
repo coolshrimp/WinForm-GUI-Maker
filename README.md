@@ -27,7 +27,7 @@ UI Maker closes that gap:
 |---|---|
 | Hand-writing XAML layout | Drag-and-drop visual designer with snap-to-grid canvas |
 | No IntelliSense when you *do* edit XAML by hand | Element/attribute/value completions, snippets, hover docs, and an inline color picker in the text editor |
-| Guessing property names | A real Properties window — categorized like Visual Studio's, with dropdowns, color pickers, Anchor toggles, and a description pane |
+| Guessing property names | A real Properties window — categorized like Visual Studio's, with VS-parity property coverage (commands, content alignment, text trimming, ItemsSource, TabStripPlacement, hit-testing, tab order, …), dropdown validation, color pickers, Anchor toggles, and a description pane that states each WPF default |
 | Adding images and icons | Pick a file → it's imported into `Resources/`, registered in `Resources.resx`, and referenced from the Designer.cs — exactly like VS |
 | Wiring events by hand | Events panel — one click writes the handler stub into the code-behind |
 | Switching between design and markup | Split view: designer on one side, live XAML source on the other |
@@ -151,7 +151,8 @@ Open any `.xaml` window in the UI Maker Designer:
   any member), arrow keys nudge the whole selection (Shift = one grid step),
   and the **alignment/distribution toolbar** now works for XAML
   multi-selections as well as WinForms. Zoom with the
-  toolbar dropdown or **Shift+scroll** (25%–300%); the status bar shows the
+  toolbar dropdown or **Ctrl+scroll** (25%–300%) — plain scroll pans vertically,
+  **Shift+scroll** horizontally, matching Visual Studio; the status bar shows the
   current percentage and clicking it resets to 100%.
 - **Properties window, Visual Studio style** — properties grouped under
   collapsible categories (Accessibility, Appearance, Behavior, Data, Design,
@@ -422,7 +423,7 @@ launches with UI Maker loaded.
 |---|---|---|
 | `uimaker.gridSize` | `8` | Snap grid size in pixels on the design canvas |
 | `uimaker.snapToGrid` | `true` | Snap control positions/sizes to the grid |
-| `uimaker.toolboxScale` | `100` | Toolbox panel size in percent (fonts + icons, accessibility) — ~80 Small, 100 Medium, ~125 Large; or Shift/Ctrl+scroll over the panel; double-click its title to reset |
+| `uimaker.toolboxScale` | `100` | Toolbox panel size in percent (fonts + icons, accessibility) — ~80 Small, 100 Medium, ~125 Large; or Ctrl+scroll over the panel; double-click its title to reset |
 | `uimaker.propertiesScale` | `100` | Properties panel size in percent — independent of the Toolbox; same gestures |
 | `uimaker.xamlIntelliSense` | `true` | XAML completions, snippets, hover docs, and inline color swatches in the text editor |
 | `uimaker.publish.askMode` | `true` | Build Release asks how to publish (folder / single EXE / bundled runtime) and remembers the choice |
