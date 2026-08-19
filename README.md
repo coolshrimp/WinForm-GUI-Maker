@@ -86,16 +86,24 @@ Open any `.xaml` window in the UI Maker Designer:
   Label, TextBox, TextBlock, CheckBox, RadioButton, ComboBox, ListBox,
   DataGrid, Image, ProgressBar, Slider, Border, GroupBox, DatePicker,
   ContentControl, Frame, Viewbox, UniformGrid, and
-  more — plus a **Modern (Styled)** section: **ToggleSwitch**, **Modern
-  Button** (rounded accent), **Card** (rounded border + drop shadow), and
-  **Pill Badge**. These are plain WPF elements dressed by a
+  more, including `Ellipse` and `Rectangle` shapes — plus a 24-entry
+  **Modern (Styled)** section of Apple-ish, dependency-free controls:
+  **ToggleSwitch** and **iOSToggle**; **ModernButton**, **SuccessButton**,
+  **DangerButton**, **OutlineButton**, **LinkButton**, and
+  **RoundIconButton** (FAB); **ModernTextBox**, **SearchBox**, and
+  **ModernSlider**; **ModernProgressBar**, **iOSProgressBar**, and a
+  **Spinner** whose ring really rotates (storyboard) — on the canvas too;
+  **StatusDot**, **Badge**, **PillBadge**, and **Chip**; **TitleText** and
+  **SubtitleText**; **Card**, **GlassCard**, **GradientPanel**, and
+  **SectionDivider**. These are plain WPF elements dressed by a
   Style/ControlTemplate that UI Maker writes into `Window.Resources` the
-  first time you drop one — no NuGet packages, restyle them freely, and the
-  canvas previews the switch/rounded look. **Each instance can have its own
-  colors**: on a ToggleSwitch, `Background` is the checked track color and
-  `BorderBrush` the unchecked one (set them in the Properties panel's color
-  pickers); Modern Buttons and Pill Badges recolor via `Background` /
-  `Foreground` the same way. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
+  first time you drop one (shared templates are injected once) — no NuGet
+  packages, restyle them freely, and the canvas previews the looks. **Each
+  instance can have its own colors**: toggles get friendly **OnColor** /
+  **OffColor** rows in the Properties panel, buttons/badges recolor via
+  `Background`/`Foreground`, progress bars via `Background` (track) and
+  `Foreground` (fill). The toolbox itself has **▤ Categorized / A–Z** sort
+  buttons like the Properties panel, plus the search box. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
   LinkLabel, TextBox, MaskedTextBox, RichTextBox, CheckBox, RadioButton,
   CheckedListBox, ComboBox, DomainUpDown, ListBox, ListView, TreeView,
   PictureBox, ProgressBar, TrackBar, NumericUpDown, DateTimePicker,

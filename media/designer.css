@@ -1691,3 +1691,103 @@ html, body {
     font-weight: 700;
     justify-content: center;
 }
+
+/* Toolbox sort row (Categorized vs A–Z), mirroring the Properties panel. */
+#ff-tool-sort {
+    display: flex;
+    gap: 4px;
+    padding: 4px 8px 2px;
+}
+
+#ff-tool-sort button {
+    background: transparent;
+    color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-panel-border, #444);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0.75;
+}
+
+#ff-tool-sort button.active {
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    border-color: transparent;
+    opacity: 1;
+}
+
+/* Outline (ghost) button — accent border, transparent fill. */
+.ff-inner.ff-look-outline-btn {
+    background: transparent;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+/* Link-look button — accent underlined text, no chrome. */
+.ff-inner.ff-look-link-btn {
+    background: transparent;
+    border: none;
+    color: #7c4dff;
+    text-decoration: underline;
+    justify-content: flex-start;
+}
+
+/* Round icon button (FAB). */
+.ff-inner.ff-look-round-btn {
+    border: none;
+    border-radius: 50%;
+    background: #7c4dff;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Modern progress bar: pill track + pill fill. */
+.ff-inner.ff-look-modern-progress {
+    border: none;
+    border-radius: 999px;
+    background: #e5e5ea;
+    overflow: hidden;
+}
+
+.ff-inner.ff-look-modern-progress .ff-progress-fill {
+    border-radius: 999px;
+    background: #7c4dff;
+}
+
+/* Modern slider: accent filled track + round white thumb. */
+.ff-inner.ff-look-modern-slider .ff-slider-track {
+    height: 4px;
+    border-radius: 2px;
+    background: #e5e5ea;
+}
+
+.ff-inner.ff-look-modern-slider .ff-slider-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Spinner ring (UimSpinner) — spins on the canvas like at runtime. */
+.ff-inner.ff-look-spinner {
+    border: 3px solid;
+    border-color: #7c4dff #7c4dff transparent #7c4dff;
+    border-radius: 50%;
+    background: transparent;
+    animation: ff-spin 1s linear infinite;
+}
+
+@keyframes ff-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Plain shapes (Ellipse / Rectangle). */
+.ff-inner.ff-look-shape {
+    border: none;
+    background: transparent;
+}

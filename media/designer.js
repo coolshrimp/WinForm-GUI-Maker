@@ -132,6 +132,8 @@
         Expander:    { icon: '▸', w: 220, h: 120, attrs: { Header: 'Expander', IsExpanded: 'True' }, props: ['Header', 'IsExpanded'], events: ['Expanded', 'Collapsed'], defaultEvent: 'Expanded' },
         Separator:   { icon: '─', w: 160, h: 4,   attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
         TabControl:  { icon: '⧉', w: 320, h: 200, attrs: {},                      props: [], events: ['SelectionChanged'], defaultEvent: 'SelectionChanged' },
+        Ellipse:     { icon: '⬤', w: 60,  h: 60,  attrs: { Fill: '#FF7C4DFF' },   props: ['Fill', 'Stroke', 'StrokeThickness'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
+        Rectangle:   { icon: '▮', w: 100, h: 60,  attrs: { Fill: '#FF7C4DFF' },   props: ['Fill', 'Stroke', 'StrokeThickness', 'RadiusX', 'RadiusY'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         ContentControl: { icon: '◻', w: 180, h: 100, attrs: {},                   props: [], events: ['Loaded'], defaultEvent: 'Loaded' },
         Frame:       { icon: '🗔', w: 220, h: 160, attrs: {},                      props: ['Source'], events: ['Navigated', 'Loaded'], defaultEvent: 'Loaded' },
         Viewbox:     { icon: '🔍', w: 160, h: 120, attrs: { Stretch: 'Uniform' },  props: ['Stretch'], events: [], defaultEvent: 'Loaded' },
@@ -145,21 +147,13 @@
     };
 
     /**
-     * "Modern (Styled)" toolbox section: standard WPF elements dressed with a
-     * Style/ControlTemplate that is injected into <Window.Resources> the
-     * first time one is dropped — the fancy look with zero dependencies.
-     * `element` is the real element inserted; `styleKey`/`styleXml` describe
-     * the resource; `init` builds extra property-element children.
+     * Reusable Style/ControlTemplate resources behind the "Modern (Styled)"
+     * toolbox section. Injected into <Window.Resources> on first use (never
+     * duplicated, never overwritten). Colors route through TemplateBinding
+     * wherever possible so EACH instance recolors via its own properties.
      */
-    const MODERN_CONTROLS = {
-        ToggleSwitch: {
-            icon: '⭘', w: 90, h: 20, noSize: true, element: 'CheckBox',
-            attrs: { Content: 'Toggle', Style: '{StaticResource UimToggleSwitch}' },
-            props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked',
-            styleKey: 'UimToggleSwitch',
-            // Per-instance colors: Background = CHECKED track, BorderBrush =
-            // unchecked track — set them on each CheckBox for unique toggles.
-            styleXml:
+    const UIM_STYLES = {
+        UimToggleSwitch:
 `<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimToggleSwitch" TargetType="CheckBox">
     <Setter Property="Cursor" Value="Hand"/>
     <Setter Property="Background" Value="#FF7C4DFF"/>
@@ -185,14 +179,8 @@
             </ControlTemplate>
         </Setter.Value>
     </Setter>
-</Style>`
-        },
-        ModernButton: {
-            icon: '▢', w: 110, h: 34, element: 'Button',
-            attrs: { Content: 'Button', Style: '{StaticResource UimModernButton}' },
-            props: ['Content'], events: ['Click', 'MouseDoubleClick'], defaultEvent: 'Click',
-            styleKey: 'UimModernButton',
-            styleXml:
+</Style>`,
+        UimModernButton:
 `<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimModernButton" TargetType="Button">
     <Setter Property="Background" Value="#FF7C4DFF"/>
     <Setter Property="Foreground" Value="White"/>
@@ -219,33 +207,228 @@
             </ControlTemplate>
         </Setter.Value>
     </Setter>
-</Style>`
-        },
-        Card: {
-            icon: '▭', w: 220, h: 140, element: 'Border',
-            attrs: {
-                CornerRadius: '8', Background: '#FFFFFFFF',
-                BorderBrush: '#FFE3E3E8', BorderThickness: '1', Padding: '12'
-            },
-            props: ['CornerRadius', 'Background', 'BorderBrush', 'BorderThickness', 'Padding'],
-            events: [], defaultEvent: 'Loaded',
-            init(el) {
-                const effect = xamlDoc.createElementNS(PRES_NS, 'Border.Effect');
-                const shadow = xamlDoc.createElementNS(PRES_NS, 'DropShadowEffect');
-                shadow.setAttribute('BlurRadius', '12');
-                shadow.setAttribute('ShadowDepth', '2');
-                shadow.setAttribute('Direction', '270');
-                shadow.setAttribute('Opacity', '0.22');
-                effect.appendChild(shadow);
-                el.appendChild(effect);
-            }
-        },
-        PillBadge: {
-            icon: '⬭', w: 70, h: 22, noSize: true, element: 'Label',
-            attrs: { Content: 'NEW', Style: '{StaticResource UimPillBadge}' },
-            props: ['Content', 'Background', 'Foreground'], events: [], defaultEvent: 'Loaded',
-            styleKey: 'UimPillBadge',
-            styleXml:
+</Style>`,
+        UimOutlineButton:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimOutlineButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="#FF7C4DFF"/>
+    <Setter Property="BorderBrush" Value="#FF7C4DFF"/>
+    <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Padding" Value="14,7"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="Button">
+                <Border x:Name="UimBg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1.5" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="UimBg" Property="Background" Value="#227C4DFF"/>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Setter TargetName="UimBg" Property="Opacity" Value="0.8"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimLinkButton:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimLinkButton" TargetType="Button">
+    <Setter Property="Foreground" Value="#FF7C4DFF"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="Button">
+                <Border x:Name="UimU" Background="Transparent" BorderBrush="{TemplateBinding Foreground}" BorderThickness="0,0,0,1">
+                    <ContentPresenter RecognizesAccessKey="True"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Opacity" Value="0.8"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimRoundIconButton:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimRoundIconButton" TargetType="Button">
+    <Setter Property="Background" Value="#FF7C4DFF"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="FontSize" Value="18"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="Button">
+                <Border x:Name="UimBg" Background="{TemplateBinding Background}" CornerRadius="999">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.3"/>
+                    </Border.Effect>
+                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="UimBg" Property="Opacity" Value="0.9"/>
+                    </Trigger>
+                    <Trigger Property="IsPressed" Value="True">
+                        <Setter TargetName="UimBg" Property="Opacity" Value="0.75"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimModernTextBox:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimModernTextBox" TargetType="TextBox">
+    <Setter Property="Background" Value="#FFFFFFFF"/>
+    <Setter Property="Foreground" Value="#FF1C1C1E"/>
+    <Setter Property="BorderBrush" Value="#FFD1D1D6"/>
+    <Setter Property="Padding" Value="10,6"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="TextBox">
+                <Border x:Name="UimBg" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                    <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                        <Setter TargetName="UimBg" Property="BorderBrush" Value="#FF7C4DFF"/>
+                        <Setter TargetName="UimBg" Property="BorderThickness" Value="2"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimSearchBox:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimSearchBox" TargetType="TextBox">
+    <Setter Property="Background" Value="#FFF2F2F7"/>
+    <Setter Property="Foreground" Value="#FF1C1C1E"/>
+    <Setter Property="BorderBrush" Value="Transparent"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="TextBox">
+                <Border x:Name="UimBg" CornerRadius="999" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="🔍" Margin="12,0,6,0" VerticalAlignment="Center" Opacity="0.55"/>
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                        <Setter TargetName="UimBg" Property="BorderBrush" Value="#FF7C4DFF"/>
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5"/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimModernProgressBar:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimModernProgressBar" TargetType="ProgressBar">
+    <Setter Property="Background" Value="#FFE5E5EA"/>
+    <Setter Property="Foreground" Value="#FF7C4DFF"/>
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ProgressBar">
+                <Grid>
+                    <Border x:Name="PART_Track" CornerRadius="99" Background="{TemplateBinding Background}"/>
+                    <Border x:Name="PART_Indicator" CornerRadius="99" Background="{TemplateBinding Foreground}" HorizontalAlignment="Left"/>
+                </Grid>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimModernSlider:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimModernSlider" TargetType="Slider">
+    <Setter Property="Foreground" Value="#FF7C4DFF"/>
+    <Setter Property="Background" Value="#FFE5E5EA"/>
+    <Setter Property="Height" Value="22"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="Slider">
+                <Grid>
+                    <Border Height="4" CornerRadius="2" Background="{TemplateBinding Background}" VerticalAlignment="Center"/>
+                    <Track x:Name="PART_Track">
+                        <Track.DecreaseRepeatButton>
+                            <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                                <RepeatButton.Template>
+                                    <ControlTemplate TargetType="RepeatButton">
+                                        <Border Height="4" CornerRadius="2" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" VerticalAlignment="Center"/>
+                                    </ControlTemplate>
+                                </RepeatButton.Template>
+                            </RepeatButton>
+                        </Track.DecreaseRepeatButton>
+                        <Track.Thumb>
+                            <Thumb Width="16" Height="16" Focusable="False">
+                                <Thumb.Template>
+                                    <ControlTemplate TargetType="Thumb">
+                                        <Ellipse Fill="White" Stroke="#33000000" StrokeThickness="1">
+                                            <Ellipse.Effect>
+                                                <DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.3"/>
+                                            </Ellipse.Effect>
+                                        </Ellipse>
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                        </Track.Thumb>
+                        <Track.IncreaseRepeatButton>
+                            <RepeatButton Command="Slider.IncreaseLarge" Focusable="False">
+                                <RepeatButton.Template>
+                                    <ControlTemplate TargetType="RepeatButton">
+                                        <Border Background="Transparent"/>
+                                    </ControlTemplate>
+                                </RepeatButton.Template>
+                            </RepeatButton>
+                        </Track.IncreaseRepeatButton>
+                    </Track>
+                </Grid>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimSpinner:
+`<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimSpinner" TargetType="ContentControl">
+    <Setter Property="Foreground" Value="#FF7C4DFF"/>
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Ellipse x:Name="UimRing" Stroke="{TemplateBinding Foreground}" StrokeThickness="3" StrokeDashArray="10 24" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <RotateTransform/>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <ControlTemplate.Triggers>
+                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                        <BeginStoryboard>
+                            <Storyboard RepeatBehavior="Forever">
+                                <DoubleAnimation Storyboard.TargetName="UimRing" Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="0" To="360" Duration="0:0:1"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>`,
+        UimPillBadge:
 `<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimPillBadge" TargetType="Label">
     <Setter Property="Background" Value="#FF7C4DFF"/>
     <Setter Property="Foreground" Value="White"/>
@@ -262,8 +445,204 @@
         </Setter.Value>
     </Setter>
 </Style>`
+    };
+
+    /**
+     * "Modern (Styled)" toolbox section: standard WPF elements dressed with a
+     * Style/ControlTemplate from UIM_STYLES, injected into <Window.Resources>
+     * the first time one is dropped — Apple-ish looks with zero dependencies.
+     * `element` is the real element inserted; `styleKey` names the resource;
+     * `init` builds extra property-element children (effects, gradients).
+     * Several entries share one style and differ only by attrs (colors/sizes)
+     * because the templates recolor via TemplateBinding.
+     */
+    const MODERN_CONTROLS = {
+        // ---- toggles
+        ToggleSwitch: {
+            icon: '⭘', w: 90, h: 20, noSize: true, element: 'CheckBox',
+            attrs: { Content: 'Toggle', Style: '{StaticResource UimToggleSwitch}' },
+            props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked',
+            styleKey: 'UimToggleSwitch'
+        },
+        iOSToggle: {
+            icon: '🍏', w: 90, h: 20, noSize: true, element: 'CheckBox',
+            attrs: { Content: 'Toggle', Style: '{StaticResource UimToggleSwitch}', Background: '#FF34C759', BorderBrush: '#FFE5E5EA' },
+            props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked',
+            styleKey: 'UimToggleSwitch'
+        },
+        // ---- buttons
+        ModernButton: {
+            icon: '▢', w: 110, h: 34, element: 'Button',
+            attrs: { Content: 'Button', Style: '{StaticResource UimModernButton}' },
+            props: ['Content'], events: ['Click', 'MouseDoubleClick'], defaultEvent: 'Click',
+            styleKey: 'UimModernButton'
+        },
+        SuccessButton: {
+            icon: '✓', w: 110, h: 34, element: 'Button',
+            attrs: { Content: 'Save', Style: '{StaticResource UimModernButton}', Background: '#FF34C759' },
+            props: ['Content'], events: ['Click'], defaultEvent: 'Click',
+            styleKey: 'UimModernButton'
+        },
+        DangerButton: {
+            icon: '✕', w: 110, h: 34, element: 'Button',
+            attrs: { Content: 'Delete', Style: '{StaticResource UimModernButton}', Background: '#FFFF3B30' },
+            props: ['Content'], events: ['Click'], defaultEvent: 'Click',
+            styleKey: 'UimModernButton'
+        },
+        OutlineButton: {
+            icon: '▢', w: 110, h: 34, element: 'Button',
+            attrs: { Content: 'Button', Style: '{StaticResource UimOutlineButton}' },
+            props: ['Content'], events: ['Click'], defaultEvent: 'Click',
+            styleKey: 'UimOutlineButton'
+        },
+        LinkButton: {
+            icon: '🔗', w: 80, h: 22, noSize: true, element: 'Button',
+            attrs: { Content: 'Learn more', Style: '{StaticResource UimLinkButton}' },
+            props: ['Content'], events: ['Click'], defaultEvent: 'Click',
+            styleKey: 'UimLinkButton'
+        },
+        RoundIconButton: {
+            icon: '⊕', w: 44, h: 44, element: 'Button',
+            attrs: { Content: '+', Style: '{StaticResource UimRoundIconButton}' },
+            props: ['Content'], events: ['Click'], defaultEvent: 'Click',
+            styleKey: 'UimRoundIconButton'
+        },
+        // ---- inputs
+        ModernTextBox: {
+            icon: '⌨', w: 180, h: 34, element: 'TextBox',
+            attrs: { Text: '', Style: '{StaticResource UimModernTextBox}' },
+            props: ['Text', 'MaxLength'], events: ['TextChanged', 'KeyDown'], defaultEvent: 'TextChanged',
+            styleKey: 'UimModernTextBox'
+        },
+        SearchBox: {
+            icon: '🔍', w: 200, h: 32, element: 'TextBox',
+            attrs: { Text: '', Style: '{StaticResource UimSearchBox}' },
+            props: ['Text', 'MaxLength'], events: ['TextChanged', 'KeyDown'], defaultEvent: 'TextChanged',
+            styleKey: 'UimSearchBox'
+        },
+        ModernSlider: {
+            icon: '⬌', w: 180, h: 22, element: 'Slider',
+            attrs: { Minimum: '0', Maximum: '100', Value: '40', Style: '{StaticResource UimModernSlider}' },
+            props: ['Minimum', 'Maximum', 'Value'], events: ['ValueChanged'], defaultEvent: 'ValueChanged',
+            styleKey: 'UimModernSlider'
+        },
+        // ---- progress & status
+        ModernProgressBar: {
+            icon: '▱', w: 180, h: 8, element: 'ProgressBar',
+            attrs: { Value: '40', Style: '{StaticResource UimModernProgressBar}' },
+            props: ['Minimum', 'Maximum', 'Value', 'IsIndeterminate'], events: ['ValueChanged'], defaultEvent: 'ValueChanged',
+            styleKey: 'UimModernProgressBar'
+        },
+        iOSProgressBar: {
+            icon: '▱', w: 180, h: 4, element: 'ProgressBar',
+            attrs: { Value: '40', Style: '{StaticResource UimModernProgressBar}', Background: '#FFE5E5EA', Foreground: '#FF007AFF' },
+            props: ['Minimum', 'Maximum', 'Value'], events: ['ValueChanged'], defaultEvent: 'ValueChanged',
+            styleKey: 'UimModernProgressBar'
+        },
+        Spinner: {
+            icon: '◌', w: 32, h: 32, element: 'ContentControl',
+            attrs: { Style: '{StaticResource UimSpinner}' },
+            props: [], events: ['Loaded'], defaultEvent: 'Loaded',
+            styleKey: 'UimSpinner'
+        },
+        StatusDot: {
+            icon: '●', w: 12, h: 12, element: 'Ellipse',
+            attrs: { Fill: '#FF34C759' },
+            props: ['Fill', 'Stroke', 'StrokeThickness'], events: [], defaultEvent: 'Loaded'
+        },
+        Badge: {
+            icon: '➊', w: 26, h: 20, noSize: true, element: 'Label',
+            attrs: { Content: '3', Style: '{StaticResource UimPillBadge}', Background: '#FFFF3B30', Padding: '7,2' },
+            props: ['Content', 'Background', 'Foreground'], events: [], defaultEvent: 'Loaded',
+            styleKey: 'UimPillBadge'
+        },
+        PillBadge: {
+            icon: '⬭', w: 70, h: 22, noSize: true, element: 'Label',
+            attrs: { Content: 'NEW', Style: '{StaticResource UimPillBadge}' },
+            props: ['Content', 'Background', 'Foreground'], events: [], defaultEvent: 'Loaded',
+            styleKey: 'UimPillBadge'
+        },
+        Chip: {
+            icon: '⬭', w: 80, h: 26, noSize: true, element: 'Border',
+            attrs: { CornerRadius: '999', Background: '#22808080', Padding: '12,4' },
+            props: ['CornerRadius', 'Background', 'Padding'], events: [], defaultEvent: 'Loaded',
+            init(el) {
+                const text = xamlDoc.createElementNS(PRES_NS, 'TextBlock');
+                text.setAttribute('Text', 'Chip');
+                text.setAttribute('VerticalAlignment', 'Center');
+                el.appendChild(text);
+            }
+        },
+        // ---- text
+        TitleText: {
+            icon: '𝗧', w: 160, h: 32, noSize: true, element: 'TextBlock',
+            attrs: { Text: 'Title', FontSize: '24', FontWeight: 'SemiBold' },
+            props: ['Text', 'TextWrapping'], events: [], defaultEvent: 'Loaded'
+        },
+        SubtitleText: {
+            icon: 'ᵗ', w: 160, h: 20, noSize: true, element: 'TextBlock',
+            attrs: { Text: 'Subtitle text', FontSize: '13', Foreground: '#FF8E8E93' },
+            props: ['Text', 'TextWrapping'], events: [], defaultEvent: 'Loaded'
+        },
+        // ---- cards & decoration
+        Card: {
+            icon: '▭', w: 220, h: 140, element: 'Border',
+            attrs: {
+                CornerRadius: '8', Background: '#FFFFFFFF',
+                BorderBrush: '#FFE3E3E8', BorderThickness: '1', Padding: '12'
+            },
+            props: ['CornerRadius', 'Background', 'BorderBrush', 'BorderThickness', 'Padding'],
+            events: [], defaultEvent: 'Loaded',
+            init(el) {
+                appendDropShadow(el, { BlurRadius: '12', ShadowDepth: '2', Direction: '270', Opacity: '0.22' });
+            }
+        },
+        GlassCard: {
+            icon: '◽', w: 220, h: 140, element: 'Border',
+            attrs: {
+                CornerRadius: '12', Background: '#66FFFFFF',
+                BorderBrush: '#80FFFFFF', BorderThickness: '1', Padding: '16'
+            },
+            props: ['CornerRadius', 'Background', 'BorderBrush', 'BorderThickness', 'Padding'],
+            events: [], defaultEvent: 'Loaded',
+            init(el) {
+                appendDropShadow(el, { BlurRadius: '16', ShadowDepth: '4', Direction: '270', Opacity: '0.18' });
+            }
+        },
+        GradientPanel: {
+            icon: '▨', w: 220, h: 140, element: 'Border',
+            attrs: { CornerRadius: '10', Padding: '12' },
+            props: ['CornerRadius', 'Padding'], events: [], defaultEvent: 'Loaded',
+            init(el) {
+                const bg = xamlDoc.createElementNS(PRES_NS, 'Border.Background');
+                const brush = xamlDoc.createElementNS(PRES_NS, 'LinearGradientBrush');
+                brush.setAttribute('StartPoint', '0,0');
+                brush.setAttribute('EndPoint', '1,1');
+                for (const [color, offset] of [['#FF7C4DFF', '0'], ['#FF4D9FFF', '1']]) {
+                    const stop = xamlDoc.createElementNS(PRES_NS, 'GradientStop');
+                    stop.setAttribute('Color', color);
+                    stop.setAttribute('Offset', offset);
+                    brush.appendChild(stop);
+                }
+                bg.appendChild(brush);
+                el.appendChild(bg);
+            }
+        },
+        SectionDivider: {
+            icon: '─', w: 200, h: 1, element: 'Border',
+            attrs: { Background: '#33808080', Height: '1' },
+            props: ['Background'], events: [], defaultEvent: 'Loaded'
         }
     };
+
+    /** Append a <X.Effect><DropShadowEffect …/></X.Effect> property child. */
+    function appendDropShadow(el, attrs) {
+        const effect = xamlDoc.createElementNS(PRES_NS, `${el.localName}.Effect`);
+        const shadow = xamlDoc.createElementNS(PRES_NS, 'DropShadowEffect');
+        for (const [k, v] of Object.entries(attrs)) { shadow.setAttribute(k, v); }
+        effect.appendChild(shadow);
+        el.appendChild(effect);
+    }
 
     /** Extra property-panel entries for layout containers (not in the toolbox). */
     const PANEL_PROPS = {
@@ -1092,6 +1471,15 @@
         const bg = isToggle ? '' : resolveBrush(styleProp(el, 'Background'));
         const fg = resolveBrush(styleProp(el, 'Foreground'));
         if (bg) { div.style.background = bg; }
+        // Inline gradient backgrounds: <X.Background><LinearGradientBrush/>.
+        if (!bg && !isToggle) {
+            const bgProp = propertyElement(el, 'Background');
+            const grad = bgProp && [...bgProp.children].find(c => c.localName.endsWith('GradientBrush'));
+            if (grad) {
+                const css = gradientCss(grad);
+                if (css) { div.style.background = css; }
+            }
+        }
         if (fg) { div.style.color = fg; }
         // <Element.Background><ImageBrush ImageSource="…"/></Element.Background>
         const ib = xamlImageBrush(el, 'Background');
@@ -1498,16 +1886,32 @@
         const styleRef = el.getAttribute('Style') ?? '';
 
         switch (type) {
-            case 'Button':
+            case 'Button': {
                 inner.classList.add('ff-look-button');
-                // The injected "modern" template: rounded accent chrome.
+                // The injected "modern" templates: rounded/outline/link/round
+                // chrome, recolored per instance via Background/Foreground.
+                const btnBg = resolveBrush(styleProp(el, 'Background'));
+                const btnFg = resolveBrush(styleProp(el, 'Foreground'));
                 if (styleRef.includes('UimModernButton')) {
                     inner.classList.add('ff-look-modern-btn');
-                    const bg = resolveBrush(styleProp(el, 'Background'));
-                    if (bg) { inner.style.background = bg; }
+                    if (btnBg) { inner.style.background = btnBg; }
+                    if (btnFg) { inner.style.color = btnFg; }
+                } else if (styleRef.includes('UimOutlineButton')) {
+                    inner.classList.add('ff-look-outline-btn');
+                    const bb = resolveBrush(styleProp(el, 'BorderBrush')) || '#7c4dff';
+                    inner.style.border = `1.5px solid ${bb}`;
+                    inner.style.color = btnFg || bb;
+                } else if (styleRef.includes('UimLinkButton')) {
+                    inner.classList.add('ff-look-link-btn');
+                    if (btnFg) { inner.style.color = btnFg; }
+                } else if (styleRef.includes('UimRoundIconButton')) {
+                    inner.classList.add('ff-look-round-btn');
+                    if (btnBg) { inner.style.background = btnBg; }
+                    if (btnFg) { inner.style.color = btnFg; }
                 }
                 inner.textContent = content || 'Button';
                 break;
+            }
             case 'Label': {
                 inner.classList.add('ff-look-label');
                 if (styleRef.includes('UimPillBadge')) {
@@ -1610,12 +2014,50 @@
                 inner.classList.add('ff-look-progress');
                 const pct = progressPct(el);
                 inner.innerHTML = `<div class="ff-progress-fill" style="width:${pct}%"></div>`;
+                // Modern template: rounded pill with per-instance colors
+                // (Background = track, Foreground = fill).
+                const trackBg = resolveBrush(styleProp(el, 'Background'));
+                const fillBg = resolveBrush(styleProp(el, 'Foreground'));
+                if (styleRef.includes('UimModernProgressBar')) {
+                    inner.classList.add('ff-look-modern-progress');
+                }
+                if (trackBg) { inner.style.background = trackBg; }
+                const fillEl = inner.querySelector('.ff-progress-fill');
+                if (fillBg && fillEl) { fillEl.style.background = fillBg; }
                 break;
             }
             case 'Slider': {
                 const pct = progressPct(el);
                 inner.classList.add('ff-look-slider');
+                if (styleRef.includes('UimModernSlider')) { inner.classList.add('ff-look-modern-slider'); }
                 inner.innerHTML = `<div class="ff-slider-track"></div><div class="ff-slider-thumb" style="left:${pct}%"></div>`;
+                const acc = resolveBrush(styleProp(el, 'Foreground'));
+                const trackEl = inner.querySelector('.ff-slider-track');
+                if (acc && trackEl && styleRef.includes('UimModernSlider')) { trackEl.style.background = acc; }
+                break;
+            }
+            case 'ContentControl':
+                if (styleRef.includes('UimSpinner')) {
+                    inner.classList.add('ff-look-spinner');
+                    const ring = resolveBrush(styleProp(el, 'Foreground')) || '#7c4dff';
+                    inner.style.borderColor = `${ring} ${ring} transparent ${ring}`;
+                    break;
+                }
+                inner.classList.add('ff-look-unknown');
+                inner.textContent = type;
+                break;
+            case 'Ellipse':
+            case 'Rectangle': {
+                inner.classList.add('ff-look-shape');
+                const fill = resolveBrush(styleProp(el, 'Fill'));
+                if (fill) { inner.style.background = fill; }
+                const stroke = resolveBrush(styleProp(el, 'Stroke'));
+                if (stroke) {
+                    inner.style.border = `${num(styleProp(el, 'StrokeThickness'), 1)}px solid ${stroke}`;
+                }
+                inner.style.borderRadius = type === 'Ellipse'
+                    ? '50%'
+                    : `${num(el.getAttribute('RadiusX'), 0)}px`;
                 break;
             }
             case 'DatePicker':
@@ -1670,6 +2112,12 @@
         if (hca) {
             inner.style.justifyContent =
                 hca === 'Left' ? 'flex-start' : hca === 'Right' ? 'flex-end' : 'center';
+        }
+        // Corner rounding lifted from the style (its template's first Border)
+        // — rounded text boxes, pill search fields, modern chrome in general.
+        const cr = styleProp(el, 'CornerRadius');
+        if (cr && !String(cr).includes('{') && !inner.style.borderRadius) {
+            inner.style.borderRadius = `${parseFloat(cr) || 0}px`;
         }
         return inner;
     }
@@ -2564,6 +3012,9 @@
 
     // ================================================================= toolbox
 
+    /** Toolbox ordering: false = VS-style sections, true = flat A–Z. */
+    let toolboxSortAz = false;
+
     function buildToolbox() {
         const host = $('ff-toolbox-items');
         if (!host) { return; }
@@ -2583,6 +3034,31 @@
             host.parentNode.insertBefore(search, host);
         }
         search.value = '';
+
+        // Sort toggle: Categorized sections vs a flat A–Z list, mirroring the
+        // Properties panel's ▤/A–Z buttons.
+        let sortRow = $('ff-tool-sort');
+        if (!sortRow) {
+            sortRow = document.createElement('div');
+            sortRow.id = 'ff-tool-sort';
+            const mkSort = (id, label, title, az) => {
+                const b = document.createElement('button');
+                b.id = id;
+                b.textContent = label;
+                b.title = title;
+                b.addEventListener('click', () => {
+                    if (toolboxSortAz === az) { return; }
+                    toolboxSortAz = az;
+                    buildToolbox();
+                });
+                sortRow.appendChild(b);
+            };
+            mkSort('ff-tool-sort-cat', '▤ Categorized', 'Group the toolbox into sections', false);
+            mkSort('ff-tool-sort-az', 'A–Z', 'Flat alphabetical list of every tool', true);
+            host.parentNode.insertBefore(sortRow, host);
+        }
+        $('ff-tool-sort-cat').classList.toggle('active', !toolboxSortAz);
+        $('ff-tool-sort-az').classList.toggle('active', toolboxSortAz);
 
         const addTool = (type, def) => {
             const item = document.createElement('div');
@@ -2649,6 +3125,19 @@
                 }
             }
         };
+
+        // Flat A–Z: every tool for the current designer, alphabetically.
+        if (toolboxSortAz) {
+            const all = docMode === 'winforms'
+                ? [...Object.entries(WF_CONTROLS), ...Object.entries(WF_TRAY),
+                    ...Object.keys(WF_CUSTOM).map(t => [t, { icon: '🧩' }])]
+                : [...Object.entries(CONTROLS), ...Object.entries(MODERN_CONTROLS),
+                    ...Object.keys(XAML_CUSTOM).map(t => [t, { icon: '🧩' }])];
+            for (const [type, def] of all.sort((a, b) => a[0].localeCompare(b[0]))) {
+                addTool(type, def);
+            }
+            return;
+        }
 
         if (docMode === 'winforms') {
             // VS-style sections, in a fixed order across both catalogs.
@@ -2814,7 +3303,7 @@
         // Modern (styled) entries insert a standard element and make sure the
         // Style resource it references exists in the document.
         if (def.element) {
-            if (def.styleKey) { ensureWindowStyle(def.styleKey, def.styleXml); }
+            if (def.styleKey) { ensureWindowStyle(def.styleKey, UIM_STYLES[def.styleKey]); }
             return xamlDoc.createElementNS(PRES_NS, def.element);
         }
         if (!def.custom) { return xamlDoc.createElementNS(PRES_NS, type); }
@@ -3158,9 +3647,32 @@
             attachDesc(nameRow, 'Name', XAML_DESCS.Name);
             rows.push({ label: 'Name', cat: 'Design', node: nameRow });
         }
+        // Toggle-styled controls: friendly OnColor / OffColor rows that map
+        // to the template's per-instance brushes (Background / BorderBrush),
+        // replacing those raw rows so there is one obvious place to recolor.
+        const toggleAlias = !isWindow && styleToggleInfo(el)
+            ? [['OnColor', 'Background', 'Track color while the toggle is ON (checked). Stored as Background — the template binds to it.'],
+               ['OffColor', 'BorderBrush', 'Track color while the toggle is OFF (unchecked). Stored as BorderBrush — the template binds to it.']]
+            : null;
+        if (toggleAlias) {
+            for (const [label, prop, desc] of toggleAlias) {
+                const write = v => {
+                    removePropertyElement(el, prop);
+                    if (v === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, v); }
+                    commit();
+                };
+                const node = xamlBrushRow(el, prop, write, label);
+                if (el.getAttribute(prop) !== null) { node.classList.add('ff-set'); }
+                attachDesc(node, label, desc);
+                rows.push({ label, cat: 'Appearance', node });
+            }
+        }
+
+        const aliased = new Set((toggleAlias ?? []).map(([, prop]) => prop));
         const names = isWindow
             ? WINDOW_PROPS
-            : [...(xamlDefOf(el.localName)?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS];
+            : [...(xamlDefOf(el.localName)?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS]
+                .filter(p => !aliased.has(p));
 
         for (const prop of names) {
             const node = xamlPropRow(el, prop);
@@ -3223,11 +3735,11 @@
     }
 
     /** Brush row: color swatch (native picker) + named-color text + image button. */
-    function xamlBrushRow(el, prop, write) {
+    function xamlBrushRow(el, prop, write, label = prop) {
         const row = document.createElement('div');
         row.className = 'ff-prop-row';
         const lab = document.createElement('label');
-        lab.textContent = prop;
+        lab.textContent = label;
         row.appendChild(lab);
 
         const raw = el.getAttribute(prop) ?? '';

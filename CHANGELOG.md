@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.25.0
+
+Three user requests in one release:
+
+**Friendly toggle color properties.** Toggle-styled controls now show
+**OnColor** and **OffColor** rows at the top of the Properties panel
+(Appearance) with color-picker swatches — no need to know that they map to
+`Background`/`BorderBrush` under the hood (the raw rows are hidden to avoid
+duplicates, and the description pane explains the mapping).
+
+**The Modern (Styled) toolbox grew from 4 to 24 entries** — Apple-ish,
+dependency-free, all injected as plain Styles/ControlTemplates you can edit,
+most recoloring per instance via TemplateBinding:
+
+- *Toggles:* ToggleSwitch, **iOSToggle** (green iOS look)
+- *Buttons:* ModernButton, **SuccessButton**, **DangerButton**,
+  **OutlineButton** (ghost), **LinkButton** (underlined accent),
+  **RoundIconButton** (FAB with shadow)
+- *Inputs:* **ModernTextBox** (rounded, accent focus ring), **SearchBox**
+  (pill with 🔍), **ModernSlider** (round thumb, accent track)
+- *Progress & status:* **ModernProgressBar** (pill), **iOSProgressBar**
+  (thin blue), **Spinner** (ring that actually rotates at runtime via a
+  storyboard — and spins on the canvas too), **StatusDot**, **Badge**
+  (red counter), PillBadge, **Chip**
+- *Text:* **TitleText**, **SubtitleText**
+- *Cards & decor:* Card, **GlassCard** (translucent), **GradientPanel**
+  (purple→blue LinearGradientBrush), **SectionDivider**
+
+Shared templates are injected once no matter how many variants you drop
+(SuccessButton/DangerButton reuse ModernButton's template and differ only by
+attributes). The canvas previews all of them: outline/link/round chrome,
+pill progress with per-instance track/fill colors, spinning ring, shapes,
+inline gradient backgrounds (`<Border.Background><LinearGradientBrush>`),
+and style-lifted corner rounding on text boxes.
+
+**More designer elements + toolbox sorting.** `Ellipse` and `Rectangle`
+shapes joined the WPF toolbox (with Fill/Stroke color pickers and proper
+canvas rendering), and the toolbox now has **▤ Categorized / A–Z** sort
+buttons like the Properties panel — A–Z flattens every tool (built-ins,
+Modern, custom controls) into one alphabetical list; the search box works in
+both modes.
+
 ## 0.24.0
 
 **Per-toggle colors** (user request: "do the toggles have a color property so
