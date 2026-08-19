@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.3
+
+**Flat toolbox icons** (user report: mixed colored emoji among flat glyphs).
+Every toolbox icon that Windows rendered as a colored emoji (🔑 🖼 📅 🌲 🍏
+🔗 ⌨ and ~25 more across the WPF, Modern, WinForms, and custom-control
+catalogs) was replaced with a flat monochrome symbol that follows the editor
+theme, and the icon column now requests text presentation
+(`font-variant-emoji: text` + Segoe UI Symbol) so dual-presentation
+characters can never flip to emoji either. The properties panel's image
+button and the canvas DatePicker glyph were de-emojied to match.
+
 ## 0.25.2
 
 **Toggle labels no longer get a colored highlight box on the canvas** (user

@@ -112,31 +112,31 @@
         Button:      { icon: '▭', w: 100, h: 32,  attrs: { Content: 'Button' },   props: ['Content'], events: ['Click', 'MouseDoubleClick', 'GotFocus', 'LostFocus'], defaultEvent: 'Click' },
         Label:       { icon: 'A',  w: 90,  h: 26,  attrs: { Content: 'Label' },    props: ['Content'], events: ['MouseDown', 'MouseUp'], defaultEvent: 'MouseDown' },
         TextBlock:   { icon: '¶',  w: 110, h: 20,  attrs: { Text: 'TextBlock' },   props: ['Text', 'TextWrapping'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
-        TextBox:     { icon: '⌨', w: 160, h: 28,  attrs: { Text: '' },            props: ['Text', 'MaxLength', 'TextWrapping', 'AcceptsReturn'], events: ['TextChanged', 'KeyDown', 'KeyUp', 'GotFocus', 'LostFocus'], defaultEvent: 'TextChanged' },
-        PasswordBox: { icon: '🔑', w: 160, h: 28,  attrs: {},                      props: ['MaxLength'], events: ['PasswordChanged', 'KeyDown'], defaultEvent: 'PasswordChanged' },
+        TextBox:     { icon: '⌶', w: 160, h: 28,  attrs: { Text: '' },            props: ['Text', 'MaxLength', 'TextWrapping', 'AcceptsReturn'], events: ['TextChanged', 'KeyDown', 'KeyUp', 'GotFocus', 'LostFocus'], defaultEvent: 'TextChanged' },
+        PasswordBox: { icon: '∗', w: 160, h: 28,  attrs: {},                      props: ['MaxLength'], events: ['PasswordChanged', 'KeyDown'], defaultEvent: 'PasswordChanged' },
         CheckBox:    { icon: '☑', w: 110, h: 22,  attrs: { Content: 'CheckBox' }, props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked' },
         RadioButton: { icon: '◉', w: 120, h: 22,  attrs: { Content: 'RadioButton' }, props: ['Content', 'IsChecked', 'GroupName'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked' },
         ComboBox:    { icon: '▾', w: 140, h: 28,  attrs: {},                      props: ['SelectedIndex', 'IsEditable'], events: ['SelectionChanged'], defaultEvent: 'SelectionChanged' },
         ListBox:     { icon: '≡', w: 160, h: 120, attrs: {},                      props: ['SelectedIndex'], events: ['SelectionChanged', 'MouseDoubleClick'], defaultEvent: 'SelectionChanged' },
         DataGrid:    { icon: '▦', w: 300, h: 160, attrs: { AutoGenerateColumns: 'True' }, props: ['AutoGenerateColumns', 'IsReadOnly'], events: ['SelectionChanged'], defaultEvent: 'SelectionChanged' },
-        Image:       { icon: '🖼', w: 120, h: 90,  attrs: { Stretch: 'Uniform' },  props: ['Source', 'Stretch'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
+        Image:       { icon: '▨', w: 120, h: 90,  attrs: { Stretch: 'Uniform' },  props: ['Source', 'Stretch'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         ProgressBar: { icon: '▱', w: 180, h: 18,  attrs: { Value: '40' },         props: ['Minimum', 'Maximum', 'Value', 'IsIndeterminate'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
         Slider:      { icon: '⬌', w: 180, h: 24,  attrs: { Minimum: '0', Maximum: '100', Value: '25' }, props: ['Minimum', 'Maximum', 'Value', 'TickFrequency'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
         Border:      { icon: '▢', w: 200, h: 120, attrs: { BorderBrush: '#FF808080', BorderThickness: '1' }, props: ['BorderBrush', 'BorderThickness', 'CornerRadius', 'Padding'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         GroupBox:    { icon: '⬒', w: 220, h: 140, attrs: { Header: 'GroupBox' },  props: ['Header'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
-        DatePicker:  { icon: '📅', w: 140, h: 28,  attrs: {},                      props: ['SelectedDate'], events: ['SelectedDateChanged'], defaultEvent: 'SelectedDateChanged' },
-        Calendar:    { icon: '📆', w: 180, h: 170, attrs: {},                      props: ['SelectedDate', 'DisplayMode'], events: ['SelectedDatesChanged'], defaultEvent: 'SelectedDatesChanged' },
+        DatePicker:  { icon: '▧', w: 140, h: 28,  attrs: {},                      props: ['SelectedDate'], events: ['SelectedDateChanged'], defaultEvent: 'SelectedDateChanged' },
+        Calendar:    { icon: '▦', w: 180, h: 170, attrs: {},                      props: ['SelectedDate', 'DisplayMode'], events: ['SelectedDatesChanged'], defaultEvent: 'SelectedDatesChanged' },
         ListView:    { icon: '☰', w: 250, h: 150, attrs: {},                      props: ['SelectedIndex'], events: ['SelectionChanged', 'MouseDoubleClick'], defaultEvent: 'SelectionChanged' },
-        TreeView:    { icon: '🌲', w: 200, h: 150, attrs: {},                      props: [], events: ['SelectedItemChanged', 'MouseDoubleClick'], defaultEvent: 'SelectedItemChanged' },
-        RichTextBox: { icon: '📝', w: 220, h: 120, attrs: {},                      props: ['IsReadOnly', 'AcceptsReturn'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
+        TreeView:    { icon: '⋔', w: 200, h: 150, attrs: {},                      props: [], events: ['SelectedItemChanged', 'MouseDoubleClick'], defaultEvent: 'SelectedItemChanged' },
+        RichTextBox: { icon: '≣', w: 220, h: 120, attrs: {},                      props: ['IsReadOnly', 'AcceptsReturn'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
         Expander:    { icon: '▸', w: 220, h: 120, attrs: { Header: 'Expander', IsExpanded: 'True' }, props: ['Header', 'IsExpanded'], events: ['Expanded', 'Collapsed'], defaultEvent: 'Expanded' },
         Separator:   { icon: '─', w: 160, h: 4,   attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
         TabControl:  { icon: '⧉', w: 320, h: 200, attrs: {},                      props: [], events: ['SelectionChanged'], defaultEvent: 'SelectionChanged' },
         Ellipse:     { icon: '⬤', w: 60,  h: 60,  attrs: { Fill: '#FF7C4DFF' },   props: ['Fill', 'Stroke', 'StrokeThickness'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         Rectangle:   { icon: '▮', w: 100, h: 60,  attrs: { Fill: '#FF7C4DFF' },   props: ['Fill', 'Stroke', 'StrokeThickness', 'RadiusX', 'RadiusY'], events: ['MouseDown'], defaultEvent: 'MouseDown' },
         ContentControl: { icon: '◻', w: 180, h: 100, attrs: {},                   props: [], events: ['Loaded'], defaultEvent: 'Loaded' },
-        Frame:       { icon: '🗔', w: 220, h: 160, attrs: {},                      props: ['Source'], events: ['Navigated', 'Loaded'], defaultEvent: 'Loaded' },
-        Viewbox:     { icon: '🔍', w: 160, h: 120, attrs: { Stretch: 'Uniform' },  props: ['Stretch'], events: [], defaultEvent: 'Loaded' },
+        Frame:       { icon: '⊡', w: 220, h: 160, attrs: {},                      props: ['Source'], events: ['Navigated', 'Loaded'], defaultEvent: 'Loaded' },
+        Viewbox:     { icon: '⌕', w: 160, h: 120, attrs: { Stretch: 'Uniform' },  props: ['Stretch'], events: [], defaultEvent: 'Loaded' },
         UniformGrid: { icon: '▦', w: 220, h: 160, attrs: {},                      props: ['Rows', 'Columns'], events: [], defaultEvent: 'Loaded' },
         Grid:        { icon: '#',  w: 260, h: 180, attrs: {},                      props: [], events: [], defaultEvent: 'Loaded' },
         StackPanel:  { icon: '☷', w: 220, h: 160, attrs: {},                      props: ['Orientation'], events: [], defaultEvent: 'Loaded' },
@@ -468,7 +468,7 @@
             styleKey: 'UimToggleSwitch'
         },
         iOSToggle: {
-            icon: '🍏', w: 90, h: 20, noSize: true, element: 'CheckBox',
+            icon: '⊙', w: 90, h: 20, noSize: true, element: 'CheckBox',
             attrs: { Content: 'Toggle', Style: '{StaticResource UimToggleSwitch}', Background: '#FF34C759', BorderBrush: '#FFE5E5EA' },
             props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked',
             styleKey: 'UimToggleSwitch'
@@ -499,7 +499,7 @@
             styleKey: 'UimOutlineButton'
         },
         LinkButton: {
-            icon: '🔗', w: 80, h: 22, noSize: true, element: 'Button',
+            icon: '∾', w: 80, h: 22, noSize: true, element: 'Button',
             attrs: { Content: 'Learn more', Style: '{StaticResource UimLinkButton}' },
             props: ['Content'], events: ['Click'], defaultEvent: 'Click',
             styleKey: 'UimLinkButton'
@@ -512,13 +512,13 @@
         },
         // ---- inputs
         ModernTextBox: {
-            icon: '⌨', w: 180, h: 34, element: 'TextBox',
+            icon: '⌶', w: 180, h: 34, element: 'TextBox',
             attrs: { Text: '', Style: '{StaticResource UimModernTextBox}' },
             props: ['Text', 'MaxLength'], events: ['TextChanged', 'KeyDown'], defaultEvent: 'TextChanged',
             styleKey: 'UimModernTextBox'
         },
         SearchBox: {
-            icon: '🔍', w: 200, h: 32, element: 'TextBox',
+            icon: '⌕', w: 200, h: 32, element: 'TextBox',
             attrs: { Text: '', Style: '{StaticResource UimSearchBox}' },
             props: ['Text', 'MaxLength'], events: ['TextChanged', 'KeyDown'], defaultEvent: 'TextChanged',
             styleKey: 'UimSearchBox'
@@ -601,7 +601,7 @@
             }
         },
         GlassCard: {
-            icon: '◽', w: 220, h: 140, element: 'Border',
+            icon: '▣', w: 220, h: 140, element: 'Border',
             attrs: {
                 CornerRadius: '12', Background: '#66FFFFFF',
                 BorderBrush: '#80FFFFFF', BorderThickness: '1', Padding: '16'
@@ -2070,7 +2070,7 @@
             }
             case 'DatePicker':
                 inner.classList.add('ff-look-input');
-                inner.innerHTML = 'Select a date <span class="ff-combo-arrow">📅</span>';
+                inner.innerHTML = 'Select a date <span class="ff-combo-arrow">▦</span>';
                 break;
             case 'Calendar':
                 inner.classList.add('ff-look-list', 'ff-look-calendar');
@@ -3033,7 +3033,7 @@
             search = document.createElement('input');
             search.id = 'ff-tool-search';
             search.type = 'text';
-            search.placeholder = '🔍 Search Toolbox';
+            search.placeholder = '⌕ Search Toolbox';
             search.setAttribute('aria-label', 'Search toolbox');
             search.spellcheck = false;
             search.addEventListener('input', () => filterToolbox(search.value));
@@ -3121,7 +3121,7 @@
                 if (sec === 'Project Controls') { addSection(sec, true); }
                 else if (tools.length) { addSection(sec); }
                 for (const [type, c] of tools) {
-                    const item = addTool(type, { icon: '🧩' });
+                    const item = addTool(type, { icon: '⬡' });
                     item.title = `${c.qualified ?? type}${c.base ? ` (inherits ${c.base})` : ''} — drag onto the form, or double-click to add`;
                 }
                 if (sec === 'Project Controls' && !tools.length) {
@@ -3137,9 +3137,9 @@
         if (toolboxSortAz) {
             const all = docMode === 'winforms'
                 ? [...Object.entries(WF_CONTROLS), ...Object.entries(WF_TRAY),
-                    ...Object.keys(WF_CUSTOM).map(t => [t, { icon: '🧩' }])]
+                    ...Object.keys(WF_CUSTOM).map(t => [t, { icon: '⬡' }])]
                 : [...Object.entries(CONTROLS), ...Object.entries(MODERN_CONTROLS),
-                    ...Object.keys(XAML_CUSTOM).map(t => [t, { icon: '🧩' }])];
+                    ...Object.keys(XAML_CUSTOM).map(t => [t, { icon: '⬡' }])];
             for (const [type, def] of all.sort((a, b) => a[0].localeCompare(b[0]))) {
                 addTool(type, def);
             }
@@ -3815,7 +3815,7 @@
             const pick = document.createElement('button');
             pick.type = 'button';
             pick.className = 'ff-img-btn';
-            pick.textContent = '🖼';
+            pick.textContent = '▨';
             pick.title = 'Use an image as the background (imports it into the project and writes an ImageBrush)';
             pick.addEventListener('click', () => {
                 pendingXamlImage = { el, prop };
@@ -5104,8 +5104,8 @@
         // ---- Common Controls
         Button:         { sec: 'Common Controls', icon: '▭', w: 75,  h: 23,  text: 'button',      props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'TextImageRelation', 'BackgroundImage', 'BackgroundImageLayout', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic', 'AutoEllipsis', 'DialogResult'], events: ['Click', 'MouseDown', 'MouseUp', 'DoubleClick'], defaultEvent: 'Click' },
         Label:          { sec: 'Common Controls', icon: 'A',  w: 60,  h: 15,  text: 'label',       props: ['Text', 'TextAlign', 'Image', 'ImageAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
-        LinkLabel:      { sec: 'Common Controls', icon: '🔗', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'TextAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis', 'LinkColor'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
-        TextBox:        { sec: 'Common Controls', icon: '⌨', w: 100, h: 23,  text: '',            props: ['Text', 'PlaceholderText', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'PasswordChar', 'CharacterCasing', 'ScrollBars', 'TextAlign'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
+        LinkLabel:      { sec: 'Common Controls', icon: '∾', w: 80,  h: 15,  text: 'linkLabel',   props: ['Text', 'TextAlign', 'BorderStyle', 'UseMnemonic', 'AutoEllipsis', 'LinkColor'], events: ['LinkClicked', 'Click'], defaultEvent: 'LinkClicked' },
+        TextBox:        { sec: 'Common Controls', icon: '⌶', w: 100, h: 23,  text: '',            props: ['Text', 'PlaceholderText', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'PasswordChar', 'CharacterCasing', 'ScrollBars', 'TextAlign'], events: ['TextChanged', 'KeyDown', 'KeyPress', 'Leave'], defaultEvent: 'TextChanged' },
         MaskedTextBox:  { sec: 'Common Controls', icon: '#',  w: 100, h: 23,  text: '',            props: ['Text', 'Mask', 'ReadOnly', 'TextAlign'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
         RichTextBox:    { sec: 'Common Controls', icon: '¶',  w: 150, h: 96,  text: '',            props: ['Text', 'ReadOnly', 'Multiline', 'WordWrap', 'MaxLength', 'ScrollBars'], events: ['TextChanged'], defaultEvent: 'TextChanged' },
         CheckBox:       { sec: 'Common Controls', icon: '☑', w: 90,  h: 19,  text: 'checkBox',    props: ['Text', 'Checked', 'ThreeState', 'TextAlign', 'CheckAlign', 'Image', 'ImageAlign', 'FlatStyle', 'UseVisualStyleBackColor', 'UseMnemonic'], events: ['CheckedChanged', 'Click'], defaultEvent: 'CheckedChanged' },
@@ -5115,16 +5115,16 @@
         DomainUpDown:   { sec: 'Common Controls', icon: '⇅', w: 120, h: 23,  text: '',            props: ['Text', 'Items', 'ReadOnly', 'Sorted', 'Wrap'], events: ['SelectedItemChanged'], defaultEvent: 'SelectedItemChanged' },
         ListBox:        { sec: 'Common Controls', icon: '≡', w: 120, h: 94,  text: '',            props: ['Items', 'SelectionMode', 'Sorted', 'MultiColumn'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
         ListView:       { sec: 'Common Controls', icon: '☰', w: 160, h: 97,  text: '',            props: ['View', 'FullRowSelect', 'GridLines', 'MultiSelect', 'CheckBoxes'], events: ['SelectedIndexChanged', 'DoubleClick'], defaultEvent: 'SelectedIndexChanged' },
-        TreeView:       { sec: 'Common Controls', icon: '🌲', w: 160, h: 97,  text: '',            props: ['CheckBoxes', 'ShowLines', 'ShowRootLines'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
-        PictureBox:     { sec: 'Common Controls', icon: '🖼', w: 100, h: 50,  text: '',            props: ['Image', 'SizeMode', 'BorderStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
+        TreeView:       { sec: 'Common Controls', icon: '⋔', w: 160, h: 97,  text: '',            props: ['CheckBoxes', 'ShowLines', 'ShowRootLines'], events: ['AfterSelect', 'DoubleClick'], defaultEvent: 'AfterSelect' },
+        PictureBox:     { sec: 'Common Controls', icon: '▨', w: 100, h: 50,  text: '',            props: ['Image', 'SizeMode', 'BorderStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Click', 'DoubleClick'], defaultEvent: 'Click' },
         ProgressBar:    { sec: 'Common Controls', icon: '▱', w: 100, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Style'], events: ['Click'], defaultEvent: 'Click' },
         TrackBar:       { sec: 'Common Controls', icon: '⬌', w: 104, h: 45,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'TickFrequency', 'SmallChange', 'LargeChange', 'Orientation'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
         NumericUpDown:  { sec: 'Common Controls', icon: '↕', w: 120, h: 23,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'Increment', 'DecimalPlaces', 'ThousandsSeparator', 'ReadOnly', 'TextAlign'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        DateTimePicker: { sec: 'Common Controls', icon: '📅', w: 200, h: 23,  text: '',            props: ['Format', 'CustomFormat', 'ShowUpDown'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
-        MonthCalendar:  { sec: 'Common Controls', icon: '📆', w: 227, h: 162, text: '', noSize: true, props: ['ShowToday', 'ShowTodayCircle', 'ShowWeekNumbers', 'MaxSelectionCount'], events: ['DateChanged'], defaultEvent: 'DateChanged' },
+        DateTimePicker: { sec: 'Common Controls', icon: '▧', w: 200, h: 23,  text: '',            props: ['Format', 'CustomFormat', 'ShowUpDown'], events: ['ValueChanged'], defaultEvent: 'ValueChanged' },
+        MonthCalendar:  { sec: 'Common Controls', icon: '▦', w: 227, h: 162, text: '', noSize: true, props: ['ShowToday', 'ShowTodayCircle', 'ShowWeekNumbers', 'MaxSelectionCount'], events: ['DateChanged'], defaultEvent: 'DateChanged' },
         HScrollBar:     { sec: 'Common Controls', icon: '⇔', w: 80,  h: 17,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'SmallChange', 'LargeChange'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
         VScrollBar:     { sec: 'Common Controls', icon: '⇕', w: 17,  h: 80,  text: '',            props: ['Minimum', 'Maximum', 'Value', 'SmallChange', 'LargeChange'], events: ['Scroll', 'ValueChanged'], defaultEvent: 'Scroll' },
-        WebBrowser:     { sec: 'Common Controls', icon: '🌐', w: 250, h: 150, text: '',            props: ['AllowNavigation', 'ScriptErrorsSuppressed'], events: ['DocumentCompleted', 'Navigated'], defaultEvent: 'DocumentCompleted' },
+        WebBrowser:     { sec: 'Common Controls', icon: '◍', w: 250, h: 150, text: '',            props: ['AllowNavigation', 'ScriptErrorsSuppressed'], events: ['DocumentCompleted', 'Navigated'], defaultEvent: 'DocumentCompleted' },
         PropertyGrid:   { sec: 'Common Controls', icon: '▤', w: 130, h: 130, text: '',            props: ['HelpVisible', 'ToolbarVisible', 'PropertySort'], events: ['PropertyValueChanged'], defaultEvent: 'PropertyValueChanged' },
         // ---- Containers
         GroupBox:        { sec: 'Containers', icon: '⬒', w: 200, h: 100, text: 'groupBox',    props: ['Text', 'FlatStyle', 'BackgroundImage', 'BackgroundImageLayout'], events: ['Enter'], defaultEvent: 'Enter' },
@@ -5139,7 +5139,7 @@
         TabControl:      { sec: 'Containers', icon: '⧉', w: 300, h: 200, text: '',            props: ['SelectedIndex', 'Alignment'], events: ['SelectedIndexChanged'], defaultEvent: 'SelectedIndexChanged' },
         // ---- Menus & Toolbars
         MenuStrip:      { sec: 'Menus & Toolbars', icon: '☰', w: 0,   h: 24,  text: '',            props: ['Items', 'BackColor'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
-        ToolStrip:      { sec: 'Menus & Toolbars', icon: '🔧', w: 0,   h: 25,  text: '',            props: ['Items', 'BackColor', 'GripStyle'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
+        ToolStrip:      { sec: 'Menus & Toolbars', icon: '⋯', w: 0,   h: 25,  text: '',            props: ['Items', 'BackColor', 'GripStyle'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
         StatusStrip:    { sec: 'Menus & Toolbars', icon: '▁', w: 0,   h: 22,  text: '',            props: ['Items', 'BackColor', 'SizingGrip'], events: ['ItemClicked'], defaultEvent: 'ItemClicked' },
         // ---- Data
         DataGridView:   { sec: 'Data', icon: '▦', w: 240, h: 150, text: '',            props: ['ReadOnly', 'AllowUserToAddRows', 'AllowUserToDeleteRows', 'MultiSelect', 'RowHeadersVisible'], events: ['CellClick', 'CellValueChanged', 'SelectionChanged'], defaultEvent: 'CellClick' }
@@ -5155,28 +5155,28 @@
      */
     const WF_TRAY = {
         // ---- Components
-        Timer:               { sec: 'Components', icon: '⏱', ctor: 'components', props: ['Interval', 'Enabled'], events: ['Tick'], defaultEvent: 'Tick' },
-        ToolTip:             { sec: 'Components', icon: '💬', ctor: 'components', props: ['AutomaticDelay', 'InitialDelay', 'ReshowDelay', 'ShowAlways'], events: ['Popup'], defaultEvent: 'Popup' },
+        Timer:               { sec: 'Components', icon: '◷', ctor: 'components', props: ['Interval', 'Enabled'], events: ['Tick'], defaultEvent: 'Tick' },
+        ToolTip:             { sec: 'Components', icon: '❝', ctor: 'components', props: ['AutomaticDelay', 'InitialDelay', 'ReshowDelay', 'ShowAlways'], events: ['Popup'], defaultEvent: 'Popup' },
         ContextMenuStrip:    { sec: 'Components', icon: '≣', ctor: 'components', props: ['Items'], events: ['Opening', 'ItemClicked'], defaultEvent: 'Opening' },
-        NotifyIcon:          { sec: 'Components', icon: '🔔', ctor: 'components', props: ['Text', 'Icon', 'Visible', 'BalloonTipTitle', 'BalloonTipText'], events: ['Click', 'DoubleClick', 'MouseClick'], defaultEvent: 'DoubleClick' },
-        BackgroundWorker:    { sec: 'Components', icon: '⚙', ctor: '', ns: 'System.ComponentModel', props: ['WorkerReportsProgress', 'WorkerSupportsCancellation'], events: ['DoWork', 'ProgressChanged', 'RunWorkerCompleted'], defaultEvent: 'DoWork' },
-        ImageList:           { sec: 'Components', icon: '🖼', ctor: 'components', props: ['ColorDepth', 'TransparentColor'], events: [], defaultEvent: 'Disposed' },
-        ErrorProvider:       { sec: 'Components', icon: '⚠', ctor: 'components', props: ['BlinkRate'], events: [], defaultEvent: 'Disposed' },
-        HelpProvider:        { sec: 'Components', icon: '❓', ctor: '',           props: ['HelpNamespace'], events: [], defaultEvent: 'Disposed' },
-        BindingSource:       { sec: 'Components', icon: '🔗', ctor: 'components', props: ['DataMember'], events: ['CurrentChanged'], defaultEvent: 'CurrentChanged' },
-        FileSystemWatcher:   { sec: 'Components', icon: '👁', ctor: '', ns: 'System.IO', props: ['Path', 'Filter', 'IncludeSubdirectories', 'EnableRaisingEvents'], events: ['Changed', 'Created', 'Deleted', 'Renamed'], defaultEvent: 'Changed' },
-        Process:             { sec: 'Components', icon: '⚡', ctor: '', ns: 'System.Diagnostics', props: ['EnableRaisingEvents'], events: ['Exited'], defaultEvent: 'Exited' },
+        NotifyIcon:          { sec: 'Components', icon: '⍾', ctor: 'components', props: ['Text', 'Icon', 'Visible', 'BalloonTipTitle', 'BalloonTipText'], events: ['Click', 'DoubleClick', 'MouseClick'], defaultEvent: 'DoubleClick' },
+        BackgroundWorker:    { sec: 'Components', icon: '⊛', ctor: '', ns: 'System.ComponentModel', props: ['WorkerReportsProgress', 'WorkerSupportsCancellation'], events: ['DoWork', 'ProgressChanged', 'RunWorkerCompleted'], defaultEvent: 'DoWork' },
+        ImageList:           { sec: 'Components', icon: '▨', ctor: 'components', props: ['ColorDepth', 'TransparentColor'], events: [], defaultEvent: 'Disposed' },
+        ErrorProvider:       { sec: 'Components', icon: '∆', ctor: 'components', props: ['BlinkRate'], events: [], defaultEvent: 'Disposed' },
+        HelpProvider:        { sec: 'Components', icon: '?', ctor: '',           props: ['HelpNamespace'], events: [], defaultEvent: 'Disposed' },
+        BindingSource:       { sec: 'Components', icon: '∾', ctor: 'components', props: ['DataMember'], events: ['CurrentChanged'], defaultEvent: 'CurrentChanged' },
+        FileSystemWatcher:   { sec: 'Components', icon: '◉', ctor: '', ns: 'System.IO', props: ['Path', 'Filter', 'IncludeSubdirectories', 'EnableRaisingEvents'], events: ['Changed', 'Created', 'Deleted', 'Renamed'], defaultEvent: 'Changed' },
+        Process:             { sec: 'Components', icon: 'ϟ', ctor: '', ns: 'System.Diagnostics', props: ['EnableRaisingEvents'], events: ['Exited'], defaultEvent: 'Exited' },
         // ---- Dialogs
-        OpenFileDialog:      { sec: 'Dialogs', icon: '📂', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory', 'Multiselect'], events: ['FileOk'], defaultEvent: 'FileOk' },
-        SaveFileDialog:      { sec: 'Dialogs', icon: '💾', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory'], events: ['FileOk'], defaultEvent: 'FileOk' },
-        FolderBrowserDialog: { sec: 'Dialogs', icon: '🗂', ctor: '',           props: ['Description', 'SelectedPath'], events: [], defaultEvent: 'HelpRequest' },
-        ColorDialog:         { sec: 'Dialogs', icon: '🎨', ctor: '',           props: ['AllowFullOpen', 'FullOpen'], events: [], defaultEvent: 'HelpRequest' },
-        FontDialog:          { sec: 'Dialogs', icon: '🅵', ctor: '',           props: ['ShowColor', 'ShowEffects'], events: [], defaultEvent: 'HelpRequest' },
+        OpenFileDialog:      { sec: 'Dialogs', icon: '❏', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory', 'Multiselect'], events: ['FileOk'], defaultEvent: 'FileOk' },
+        SaveFileDialog:      { sec: 'Dialogs', icon: '⍗', ctor: '',           props: ['Title', 'Filter', 'FileName', 'DefaultExt', 'InitialDirectory'], events: ['FileOk'], defaultEvent: 'FileOk' },
+        FolderBrowserDialog: { sec: 'Dialogs', icon: '❐', ctor: '',           props: ['Description', 'SelectedPath'], events: [], defaultEvent: 'HelpRequest' },
+        ColorDialog:         { sec: 'Dialogs', icon: '◧', ctor: '',           props: ['AllowFullOpen', 'FullOpen'], events: [], defaultEvent: 'HelpRequest' },
+        FontDialog:          { sec: 'Dialogs', icon: 'Ƒ', ctor: '',           props: ['ShowColor', 'ShowEffects'], events: [], defaultEvent: 'HelpRequest' },
         // ---- Printing
-        PrintDialog:         { sec: 'Printing', icon: '🖨', ctor: '',           props: ['AllowSomePages', 'UseEXDialog'], events: [], defaultEvent: 'HelpRequest' },
-        PrintDocument:       { sec: 'Printing', icon: '📄', ctor: '', ns: 'System.Drawing.Printing', props: ['DocumentName'], events: ['PrintPage', 'BeginPrint', 'EndPrint'], defaultEvent: 'PrintPage' },
-        PrintPreviewDialog:  { sec: 'Printing', icon: '🔍', ctor: '',           props: [], events: ['Load'], defaultEvent: 'Load' },
-        PageSetupDialog:     { sec: 'Printing', icon: '📐', ctor: '',           props: ['AllowMargins', 'AllowOrientation', 'AllowPaper'], events: [], defaultEvent: 'HelpRequest' }
+        PrintDialog:         { sec: 'Printing', icon: '⎙', ctor: '',           props: ['AllowSomePages', 'UseEXDialog'], events: [], defaultEvent: 'HelpRequest' },
+        PrintDocument:       { sec: 'Printing', icon: '⎗', ctor: '', ns: 'System.Drawing.Printing', props: ['DocumentName'], events: ['PrintPage', 'BeginPrint', 'EndPrint'], defaultEvent: 'PrintPage' },
+        PrintPreviewDialog:  { sec: 'Printing', icon: '⌕', ctor: '',           props: [], events: ['Load'], defaultEvent: 'Load' },
+        PageSetupDialog:     { sec: 'Printing', icon: '⊿', ctor: '',           props: ['AllowMargins', 'AllowOrientation', 'AllowPaper'], events: [], defaultEvent: 'HelpRequest' }
     };
 
     /** Item type generated for each strip's Items collection. */
@@ -5295,7 +5295,7 @@
         const baseDef = baseType ? WF_CONTROLS[baseType] : null;
         return {
             sec: custom.source === 'library' ? 'Custom Library' : 'Project Controls',
-            icon: '🧩',
+            icon: '⬡',
             w: custom.width ?? baseDef?.w ?? 150,
             h: custom.height ?? baseDef?.h ?? 46,
             text: baseDef?.text ?? '',
@@ -5315,7 +5315,7 @@
         if (!custom) { return undefined; }
         const baseDef = CONTROLS[custom.base];
         return {
-            icon: '🧩',
+            icon: '⬡',
             w: custom.width ?? baseDef?.w ?? 160,
             h: custom.height ?? baseDef?.h ?? 100,
             attrs: {},

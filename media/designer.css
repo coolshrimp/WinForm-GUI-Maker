@@ -235,6 +235,12 @@ html, body {
     width: 18px;
     text-align: center;
     opacity: 0.85;
+    /* Flat, theme-colored glyphs: prefer the monochrome symbol font and ask
+       for text presentation so dual-presentation characters (☑ ⏱ …) never
+       render as colored emoji. */
+    font-family: 'Segoe UI Symbol', 'Segoe UI', var(--vscode-font-family), sans-serif;
+    font-variant-emoji: text;
+    color: var(--vscode-foreground);
 }
 
 /* Section header separating controls from non-visual components. */
