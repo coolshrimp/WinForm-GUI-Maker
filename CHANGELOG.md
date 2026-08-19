@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.25.2
+
+**Toggle labels no longer get a colored highlight box on the canvas** (user
+report). The generic "style-aware chrome" pass painted every styled
+control's `Background`/`BorderBrush`/`CornerRadius` onto its rendered
+surface — correct for buttons and text boxes, wrong for toggle-templated
+CheckBoxes, where those properties are the TRACK colors. Once a toggle style
+declared `Background` (the new per-instance color plumbing), the whole
+control — including the label text — got painted with a rounded accent
+highlight. Toggle-rendered controls are now exempt from surface chrome:
+only the switch track uses those brushes, the label stays plain (Foreground
+still applies). Also removed a duplicated corner-radius application.
+
 ## 0.25.1
 
 Property-panel fixes from live use:

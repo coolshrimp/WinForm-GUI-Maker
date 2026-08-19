@@ -2095,19 +2095,24 @@
 
         // Style-aware chrome: implicit/keyed styles (App.xaml included)
         // restyle the default look so themed apps preview like they run.
-        const sBg = resolveBrush(styleProp(el, 'Background'));
+        // Toggle-templated controls are exempt from surface chrome — their
+        // Background/BorderBrush are the TRACK colors and their template's
+        // CornerRadius belongs to the track, not a highlight box around the
+        // label text.
+        const toggleLook = (type === 'CheckBox' || type === 'ToggleButton') && !!styleToggleInfo(el);
+        const sBg = toggleLook ? '' : resolveBrush(styleProp(el, 'Background'));
         if (sBg) { inner.style.background = sBg; }
         const sFg = resolveBrush(styleProp(el, 'Foreground'));
         if (sFg) { inner.style.color = sFg; }
-        const sBb = resolveBrush(styleProp(el, 'BorderBrush'));
+        const sBb = toggleLook ? '' : resolveBrush(styleProp(el, 'BorderBrush'));
         if (sBb) { inner.style.borderColor = sBb; inner.style.borderStyle = 'solid'; }
-        const sBt = styleProp(el, 'BorderThickness');
+        const sBt = toggleLook ? null : styleProp(el, 'BorderThickness');
         if (sBt && !String(sBt).includes('{')) {
             const t = parseMargin(sBt);
             inner.style.borderStyle = 'solid';
             inner.style.borderWidth = `${t.t}px ${t.r}px ${t.b}px ${t.l}px`;
         }
-        const sCr = styleProp(el, 'CornerRadius'); // real or template-derived
+        const sCr = toggleLook ? null : styleProp(el, 'CornerRadius'); // real or template-derived
         if (sCr && !String(sCr).includes('{')) {
             inner.style.borderRadius = `${parseFloat(sCr) || 0}px`;
         }
@@ -2120,12 +2125,6 @@
         if (hca) {
             inner.style.justifyContent =
                 hca === 'Left' ? 'flex-start' : hca === 'Right' ? 'flex-end' : 'center';
-        }
-        // Corner rounding lifted from the style (its template's first Border)
-        // — rounded text boxes, pill search fields, modern chrome in general.
-        const cr = styleProp(el, 'CornerRadius');
-        if (cr && !String(cr).includes('{') && !inner.style.borderRadius) {
-            inner.style.borderRadius = `${parseFloat(cr) || 0}px`;
         }
         return inner;
     }
