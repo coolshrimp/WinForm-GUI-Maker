@@ -134,6 +134,54 @@ test('each ToggleSwitch carries its own colors via Background/BorderBrush', () =
     assert.notEqual(def, custom);
 });
 
+test('an app-level toggle style with StaticResource colors resolves for the swatches', () => {
+    // Mirrors csContextMenuEditor's App.xaml: colors baked into the template
+    // (off = literal, on = {StaticResource Accent}), hover via Opacity.
+    const { api } = loadDesigner();
+    api.setDoc('MainWindow.xaml', `<Window x:Class="App.W"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid><CheckBox x:Name="ShiftToggle" Content="Shift menu" Style="{StaticResource ToggleSwitch}"/></Grid>
+</Window>`);
+    api.setAppResources([`<Application xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <SolidColorBrush x:Key="Accent">#FF7B4DC8</SolidColorBrush>
+        <Style x:Key="ToggleSwitch" TargetType="CheckBox">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="track" Width="38" Height="20" CornerRadius="10" Background="#FFCFC7DA">
+                                <Ellipse x:Name="thumb" Width="14" Height="14" Fill="White" HorizontalAlignment="Left"/>
+                            </Border>
+                            <ContentPresenter/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="track" Property="Background" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="thumb" Property="HorizontalAlignment" Value="Right"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="track" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Application.Resources>
+</Application>`]);
+    const info = api.toggleInfoAt('0/0');
+    assert.ok(info, 'app toggle style detected');
+    assert.equal(info.on, '{StaticResource Accent}');
+    assert.equal(info.track, '#FFCFC7DA');
+    // The swatch fallback resolves the resource to the actual purple.
+    assert.equal(api.templateBrushAt('0/0', info.on), 'rgba(123,77,200,1.000)');
+    // TemplateBinding forms resolve per instance once the style defers to it.
+    api.elAtPath('0/0').setAttribute('Background', '#FF00C853');
+    assert.equal(api.templateBrushAt('0/0', '{TemplateBinding Background}'), 'rgba(0,200,83,1.000)');
+});
+
 test('the injected UimToggleSwitch is recognized by the generic detector', () => {
     const { api } = loadDesigner();
     api.setDoc('MainWindow.xaml', `<Window x:Class="App.W"

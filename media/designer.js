@@ -172,6 +172,9 @@
                         <Setter TargetName="UimTrack" Property="Background" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}"/>
                         <Setter TargetName="UimThumb" Property="HorizontalAlignment" Value="Right"/>
                     </Trigger>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="UimTrack" Property="Opacity" Value="0.85"/>
+                    </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
                         <Setter Property="Opacity" Value="0.5"/>
                     </Trigger>
@@ -1741,26 +1744,31 @@
 
     /** Draw a toggle switch (track + thumb + label) into `inner`, using the
      *  template's own brushes when they resolve. */
+    /**
+     * Resolve a template brush that may defer to the INSTANCE — the
+     * "{TemplateBinding X}" / "{Binding X, RelativeSource TemplatedParent}"
+     * forms that give each toggle its own colors. Resolved against the
+     * element (attribute first, then its style's defaults).
+     */
+    function resolveTemplateBrush(el, raw) {
+        if (!raw) { return ''; }
+        const bound = /^\{\s*TemplateBinding\s+(\w+)\s*\}$/.exec(raw)
+            ?? /^\{\s*Binding\s+(\w+)\s*,\s*RelativeSource=\{RelativeSource\s+TemplatedParent\}\s*\}$/.exec(raw);
+        if (bound) { return resolveBrush(styleProp(el, bound[1])) || ''; }
+        return resolveBrush(raw) || '';
+    }
+
     function renderToggleSwitch(inner, el, label, toggle) {
         const on = el.getAttribute('IsChecked') === 'True';
-        // Template brushes may defer to the INSTANCE ("{TemplateBinding
-        // BorderBrush}" / "{Binding X, RelativeSource TemplatedParent}") —
-        // that is how each toggle gets its own colors. Resolve those against
-        // the element (attribute first, then its style's defaults).
-        const brushOf = raw => {
-            if (!raw) { return ''; }
-            const bound = /^\{\s*TemplateBinding\s+(\w+)\s*\}$/.exec(raw)
-                ?? /^\{\s*Binding\s+(\w+)\s*,\s*RelativeSource=\{RelativeSource\s+TemplatedParent\}\s*\}$/.exec(raw);
-            if (bound) { return resolveBrush(styleProp(el, bound[1])) || ''; }
-            return resolveBrush(raw) || '';
-        };
         const track = document.createElement('span');
         track.className = `ff-toggle${on ? ' ff-toggle-on' : ''}`;
-        const trackBrush = on ? brushOf(toggle.on) : brushOf(toggle.track);
+        const trackBrush = on
+            ? resolveTemplateBrush(el, toggle.on)
+            : resolveTemplateBrush(el, toggle.track);
         if (trackBrush) { track.style.background = trackBrush; }
         const thumb = document.createElement('span');
         thumb.className = 'ff-toggle-thumb';
-        const thumbBrush = brushOf(toggle.thumb);
+        const thumbBrush = resolveTemplateBrush(el, toggle.thumb);
         if (thumbBrush) { thumb.style.background = thumbBrush; }
         track.appendChild(thumb);
         inner.appendChild(track);
@@ -3473,9 +3481,30 @@
             if (pop) { pop.remove(); pop = null; }
             if (activeComboClose === close) { activeComboClose = null; }
             document.removeEventListener('mousedown', onOutside, true);
+            document.removeEventListener('scroll', reposition, true);
+            if (typeof window !== 'undefined') { window.removeEventListener('resize', reposition); }
         };
         const onOutside = e => {
             if (pop && e.target !== input && e.target !== btn && !pop.contains(e.target)) { close(); }
+        };
+        // Pin the popup to its input: place below (or above when cramped),
+        // clamp inside the viewport, and FOLLOW the anchor when the panel
+        // scrolls or the window resizes — a popup that drifts away from its
+        // row or slides off-screen just reads as broken.
+        const reposition = () => {
+            if (!pop) { return; }
+            if (input.isConnected === false) { close(); return; }
+            const r = input.getBoundingClientRect();
+            const vw = (typeof window !== 'undefined' && window.innerWidth) || 10000;
+            const vh = (typeof window !== 'undefined' && window.innerHeight) || 10000;
+            if (r.bottom < 0 || r.top > vh) { close(); return; } // anchor scrolled away
+            pop.style.minWidth = `${Math.max(140, r.width)}px`;
+            const w = pop.offsetWidth || 140;
+            const h = pop.offsetHeight || 0;
+            pop.style.left = `${Math.max(4, Math.min(r.left, vw - w - 4))}px`;
+            pop.style.top = r.bottom + h + 4 > vh
+                ? `${Math.max(4, r.top - h - 2)}px`
+                : `${r.bottom + 2}px`;
         };
         const apply = value => {
             input.value = value;
@@ -3501,23 +3530,18 @@
             activeComboClose = close;
             pop = document.createElement('div');
             pop.className = 'ff-combo-pop';
-            const r = input.getBoundingClientRect();
-            pop.style.left = `${r.left}px`;
-            pop.style.top = `${r.bottom + 2}px`;
-            pop.style.minWidth = `${Math.max(140, r.width)}px`;
             document.body.appendChild(pop);
             fill('');
-            // Flip upward when there is no room below.
-            if (typeof window !== 'undefined' && window.innerHeight
-                && r.bottom + pop.offsetHeight + 4 > window.innerHeight) {
-                pop.style.top = `${Math.max(4, r.top - pop.offsetHeight - 2)}px`;
-            }
+            reposition();
             document.addEventListener('mousedown', onOutside, true);
+            document.addEventListener('scroll', reposition, true);
+            if (typeof window !== 'undefined') { window.addEventListener('resize', reposition); }
         };
         btn.addEventListener('mousedown', e => { e.preventDefault(); open(); });
         input.addEventListener('input', () => {
             if (!pop) { open(); }
             fill(input.value.trim().toLowerCase());
+            reposition(); // the filtered list changes height
         });
         input.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); } });
     }
@@ -3650,18 +3674,25 @@
         // Toggle-styled controls: friendly OnColor / OffColor rows that map
         // to the template's per-instance brushes (Background / BorderBrush),
         // replacing those raw rows so there is one obvious place to recolor.
-        const toggleAlias = !isWindow && styleToggleInfo(el)
-            ? [['OnColor', 'Background', 'Track color while the toggle is ON (checked). Stored as Background — the template binds to it.'],
-               ['OffColor', 'BorderBrush', 'Track color while the toggle is OFF (unchecked). Stored as BorderBrush — the template binds to it.']]
+        const toggleInfo = !isWindow ? styleToggleInfo(el) : null;
+        const toggleAlias = toggleInfo
+            ? [['OnColor', 'Background', toggleInfo.on,
+                'Track color while the toggle is ON (checked). Stored as Background — templates that use TemplateBinding pick it up per toggle; hard-coded templates show their own color here until restyled.'],
+               ['OffColor', 'BorderBrush', toggleInfo.track,
+                'Track color while the toggle is OFF (unchecked). Stored as BorderBrush — templates that use TemplateBinding pick it up per toggle.']]
             : null;
         if (toggleAlias) {
-            for (const [label, prop, desc] of toggleAlias) {
+            for (const [label, prop, templateBrush, desc] of toggleAlias) {
                 const write = v => {
                     removePropertyElement(el, prop);
                     if (v === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, v); }
                     commit();
                 };
-                const node = xamlBrushRow(el, prop, write, label);
+                // Swatch fallback: the color the template actually paints
+                // (resolves StaticResources and TemplatedParent bindings), so
+                // a purple app toggle shows purple here, not black.
+                const node = xamlBrushRow(el, prop, write, label,
+                    resolveTemplateBrush(el, templateBrush));
                 if (el.getAttribute(prop) !== null) { node.classList.add('ff-set'); }
                 attachDesc(node, label, desc);
                 rows.push({ label, cat: 'Appearance', node });
@@ -3735,7 +3766,7 @@
     }
 
     /** Brush row: color swatch (native picker) + named-color text + image button. */
-    function xamlBrushRow(el, prop, write, label = prop) {
+    function xamlBrushRow(el, prop, write, label = prop, fallbackCss = '') {
         const row = document.createElement('div');
         row.className = 'ff-prop-row';
         const lab = document.createElement('label');
@@ -3749,8 +3780,10 @@
         swatch.type = 'color';
         swatch.className = 'ff-color-swatch';
         // Show the effective color: explicit value, {StaticResource} brushes
-        // resolved through App.xaml, else the style-resolved fallback.
-        swatch.value = cssColorToHex(resolveBrush(raw) || resolveBrush(styleProp(el, prop) || ''));
+        // resolved through App.xaml, the style-resolved value, else the
+        // caller's fallback (e.g. a toggle template's baked-in track color).
+        swatch.value = cssColorToHex(
+            resolveBrush(raw) || resolveBrush(styleProp(el, prop) || '') || fallbackCss);
         swatch.title = 'Pick a color';
         swatch.addEventListener('change', () => write(swatch.value.toUpperCase()));
         row.appendChild(swatch);
@@ -3765,17 +3798,19 @@
             if (v.startsWith('(image)')) { renderPanel(); return; } // display text, not a value
             write(v);
         });
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { input.blur(); }
+            e.stopPropagation();
+        });
+        row.appendChild(input);
+        // Attach AFTER the input is in the row so the ▾ button sits at a
+        // sensible full-height spot next to the text, like the font rows.
         attachCombo(row, input, () => [
             ...[...styles.resources.entries()].map(([k, css]) =>
                 ({ value: `{StaticResource ${k}}`, html: colorItemHtml(`{StaticResource ${k}}`, css) })),
             { value: 'Transparent', html: colorItemHtml('Transparent', '') },
             ...WF_NAMED_COLORS.map(n => ({ value: n, html: colorItemHtml(n, n.toLowerCase()) }))
         ]);
-        input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') { input.blur(); }
-            e.stopPropagation();
-        });
-        row.appendChild(input);
 
         if (prop === 'Background') {
             const pick = document.createElement('button');
@@ -8233,6 +8268,10 @@
             toggleInfoAt: pathStr => {
                 const target = elAtPath(pathStr);
                 return target ? styleToggleInfo(target) : null;
+            },
+            templateBrushAt: (pathStr, raw) => {
+                const target = elAtPath(pathStr);
+                return target ? resolveTemplateBrush(target, raw) : '';
             }
         };
     }

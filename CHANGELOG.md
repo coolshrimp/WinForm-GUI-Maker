@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.25.1
+
+Property-panel fixes from live use:
+
+**Color "show choices" popups fixed.** The named-color/resource dropdown on
+every color row now opens reliably, clamps itself inside the viewport (it
+could open half off-screen next to the right-hand panel), and **follows its
+row when the Properties panel scrolls or the window resizes** — before, the
+popup stayed at stale coordinates and drifted away or got hidden. It closes
+itself when its row scrolls out of view, repositions as the filtered list
+changes height, and the ▾ button now sits next to the text field on color
+rows just like the font rows.
+
+**OnColor / OffColor now show the toggle's real colors.** For toggles whose
+template bakes the colors in (like a `{StaticResource Accent}` purple), the
+swatches used to show black because the instance had no Background set. The
+swatch fallback now resolves the color the template actually paints —
+through StaticResources, App.xaml, and TemplatedParent bindings — so a
+purple app toggle shows purple in both rows.
+
+**Hover = a lighter shade of the active color.** The injected ToggleSwitch
+template gained the same `IsMouseOver → track Opacity 0.85` trigger the
+Context Menu Editor app uses, so hovering lightens whatever OnColor/OffColor
+is showing — automatically matching, no extra property.
+
 ## 0.25.0
 
 Three user requests in one release:
