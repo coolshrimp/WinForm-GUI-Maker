@@ -667,7 +667,12 @@
         'Cursor', 'IsEnabled', 'Visibility', 'ToolTip', 'Tag',
         'AllowDrop', 'ClipToBounds', 'FlowDirection', 'Focusable', 'IsHitTestVisible',
         'IsTabStop', 'TabIndex', 'SnapsToDevicePixels', 'UseLayoutRounding',
-        'RenderTransformOrigin', 'Uid'];
+        'RenderTransformOrigin', 'Uid',
+        'Style', 'DataContext', 'OpacityMask', 'Clip', 'Language',
+        'OverridesDefaultStyle', 'ForceCursor', 'IsManipulationEnabled',
+        'AutomationProperties.Name', 'AutomationProperties.AutomationId',
+        'AutomationProperties.HelpText', 'AutomationProperties.AcceleratorKey',
+        'AutomationProperties.AccessKey'];
 
     /** Window-level properties/events shown when nothing is selected. */
     const WINDOW_PROPS = ['Title', 'Width', 'Height', 'MinWidth', 'MinHeight', 'MaxWidth', 'MaxHeight',
@@ -680,7 +685,7 @@
      * toolbox catalog (kept separate so the table above stays readable).
      */
     const XAML_EXTRA_PROPS = {
-        Button: ['Command', 'CommandParameter', 'IsDefault', 'IsCancel', 'ClickMode', 'HorizontalContentAlignment', 'VerticalContentAlignment'],
+        Button: ['Command', 'CommandParameter', 'CommandTarget', 'ContentStringFormat', 'IsDefault', 'IsCancel', 'ClickMode', 'HorizontalContentAlignment', 'VerticalContentAlignment'],
         Label: ['HorizontalContentAlignment', 'VerticalContentAlignment'],
         TextBlock: ['TextAlignment', 'TextTrimming', 'LineHeight', 'TextDecorations'],
         TextBox: ['IsReadOnly', 'CharacterCasing', 'TextAlignment', 'MinLines', 'MaxLines',
@@ -688,10 +693,10 @@
         PasswordBox: ['PasswordChar'],
         CheckBox: ['IsThreeState', 'Command', 'CommandParameter', 'ClickMode', 'HorizontalContentAlignment', 'VerticalContentAlignment'],
         RadioButton: ['Command', 'CommandParameter', 'ClickMode'],
-        ComboBox: ['ItemsSource', 'DisplayMemberPath', 'MaxDropDownHeight', 'IsDropDownOpen', 'IsReadOnly', 'StaysOpenOnEdit'],
-        ListBox: ['SelectionMode', 'ItemsSource', 'DisplayMemberPath'],
-        ListView: ['SelectionMode', 'ItemsSource', 'DisplayMemberPath'],
-        TreeView: ['ItemsSource'],
+        ComboBox: ['ItemsSource', 'DisplayMemberPath', 'MaxDropDownHeight', 'IsDropDownOpen', 'IsReadOnly', 'StaysOpenOnEdit', 'IsTextSearchEnabled', 'AlternationCount', 'ItemStringFormat'],
+        ListBox: ['SelectionMode', 'ItemsSource', 'DisplayMemberPath', 'IsTextSearchEnabled', 'IsSynchronizedWithCurrentItem', 'AlternationCount', 'ItemStringFormat'],
+        ListView: ['SelectionMode', 'ItemsSource', 'DisplayMemberPath', 'IsTextSearchEnabled', 'IsSynchronizedWithCurrentItem', 'AlternationCount', 'ItemStringFormat'],
+        TreeView: ['ItemsSource', 'ItemStringFormat'],
         DataGrid: ['ItemsSource', 'CanUserAddRows', 'CanUserDeleteRows', 'CanUserReorderColumns',
             'CanUserResizeColumns', 'CanUserSortColumns', 'GridLinesVisibility', 'HeadersVisibility', 'SelectionMode'],
         Image: ['StretchDirection'],
@@ -699,7 +704,7 @@
         Slider: ['Orientation', 'TickPlacement', 'IsSnapToTickEnabled', 'IsDirectionReversed', 'SmallChange', 'LargeChange'],
         RichTextBox: ['IsReadOnly', 'AcceptsTab'],
         Expander: ['ExpandDirection'],
-        TabControl: ['TabStripPlacement', 'SelectedIndex'],
+        TabControl: ['TabStripPlacement', 'SelectedIndex', 'ItemsSource', 'IsSynchronizedWithCurrentItem', 'AlternationCount'],
         Grid: ['ShowGridLines'],
         WrapPanel: ['ItemWidth', 'ItemHeight'],
         ScrollViewer: ['HorizontalScrollBarVisibility', 'CanContentScroll'],
@@ -722,7 +727,8 @@
         'ShowGridLines', 'IsSnapToTickEnabled', 'IsDirectionReversed', 'CanUserAddRows',
         'CanUserDeleteRows', 'CanUserReorderColumns', 'CanUserResizeColumns', 'CanUserSortColumns',
         'IsTodayHighlighted', 'AcceptsTab', 'IsDropDownOpen', 'StaysOpenOnEdit', 'CanContentScroll',
-        'ShowInTaskbar'
+        'ShowInTaskbar', 'OverridesDefaultStyle', 'ForceCursor', 'IsManipulationEnabled',
+        'IsTextSearchEnabled', 'IsSynchronizedWithCurrentItem'
     ]);
     const WINDOW_EVENTS = ['Loaded', 'Closing', 'KeyDown', 'KeyUp'];
 
@@ -776,7 +782,7 @@
     };
 
     /** Brush-typed attributes: swatch + native color picker + named colors. */
-    const XAML_BRUSH_PROPS = new Set(['Background', 'Foreground', 'BorderBrush', 'Fill', 'Stroke']);
+    const XAML_BRUSH_PROPS = new Set(['Background', 'Foreground', 'BorderBrush', 'Fill', 'Stroke', 'OpacityMask']);
 
     /** Suggested sizes/families for the font rows (free text still allowed). */
     const XAML_FONT_SIZES = ['8', '9', '10', '11', '12', '13', '14', '15', '16', '18',
@@ -834,7 +840,18 @@
         SelectedDateFormat: 'Appearance', FirstDayOfWeek: 'Behavior',
         IsTodayHighlighted: 'Appearance', DisplayDateStart: 'Behavior',
         DisplayDateEnd: 'Behavior', DisplayDate: 'Behavior',
-        ShowInTaskbar: 'Window Style', Icon: 'Window Style'
+        ShowInTaskbar: 'Window Style', Icon: 'Window Style',
+        Style: 'Appearance', DataContext: 'Data', OpacityMask: 'Appearance',
+        Clip: 'Appearance', Language: 'Common', OverridesDefaultStyle: 'Appearance',
+        ForceCursor: 'Behavior', IsManipulationEnabled: 'Behavior',
+        CommandTarget: 'Common', ContentStringFormat: 'Common',
+        AlternationCount: 'Data', IsTextSearchEnabled: 'Behavior',
+        IsSynchronizedWithCurrentItem: 'Data', ItemStringFormat: 'Data',
+        'AutomationProperties.Name': 'Automation',
+        'AutomationProperties.AutomationId': 'Automation',
+        'AutomationProperties.HelpText': 'Automation',
+        'AutomationProperties.AcceleratorKey': 'Automation',
+        'AutomationProperties.AccessKey': 'Automation'
     };
 
     /** Grid help-pane text for common XAML attributes. */
@@ -970,7 +987,26 @@
         DisplayDateEnd: 'Latest date shown.',
         DisplayDate: 'The month/year initially displayed.',
         ShowInTaskbar: 'Show a taskbar button for this window. Default: True.',
-        Icon: 'Path to the window icon, e.g. Assets/app.ico.'
+        Icon: 'Path to the window icon, e.g. Assets/app.ico.',
+        Style: 'A Style resource reference, e.g. {StaticResource MyStyle}.',
+        DataContext: 'The binding source for this element and its children, e.g. {Binding Model}.',
+        OpacityMask: 'A brush whose alpha channel masks this element.',
+        Clip: 'A Geometry that clips the element, e.g. M0,0 L100,0 100,100 Z.',
+        Language: 'The xml:lang culture, e.g. en-US. Default: en-US.',
+        OverridesDefaultStyle: 'Ignore the theme’s default style. Default: False.',
+        ForceCursor: 'Force this element’s Cursor onto its children. Default: False.',
+        IsManipulationEnabled: 'Enable touch manipulation events. Default: False.',
+        CommandTarget: 'The element a RoutedCommand executes on.',
+        ContentStringFormat: 'Format string applied to string content, e.g. {}{0:C}.',
+        AlternationCount: 'Number of alternating item containers (for row striping). Default: 0.',
+        IsTextSearchEnabled: 'Type-to-find items by text. Default: True.',
+        IsSynchronizedWithCurrentItem: 'Keep selection synced with the collection’s current item. Default: null (auto).',
+        ItemStringFormat: 'Format string applied to string items.',
+        'AutomationProperties.Name': 'Accessible name announced by screen readers.',
+        'AutomationProperties.AutomationId': 'Stable identifier for UI automation/tests.',
+        'AutomationProperties.HelpText': 'Extra accessible help text.',
+        'AutomationProperties.AcceleratorKey': 'The accelerator (shortcut) key announced to automation.',
+        'AutomationProperties.AccessKey': 'The access (mnemonic) key announced to automation.'
     };
 
     // ------------------------------------------------------------------ state
@@ -3896,10 +3932,41 @@
         if (['FontSize', 'FontFamily', 'FontWeight', 'FontStyle', 'Cursor'].includes(prop)) {
             return xamlFontRow(el, prop, write);
         }
+        if (prop === 'HorizontalAlignment' || prop === 'VerticalAlignment'
+            || prop === 'HorizontalContentAlignment' || prop === 'VerticalContentAlignment') {
+            return xamlAlignRow(el, prop, write);
+        }
         if (ENUM_VALUES[prop]) { return xamlEnumRow(el, prop, write); }
         if (XAML_BOOL_PROPS.has(prop)) { return xamlEnumRow(el, prop, write, ['True', 'False']); }
         if (prop === 'Source' && el.localName === 'Image') { return xamlImagePathRow(el, prop, write); }
         return propRow(prop, el.getAttribute(prop) ?? '', write);
+    }
+
+    /** VS-style segmented icon buttons for the alignment ("anchor") rows —
+     *  the active value highlights; clicking it again resets to default. */
+    function xamlAlignRow(el, prop, write) {
+        const row = document.createElement('div');
+        row.className = 'ff-prop-row';
+        const lab = document.createElement('label');
+        lab.textContent = prop;
+        row.appendChild(lab);
+
+        const glyphKey = prop.includes('Horizontal') ? 'HorizontalAlignment' : 'VerticalAlignment';
+        const values = ENUM_VALUES[prop] ?? ENUM_VALUES[glyphKey];
+        const raw = el.getAttribute(prop) ?? '';
+        const group = document.createElement('div');
+        group.className = 'ff-seg';
+        for (const v of values) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = `ff-seg-btn${raw === v ? ' active' : ''}`;
+            b.textContent = ENUM_GLYPHS[glyphKey]?.[v] ?? v[0];
+            b.title = raw === v ? `${v} — click again to reset to default` : v;
+            b.addEventListener('click', () => write(raw === v ? '' : v));
+            group.appendChild(b);
+        }
+        row.appendChild(group);
+        return row;
     }
 
     /** Dropdown row for enum/boolean attributes, VS-style with a default entry. */

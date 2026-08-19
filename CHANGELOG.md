@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.27.1
+
+**The "anchor" rows, VS-style** (user follow-up: "no anchor options for tabs,
+buttons etc"). WPF has no Anchor property — its equivalent is the alignment
+pair, which Visual Studio shows as segmented icon buttons. UI Maker now
+renders **HorizontalAlignment / VerticalAlignment (and the content
+alignments) as the same segmented icon buttons** (← ↔ → ⇿ / ↑ ↕ ↓ ⇳): the
+active value highlights, clicking it again resets to default. WinForms
+already had real Anchor toggles on every control, tabs and buttons included.
+
+**Property parity, round 2:**
+
+- *Every element:* Style, DataContext, OpacityMask (with the color/brush
+  picker), Clip, Language, OverridesDefaultStyle, ForceCursor,
+  IsManipulationEnabled, and the **Automation** category
+  (AutomationProperties.Name / AutomationId / HelpText / AcceleratorKey /
+  AccessKey)
+- *Buttons:* CommandTarget, ContentStringFormat
+- *ItemsControls (ComboBox, ListBox, ListView, TreeView, TabControl):*
+  AlternationCount, IsTextSearchEnabled, IsSynchronizedWithCurrentItem,
+  ItemStringFormat; TabControl also gets ItemsSource
+
+All with category placement, dropdown/boolean validation, and description
+pane entries stating the WPF defaults.
+
 ## 0.27.0
 
 **Visual Studio property parity for the WPF Properties panel** (user request
