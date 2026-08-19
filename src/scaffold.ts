@@ -11,6 +11,7 @@ import { promisify } from 'util';
 import { touchRecentProject } from './sidebar';
 import { installedSdkMajors, isLtsDotnet } from './projectInfo';
 import { listFilesUnder } from './workingFolder';
+import { ensureSolutionFor } from './solutionFile';
 
 const execFile = promisify(cp.execFile);
 
@@ -113,6 +114,13 @@ export async function newProject(): Promise<void> {
         vscode.window.showErrorMessage(`UI Maker: dotnet new failed — ${err instanceof Error ? err.message : String(err)}`);
         return;
     }
+
+    // A minimal .sln so the project ALSO opens cleanly in Visual Studio —
+    // without one, VS's XAML/forms designers have no project context.
+    try {
+        const proj = path.join(target, `${name}.${language.id === 'VB' ? 'vbproj' : 'csproj'}`);
+        if (fs.existsSync(proj)) { ensureSolutionFor(proj); }
+    } catch { /* the solution is a convenience — never block creation */ }
 
     // 7) Open ------------------------------------------------------------------
     touchRecentProject(target);
@@ -227,6 +235,7 @@ export async function generateProjectFile(dir: string): Promise<string | undefin
             `UI Maker: could not write ${path.basename(projPath)} — ${err instanceof Error ? err.message : err}`);
         return undefined;
     }
+    try { ensureSolutionFor(projPath); } catch { /* convenience only */ }
     void vscode.window.showInformationMessage(
         `UI Maker: created ${path.basename(projPath)} (${tfmPick.tfm}${winforms ? ', WinForms' : ''}${wpf ? ', WPF' : ''}) — the folder now builds with dotnet.`);
     return projPath;

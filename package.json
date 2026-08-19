@@ -2,7 +2,7 @@
     "name": "uimaker",
     "displayName": "UI Maker — .NET UI Designer",
     "description": "Visual drag-and-drop designer for WPF and WinForms (C# and Visual Basic), side panel, run/stop & debug toggles, single-exe publishing, and project scaffolding for .NET desktop apps inside VS Code.",
-    "version": "0.25.3",
+    "version": "0.26.0",
     "publisher": "coolshrimp",
     "license": "MIT",
     "repository": {
@@ -252,6 +252,12 @@
                 "title": "Control Library (Custom Controls)",
                 "category": "UI Maker",
                 "icon": "$(extensions)"
+            },
+            {
+                "command": "uimaker.createSolution",
+                "title": "Create Visual Studio Solution (.sln)",
+                "category": "UI Maker",
+                "icon": "$(file-symlink-file)"
             },
             {
                 "command": "uimaker.convertToSdk",

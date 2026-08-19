@@ -411,6 +411,7 @@ launches with UI Maker loaded.
 | `UI Maker: Project Properties` | VS-style Application page — output type, framework, assembly name, icon, manifest, version info |
 | `UI Maker: NuGet Packages` | Browse / install / update / remove nuget.org packages for the working project |
 | `UI Maker: Control Library (Custom Controls)` | Custom controls for the toolbox — the ones found in the project source, plus controls you register from NuGet packages / referenced DLLs |
+| `UI Maker: Create Visual Studio Solution (.sln)` | Add the minimal `.sln` Visual Studio's designers need — also created automatically for new projects and whenever a solution-less project becomes the working folder |
 | `UI Maker: Convert Project to SDK Style` | Rewrite a classic .NET Framework `.csproj` in the modern SDK format (backup kept) |
 | `UI Maker: Open Working Folder` | Show the current project folder in File Explorer |
 | `UI Maker: Guide: How to Build an App` | Open the built-in guide (project anatomy, required vs. optional files) |

@@ -29,6 +29,8 @@ import {
     onDidChangeWorkingFolder, setWorkingFolder
 } from './workingFolder';
 import { touchRecentProject } from './sidebar';
+import { ensureSolutionFor } from './solutionFile';
+import * as fs from 'fs';
 import * as path from 'path';
 
 /** Status-bar buttons, created once on activation and toggled with project presence. */
@@ -178,6 +180,10 @@ export function activate(context: vscode.ExtensionContext): void {
         // Custom controls: project scan results + hand-registered library.
         vscode.commands.registerCommand('uimaker.controlLibrary', (project?: string) => openControlLibrary(dotnet, project)),
 
+        // Visual Studio interop: make sure a .sln exists so VS's own
+        // designers get project context (loose .xaml files won't load there).
+        vscode.commands.registerCommand('uimaker.createSolution', () => ensureVsSolution(true)),
+
         // Classic .NET Framework project -> modern SDK format (fixes the
         // C# Dev Kit "project file is in unsupported format" warning).
         vscode.commands.registerCommand('uimaker.convertToSdk', async (project?: string) => {
@@ -227,7 +233,54 @@ export function activate(context: vscode.ExtensionContext): void {
     watcher.onDidCreate(() => refreshProjectContext());
     watcher.onDidDelete(() => refreshProjectContext());
     context.subscriptions.push(watcher);
-    context.subscriptions.push(onDidChangeWorkingFolder(() => refreshProjectContext()));
+    context.subscriptions.push(onDidChangeWorkingFolder(() => {
+        void refreshProjectContext();
+        // Keep every project UI Maker touches openable in Visual Studio.
+        ensureVsSolution(false);
+    }));
+    ensureVsSolution(false);
+}
+
+/** First project file directly inside a folder (the working-folder shape). */
+function projectFileIn(dir: string): string | undefined {
+    try {
+        const hit = fs.readdirSync(dir).find(f => /\.(cs|vb)proj$/i.test(f));
+        return hit ? path.join(dir, hit) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Make sure the working project has a Visual Studio solution. Quiet mode
+ * (automatic) only reports when it actually creates one; interactive mode
+ * (the command) always answers.
+ */
+function ensureVsSolution(interactive: boolean): void {
+    const dir = getWorkingFolder() ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const proj = dir ? projectFileIn(dir) : undefined;
+    if (!proj) {
+        if (interactive) {
+            void vscode.window.showWarningMessage(
+                'UI Maker: no .csproj/.vbproj in the working folder — open or create a project first.');
+        }
+        return;
+    }
+    try {
+        const created = ensureSolutionFor(proj);
+        if (created) {
+            vscode.window.setStatusBarMessage(
+                `UI Maker: created ${path.basename(created)} — the project now opens cleanly in Visual Studio too.`, 8000);
+        } else if (interactive) {
+            void vscode.window.showInformationMessage(
+                'UI Maker: this project already has a Visual Studio solution — nothing to do.');
+        }
+    } catch (err) {
+        if (interactive) {
+            void vscode.window.showWarningMessage(
+                `UI Maker: could not write the solution file — ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
 }
 
 export function deactivate(): void {

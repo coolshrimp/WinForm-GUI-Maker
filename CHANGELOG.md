@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.26.0
+
+**Projects stay Visual Studio-compatible** (user request: opening a UI Maker
+project in VS to compare designers failed). VS's WPF/WinForms designers need
+a loaded solution for project context — a `.xaml` opened as a loose file
+can't resolve StaticResources or custom-control namespaces, so the VS
+designer refuses to load. UI Maker projects built fine but had no `.sln`.
+Now:
+
+- **New projects** (New .NET Desktop Project, and the generate-a-project
+  flow for orphan source folders) get a minimal single-project `.sln`
+  automatically.
+- **Existing projects are fixed on contact**: whenever a project becomes the
+  working folder (open, switch, activate), UI Maker quietly adds the missing
+  `.sln` — projects that already have a `.sln`/`.slnx` in their folder or one
+  level up are left untouched.
+- **`UI Maker: Create Visual Studio Solution (.sln)`** command for doing it
+  on demand.
+
+The generated solution matches what `dotnet new sln` + `dotnet sln add`
+produce (Format 12.00, VS 17, Debug/Release Any CPU, correct C#/VB
+project-type GUIDs), with a deterministic project GUID so regenerating never
+churns diffs. Open the `.sln` in Visual Studio and its designer gets full
+context.
+
 ## 0.25.3
 
 **Flat toolbox icons** (user report: mixed colored emoji among flat glyphs).
