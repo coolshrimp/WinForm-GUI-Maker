@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.28.0
+
+**Multi-select property editing** (user request: "select 3 Labels and set
+color, or font, etc."). Ctrl/Shift-click a group of controls and the
+Properties panel switches to "N controls selected", showing only the
+properties **every** selected control supports (the Visual Studio
+intersection rule). Any edit — color pickers, fonts, enums, alignment
+buttons, sizes, free text — applies to **all** selected controls in one
+batched change, so a single Undo reverts the whole group. Works in both
+designers: XAML (mixed types included — 2 Labels + a TextBlock edit their
+shared properties) and WinForms (batched into one Designer.cs rewrite; tray
+components are excluded). Name stays per-control and is hidden in
+multi-mode, and the Events tab shows a hint since events wire to one control
+at a time.
+
 ## 0.27.2
 
 Two fixes found while designing a real app (HashcatGUI):

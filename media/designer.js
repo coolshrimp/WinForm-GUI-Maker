@@ -3883,22 +3883,31 @@
         const el = selected;
         const isWindow = !el;
         const type = isWindow ? (windowEl?.localName ?? 'Window') : el.localName;
+        // Multi-select: every selected XAML element shares the edit.
+        const multi = el && !el.__wf
+            ? [...multiSel].filter(m => m && !m.__wf && m !== windowEl)
+            : [];
+        const isMulti = multi.length > 1 && multi.includes(el);
         propsTarget.textContent = isWindow
             ? `${type} (${config.docName})`
-            : `${getName(el) || '(unnamed)'} : ${type}`;
+            : isMulti
+                ? `${multi.length} controls selected`
+                : `${getName(el) || '(unnamed)'} : ${type}`;
 
         if (!windowEl) { return; }
 
         if (activeTab === 'props') {
-            renderPropsTab(isWindow ? windowEl : el, isWindow);
+            renderPropsTab(isWindow ? windowEl : el, isWindow, isMulti ? multi : undefined);
+        } else if (isMulti) {
+            renderMultiEventsHint();
         } else {
             renderEventsTab(isWindow ? windowEl : el, isWindow);
         }
     }
 
-    function renderPropsTab(el, isWindow) {
+    function renderPropsTab(el, isWindow, multi = undefined) {
         const rows = [];
-        if (!isWindow) {
+        if (!isWindow && !multi) {
             // Name is special: stored as x:Name.
             const nameRow = propRow('Name', getName(el), v => {
                 const name = v.trim();
@@ -3916,7 +3925,7 @@
         // Toggle-styled controls: friendly OnColor / OffColor rows that map
         // to the template's per-instance brushes (Background / BorderBrush),
         // replacing those raw rows so there is one obvious place to recolor.
-        const toggleInfo = !isWindow ? styleToggleInfo(el) : null;
+        const toggleInfo = !isWindow && !multi ? styleToggleInfo(el) : null;
         const toggleAlias = toggleInfo
             ? [['OnColor', 'Background', toggleInfo.on,
                 'Track color while the toggle is ON (checked). Stored as Background — templates that use TemplateBinding pick it up per toggle; hard-coded templates show their own color here until restyled.'],
@@ -3942,13 +3951,17 @@
         }
 
         const aliased = new Set((toggleAlias ?? []).map(([, prop]) => prop));
-        const names = isWindow
-            ? WINDOW_PROPS
-            : [...(xamlDefOf(el.localName)?.props ?? PANEL_PROPS[el.localName] ?? []), ...COMMON_PROPS]
-                .filter(p => !aliased.has(p));
+        const listFor = t => [...(xamlDefOf(t.localName)?.props ?? PANEL_PROPS[t.localName] ?? []), ...COMMON_PROPS];
+        let names = isWindow ? WINDOW_PROPS : listFor(el).filter(p => !aliased.has(p));
+        // Multi-select: only the properties EVERY selected element supports,
+        // like Visual Studio — edits then apply to all of them at once.
+        if (multi) {
+            const shared = multi.filter(t => t !== el).map(t => new Set(listFor(t)));
+            names = names.filter(p => shared.every(s => s.has(p)));
+        }
 
         for (const prop of names) {
-            const node = xamlPropRow(el, prop);
+            const node = xamlPropRow(el, prop, multi ?? [el]);
             if (el.getAttribute(prop) !== null || propertyElement(el, prop)) { node.classList.add('ff-set'); }
             attachDesc(node, prop, XAML_DESCS[prop] ?? '');
             rows.push({ label: prop, cat: XAML_CATS[prop] ?? 'Common', node });
@@ -3962,10 +3975,14 @@
      * suggestion lists, Image.Source a file picker — everything else stays a
      * free text row so bindings and resources can always be typed.
      */
-    function xamlPropRow(el, prop) {
+    function xamlPropRow(el, prop, targets = [el]) {
+        // Multi-select: one edit writes the attribute on every target and
+        // commits once (a single undo step).
         const write = v => {
-            removePropertyElement(el, prop); // an attribute replaces any expanded form
-            if (v === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, v); }
+            for (const t of targets) {
+                removePropertyElement(t, prop); // an attribute replaces any expanded form
+                if (v === '') { t.removeAttribute(prop); } else { t.setAttribute(prop, v); }
+            }
             commit();
         };
         if (XAML_BRUSH_PROPS.has(prop)) { return xamlBrushRow(el, prop, write); }
@@ -8106,30 +8123,56 @@
     function wfRenderPanel() {
         const el = selected && selected.__wf && selected !== wfForm ? selected : null;
         const isForm = !el;
+        // Multi-select: every selected sibling control shares the edit
+        // (tray components are excluded — they have no common surface).
+        const multi = el
+            ? [...multiSel].filter(c => c?.__wf && c !== wfForm && !WF_TRAY[c.type])
+            : [];
+        const isMulti = multi.length > 1 && multi.includes(el);
         propsTarget.textContent = isForm
             ? `${wfForm?.name ?? 'Form'} (${config.docName})`
-            : `${el.name} : ${el.type}`;
+            : isMulti
+                ? `${multi.length} controls selected`
+                : `${el.name} : ${el.type}`;
         if (!wfForm) { return; }
 
-        if (activeTab === 'props') { wfPropsTab(el, isForm); }
+        if (activeTab === 'props') { wfPropsTab(el, isForm, isMulti ? multi : null); }
+        else if (isMulti) { renderMultiEventsHint(); }
         else { wfEventsTab(el, isForm); }
     }
 
-    function wfPropsTab(el, isForm) {
+    function wfPropsTab(el, isForm, multi = null) {
         const target = isForm ? wfForm : el;
         const type = isForm ? 'Form' : el.type;
         // Tray components have no layout/color surface — show just their own
         // properties; regular controls get the full common set too.
-        const names = isForm
+        let names = isForm
             ? ['Name', ...WF_FORM_PROPS]
             : WF_TRAY[el.type]
                 ? ['Name', ...WF_TRAY[el.type].props, 'Tag']
                 : [...new Set(['Name', ...(wfDefOf(el.type)?.props ?? ['Text']), ...WF_COMMON_PROPS])];
-        renderGrid(names.map(prop => wfGridRow(target, prop, isForm, type)));
+        // Multi-select: only the properties EVERY selected control supports,
+        // like Visual Studio (Name is per-control — hidden).
+        if (multi) {
+            const shared = multi.filter(t => t !== el).map(t =>
+                new Set([...(wfDefOf(t.type)?.props ?? ['Text']), ...WF_COMMON_PROPS]));
+            names = names.filter(p => p !== 'Name' && shared.every(s => s.has(p)));
+        }
+        renderGrid(names.map(prop => wfGridRow(target, prop, isForm, type, multi ?? [target])));
+    }
+
+    /** Events wire to exactly one control — shown instead of the events tab
+     *  while a multi-selection is active. */
+    function renderMultiEventsHint() {
+        propsBody.innerHTML = '';
+        const hint = document.createElement('div');
+        hint.className = 'ff-tool-hint';
+        hint.textContent = 'Events wire to one control at a time — select a single control to edit its events.';
+        propsBody.appendChild(hint);
     }
 
     /** One VS-style grid row for a WinForms property. */
-    function wfGridRow(target, prop, isForm, type) {
+    function wfGridRow(target, prop, isForm, type, targets = [target]) {
         const def = wfPropDef(type, prop);
         const raw = target.props[prop];
         const isSet = raw !== undefined && prop !== 'Name';
@@ -8141,10 +8184,20 @@
         row.appendChild(lab);
         attachDesc(row, prop === 'Name' ? '(Name)' : prop, def.desc ?? '');
 
-        const write = code => wfApply(isForm ? wfSetFormLine(prop, code) : wfSetLine(target.name, prop, code));
+        // Multi-select: one edit rewrites the property on EVERY selected
+        // control in a single batched text change (one undo step).
+        const write = code => {
+            if (isForm) { wfApply(wfSetFormLine(prop, code)); return; }
+            let text = xamlText;
+            for (const t of targets) { text = wfSetLine(t.name, prop, code, text); }
+            wfApply(text);
+        };
         const remove = () => {
             if (!isSet || prop === 'ClientSize') { renderPanel(); return; }
-            wfApply(isForm ? wfRemoveFormLine(prop) : wfRemoveLine(target.name, prop));
+            if (isForm) { wfApply(wfRemoveFormLine(prop)); return; }
+            let text = xamlText;
+            for (const t of targets) { text = wfRemoveLine(t.name, prop, text); }
+            wfApply(text);
         };
         const display = wfDisplay(def, raw);
 

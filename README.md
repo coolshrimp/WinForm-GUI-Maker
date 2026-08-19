@@ -150,7 +150,10 @@ Open any `.xaml` window in the UI Maker Designer:
   you hover). **Multi-select moves as a group** (Ctrl/Shift+click, then drag
   any member), arrow keys nudge the whole selection (Shift = one grid step),
   and the **alignment/distribution toolbar** now works for XAML
-  multi-selections as well as WinForms. Zoom with the
+  multi-selections as well as WinForms. **Multi-select property editing** too:
+  with several controls selected the Properties panel shows their shared
+  properties (VS's intersection rule) and every edit — colors, fonts,
+  enums, sizes — applies to the whole group as one undoable change. Zoom with the
   toolbar dropdown or **Ctrl+scroll** (25%–300%) — plain scroll pans vertically,
   **Shift+scroll** horizontally, matching Visual Studio; the status bar shows the
   current percentage and clicking it resets to 100%.
