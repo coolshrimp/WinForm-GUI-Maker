@@ -157,21 +157,25 @@
             attrs: { Content: 'Toggle', Style: '{StaticResource UimToggleSwitch}' },
             props: ['Content', 'IsChecked'], events: ['Checked', 'Unchecked', 'Click'], defaultEvent: 'Checked',
             styleKey: 'UimToggleSwitch',
+            // Per-instance colors: Background = CHECKED track, BorderBrush =
+            // unchecked track — set them on each CheckBox for unique toggles.
             styleXml:
 `<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Key="UimToggleSwitch" TargetType="CheckBox">
     <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Background" Value="#FF7C4DFF"/>
+    <Setter Property="BorderBrush" Value="#FFB9B9C3"/>
     <Setter Property="Template">
         <Setter.Value>
             <ControlTemplate TargetType="CheckBox">
                 <StackPanel Orientation="Horizontal" Background="Transparent">
-                    <Border x:Name="UimTrack" Width="40" Height="20" CornerRadius="10" Background="#FFB9B9C3" VerticalAlignment="Center">
+                    <Border x:Name="UimTrack" Width="40" Height="20" CornerRadius="10" Background="{TemplateBinding BorderBrush}" VerticalAlignment="Center">
                         <Ellipse x:Name="UimThumb" Width="14" Height="14" Fill="White" HorizontalAlignment="Left" Margin="3,0,3,0"/>
                     </Border>
                     <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                 </StackPanel>
                 <ControlTemplate.Triggers>
                     <Trigger Property="IsChecked" Value="True">
-                        <Setter TargetName="UimTrack" Property="Background" Value="#FF7C4DFF"/>
+                        <Setter TargetName="UimTrack" Property="Background" Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}"/>
                         <Setter TargetName="UimThumb" Property="HorizontalAlignment" Value="Right"/>
                     </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
@@ -1081,7 +1085,11 @@
 
     /** Shared visual attributes (colors, fonts, visibility, enabled state). */
     function applyVisual(div, el) {
-        const bg = resolveBrush(styleProp(el, 'Background'));
+        // Toggle-templated controls repurpose Background as the CHECKED track
+        // color — the control surface itself stays transparent at runtime.
+        const isToggle = (el.localName === 'CheckBox' || el.localName === 'ToggleButton')
+            && !!styleToggleInfo(el);
+        const bg = isToggle ? '' : resolveBrush(styleProp(el, 'Background'));
         const fg = resolveBrush(styleProp(el, 'Foreground'));
         if (bg) { div.style.background = bg; }
         if (fg) { div.style.color = fg; }
@@ -1347,15 +1355,24 @@
      *  template's own brushes when they resolve. */
     function renderToggleSwitch(inner, el, label, toggle) {
         const on = el.getAttribute('IsChecked') === 'True';
+        // Template brushes may defer to the INSTANCE ("{TemplateBinding
+        // BorderBrush}" / "{Binding X, RelativeSource TemplatedParent}") —
+        // that is how each toggle gets its own colors. Resolve those against
+        // the element (attribute first, then its style's defaults).
+        const brushOf = raw => {
+            if (!raw) { return ''; }
+            const bound = /^\{\s*TemplateBinding\s+(\w+)\s*\}$/.exec(raw)
+                ?? /^\{\s*Binding\s+(\w+)\s*,\s*RelativeSource=\{RelativeSource\s+TemplatedParent\}\s*\}$/.exec(raw);
+            if (bound) { return resolveBrush(styleProp(el, bound[1])) || ''; }
+            return resolveBrush(raw) || '';
+        };
         const track = document.createElement('span');
         track.className = `ff-toggle${on ? ' ff-toggle-on' : ''}`;
-        const trackBrush = on
-            ? (resolveBrush(toggle.on) || '')
-            : (resolveBrush(toggle.track) || '');
+        const trackBrush = on ? brushOf(toggle.on) : brushOf(toggle.track);
         if (trackBrush) { track.style.background = trackBrush; }
         const thumb = document.createElement('span');
         thumb.className = 'ff-toggle-thumb';
-        const thumbBrush = resolveBrush(toggle.thumb);
+        const thumbBrush = brushOf(toggle.thumb);
         if (thumbBrush) { thumb.style.background = thumbBrush; }
         track.appendChild(thumb);
         inner.appendChild(track);
@@ -1522,7 +1539,8 @@
                 inner.classList.add('ff-look-label');
                 // Any toggle-switch template — the injected UimToggleSwitch
                 // or the app's own Style/ControlTemplate — draws as a switch.
-                const toggle = styleRef.includes('UimToggleSwitch') ? {} : styleToggleInfo(el);
+                const toggle = styleToggleInfo(el)
+                    ?? (styleRef.includes('UimToggleSwitch') ? {} : null);
                 if (toggle) {
                     renderToggleSwitch(inner, el, content ?? '', toggle);
                     break;

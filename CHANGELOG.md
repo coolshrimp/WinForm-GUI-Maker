@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.24.0
+
+**Per-toggle colors** (user request: "do the toggles have a color property so
+each could be set and render unique colors"): the injected **ToggleSwitch**
+style now takes its colors from each CheckBox instance —
+
+- **Background** = the CHECKED track color (style default `#FF7C4DFF`)
+- **BorderBrush** = the unchecked track color (style default `#FFB9B9C3`)
+
+Set them per toggle in the Properties panel (both have color-picker swatches)
+and every switch can look different; leave them unset to inherit the style's
+defaults. The template routes them with `TemplateBinding`, so the same works
+at runtime, and the canvas preview resolves the instance colors too —
+including for your own toggle templates that use `TemplateBinding` /
+`TemplatedParent` bindings. The canvas also stops painting a toggle's
+surface with its Background (that property is the track color, and the real
+control surface is transparent).
+
+Note for projects that already dropped a ToggleSwitch with 0.23.x: the old
+hard-coded style stays untouched in your `Window.Resources` — delete the
+`UimToggleSwitch` style there and drop a new ToggleSwitch to get the
+color-aware version.
+
 ## 0.23.1
 
 **Your own toggle switches now look like toggles on the canvas** (user

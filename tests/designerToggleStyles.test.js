@@ -108,6 +108,32 @@ test('implicit app-level CheckBox toggle styles apply too', () => {
     assert.ok(api.toggleInfoAt('0/0'), 'implicit toggle style recognized');
 });
 
+test('each ToggleSwitch carries its own colors via Background/BorderBrush', () => {
+    const { api } = loadDesigner();
+    api.setDoc('MainWindow.xaml', `<Window x:Class="App.W"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid/>
+</Window>`);
+    api.addControlDefault('ToggleSwitch');
+    api.addControlDefault('ToggleSwitch');
+    // Second toggle gets its own colors (checked = Background, off = BorderBrush).
+    api.elAtPath('1/1').setAttribute('Background', '#FF00C853');
+    api.elAtPath('1/1').setAttribute('BorderBrush', '#FF37474F');
+
+    // The injected template defers its brushes to the instance.
+    const info = api.toggleInfoAt('1/1');
+    assert.match(info.track, /TemplateBinding BorderBrush/);
+    assert.match(info.on, /Binding Background.*TemplatedParent/);
+
+    // Default toggle uses the style's colors; the customized one its own.
+    const def = api.probeStyle('1/0', 'Background');
+    const custom = api.probeStyle('1/1', 'Background');
+    assert.ok(def, 'style default checked color resolves');
+    assert.ok(custom, 'per-instance checked color resolves');
+    assert.notEqual(def, custom);
+});
+
 test('the injected UimToggleSwitch is recognized by the generic detector', () => {
     const { api } = loadDesigner();
     api.setDoc('MainWindow.xaml', `<Window x:Class="App.W"

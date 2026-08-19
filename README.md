@@ -91,7 +91,11 @@ Open any `.xaml` window in the UI Maker Designer:
   **Pill Badge**. These are plain WPF elements dressed by a
   Style/ControlTemplate that UI Maker writes into `Window.Resources` the
   first time you drop one — no NuGet packages, restyle them freely, and the
-  canvas previews the switch/rounded look. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
+  canvas previews the switch/rounded look. **Each instance can have its own
+  colors**: on a ToggleSwitch, `Background` is the checked track color and
+  `BorderBrush` the unchecked one (set them in the Properties panel's color
+  pickers); Modern Buttons and Pill Badges recolor via `Background` /
+  `Foreground` the same way. WinForms mirrors the VS toolbox: **Common Controls** (Button, Label,
   LinkLabel, TextBox, MaskedTextBox, RichTextBox, CheckBox, RadioButton,
   CheckedListBox, ComboBox, DomainUpDown, ListBox, ListView, TreeView,
   PictureBox, ProgressBar, TrackBar, NumericUpDown, DateTimePicker,
