@@ -3,7 +3,8 @@
 // Loads media/designer.js in Node with a stub DOM so the pure text-transform
 // internals (parsing, surgical edits, rename, delete) can be tested without a
 // webview. The stub only needs to be good enough for module load + rendering
-// side effects to run without throwing; tests assert on TEXT, never on DOM.
+// side effects to run without throwing. It also records rendered children and
+// event handlers for preview tests; geometry still needs a real browser.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,6 +12,7 @@ const vm = require('node:vm');
 
 function stubElement(tag = 'div') {
     const style = {};
+    const listeners = new Map();
     style.setProperty = (k, v) => { style[k] = v; };
     style.removeProperty = k => { delete style[k]; };
     const el = {
@@ -18,19 +20,28 @@ function stubElement(tag = 'div') {
         children: [],
         style,
         dataset: {},
-        classList: { add() { }, remove() { }, toggle() { }, contains() { return false; } },
+        classList: {
+            add(...names) { el.className = [...new Set([...el.className.split(/\s+/).filter(Boolean), ...names])].join(' '); },
+            remove(...names) { el.className = el.className.split(/\s+/).filter(n => !names.includes(n)).join(' '); },
+            toggle(name, force) {
+                const add = force ?? !this.contains(name);
+                if (add) { this.add(name); } else { this.remove(name); }
+                return add;
+            },
+            contains(name) { return el.className.split(/\s+/).includes(name); }
+        },
         setAttribute() { },
         removeAttribute() { },
         getAttribute() { return null; },
-        appendChild(c) { el.children.push(c); return c; },
-        append() { },
+        appendChild(c) { el.children.push(c); c.parentElement = el; c.parentNode = el; return c; },
+        append(...nodes) { for (const c of nodes) { el.appendChild(typeof c === 'string' ? { textContent: c } : c); } },
         prepend() { },
         insertBefore(c) { el.children.push(c); return c; },
         remove() { },
         replaceChildren() { el.children = []; },
-        addEventListener() { },
-        removeEventListener() { },
-        dispatchEvent() { return true; },
+        addEventListener(type, fn) { if (!listeners.has(type)) { listeners.set(type, new Set()); } listeners.get(type).add(fn); },
+        removeEventListener(type, fn) { listeners.get(type)?.delete(fn); },
+        dispatchEvent(event) { for (const fn of listeners.get(event.type) ?? []) { fn(event); } return true; },
         querySelector() { return stubElement(); },
         querySelectorAll() { return []; },
         getBoundingClientRect() { return { left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }; },
@@ -76,12 +87,14 @@ function makeXmlElement(qname, ns) {
         childNodes: [],
         parentNode: null,
         get parentElement() { return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null; },
+        get ownerDocument() { let n = this; while (n.parentNode) { n = n.parentNode; } return n.nodeType === 9 ? n : this._doc; },
         get children() { return this.childNodes.filter(c => c.nodeType === 1); },
         get firstChild() { return this.childNodes[0] ?? null; },
         get attributes() { return [...this.attrs].map(([name, value]) => ({ name, value })); },
         get textContent() {
             return this.childNodes.map(c => c.nodeType === 3 ? c.data : c.textContent).join('');
         },
+        set textContent(value) { this.childNodes = [{ nodeType: 3, data: String(value) }]; },
         getAttribute(n) { return this.attrs.has(n) ? this.attrs.get(n) : null; },
         setAttribute(n, v) { this.attrs.set(n, String(v)); },
         removeAttribute(n) { this.attrs.delete(n); },
@@ -97,6 +110,7 @@ function makeXmlElement(qname, ns) {
             if (i < 0) { el.childNodes.push(c); } else { el.childNodes.splice(i, 0, c); }
             return c;
         },
+        replaceChild(c, old) { this.insertBefore(c, old); old.remove(); return old; },
         remove() {
             if (!el.parentNode) { return; }
             const list = el.parentNode.childNodes;
@@ -126,11 +140,13 @@ function decodeEntities(s) {
 
 function parseXmlDocument(text) {
     const doc = {
+        nodeType: 9,
         _root: null,
         get documentElement() { return this._root; },
         get childNodes() { return this._root ? [this._root] : []; },
+        replaceChild(c, old) { old.parentNode = null; this._root = c; c.parentNode = this; return old; },
         createElement(name) { return makeXmlElement(name, null); },
-        createElementNS(ns, name) { return makeXmlElement(name, ns); },
+        createElementNS(ns, name) { const el = makeXmlElement(name, ns); el._doc = doc; return el; },
         getElementsByTagName(t) {
             if (!this._root) { return []; }
             const out = (t === '*' || this._root.nodeName === t) ? [this._root] : [];
@@ -180,6 +196,7 @@ function parseXmlDocument(text) {
     }
     if (consumed !== text.length || stack.length || !root) { return fail(); }
     doc._root = root;
+    root.parentNode = doc;
     return doc;
 }
 

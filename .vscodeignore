@@ -1,5 +1,6 @@
 # Files excluded from the packaged VSIX
 .vscode/**
+.vscode-test/**
 .github/**
 .gitignore
 src/**

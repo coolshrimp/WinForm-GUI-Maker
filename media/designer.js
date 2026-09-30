@@ -654,6 +654,9 @@
         DockPanel: ['LastChildFill'],
         TabControl: [],
         TabItem: ['Header'],
+        Menu: ['Items', 'ItemsSource'],
+        ContextMenu: ['Items', 'ItemsSource'],
+        MenuItem: ['Header', 'Icon', 'Items', 'ItemsSource', 'InputGestureText', 'IsCheckable', 'IsChecked', 'StaysOpenOnClick', 'Command', 'CommandParameter', 'CommandTarget'],
         ScrollViewer: ['VerticalScrollBarVisibility', 'HorizontalScrollBarVisibility'],
         Grid: []
     };
@@ -678,7 +681,7 @@
     const WINDOW_PROPS = ['Title', 'Width', 'Height', 'MinWidth', 'MinHeight', 'MaxWidth', 'MaxHeight',
         'Background', 'FontSize', 'FontFamily',
         'ResizeMode', 'WindowStartupLocation', 'WindowStyle', 'WindowState', 'SizeToContent',
-        'Topmost', 'ShowInTaskbar', 'Opacity', 'Icon', 'FlowDirection'];
+        'Topmost', 'ShowInTaskbar', 'Opacity', 'Icon', 'FlowDirection', 'ContextMenu'];
 
     /**
      * VS property-window parity: extra per-type entries merged into the
@@ -719,16 +722,147 @@
         if (def) { def.props = [...new Set([...def.props, ...extra])]; }
     }
 
+    // Collection metadata belongs to the owning type: UniformGrid.Columns,
+    // for example, is a number, whereas DataGrid.Columns contains objects.
+    const XAML_ITEM_DEFS = {
+        ComboBoxItem: { attrs: { Content: 'Item' }, props: ['Content', 'IsSelected'], events: ['Selected', 'Unselected'] },
+        ListBoxItem: { attrs: { Content: 'Item' }, props: ['Content', 'IsSelected'], events: ['Selected', 'Unselected'] },
+        ListViewItem: { attrs: { Content: 'Item' }, props: ['Content', 'IsSelected'], events: ['Selected', 'Unselected'] },
+        TreeViewItem: { attrs: { Header: 'Item' }, props: ['Header', 'Items', 'ItemsSource', 'IsExpanded', 'IsSelected'], events: ['Expanded', 'Collapsed', 'Selected', 'Unselected'] },
+        TabItem: { attrs: { Header: 'Tab' }, props: ['Header', 'IsSelected'], events: ['Selected', 'Unselected'] },
+        StatusBarItem: { attrs: { Content: 'Status' }, props: ['Content'], events: [] },
+        RowDefinition: { attrs: { Height: '*' }, props: ['Height', 'MinHeight', 'MaxHeight', 'SharedSizeGroup'], events: [], object: true },
+        ColumnDefinition: { attrs: { Width: '*' }, props: ['Width', 'MinWidth', 'MaxWidth', 'SharedSizeGroup'], events: [], object: true },
+        GridViewColumn: { attrs: { Header: 'Column' }, props: ['Header', 'Width', 'DisplayMemberBinding', 'CellTemplate', 'CellTemplateSelector', 'HeaderTemplate', 'HeaderStringFormat'], events: [], object: true },
+        GridView: { attrs: {}, props: ['Columns', 'AllowsColumnReorder', 'ColumnHeaderTemplate', 'ColumnHeaderStringFormat'], events: [], object: true },
+        DataGridTextColumn: { attrs: { Header: 'Column' }, props: ['Header', 'Width', 'MinWidth', 'MaxWidth', 'Binding', 'IsReadOnly', 'Visibility', 'CanUserSort', 'CanUserResize', 'CanUserReorder', 'SortMemberPath', 'DisplayIndex', 'ElementStyle', 'EditingElementStyle'], events: [], object: true },
+        DataGridCheckBoxColumn: { attrs: { Header: 'Column' }, props: ['Header', 'Width', 'Binding', 'IsThreeState', 'IsReadOnly', 'Visibility', 'SortMemberPath', 'DisplayIndex'], events: [], object: true },
+        DataGridComboBoxColumn: { attrs: { Header: 'Column' }, props: ['Header', 'Width', 'ItemsSource', 'SelectedItemBinding', 'SelectedValueBinding', 'SelectedValuePath', 'DisplayMemberPath', 'IsReadOnly', 'Visibility', 'DisplayIndex'], events: [], object: true },
+        DataGridTemplateColumn: { attrs: { Header: 'Column' }, props: ['Header', 'Width', 'CellTemplate', 'CellEditingTemplate', 'IsReadOnly', 'Visibility', 'SortMemberPath', 'DisplayIndex'], events: [], object: true },
+        String: { attrs: {}, props: ['Value'], events: [], object: true }
+    };
+    const XAML_COLLECTIONS = {
+        Menu: { Items: ['MenuItem', 'Separator'] },
+        MenuItem: { Items: ['MenuItem', 'Separator'] },
+        ContextMenu: { Items: ['MenuItem', 'Separator'] },
+        ComboBox: { Items: ['ComboBoxItem', 'String'] },
+        ListBox: { Items: ['ListBoxItem', 'String'] },
+        ListView: { Items: ['ListViewItem', 'String'], Columns: ['GridViewColumn'] },
+        TreeView: { Items: ['TreeViewItem'] },
+        TreeViewItem: { Items: ['TreeViewItem'] },
+        TabControl: { Items: ['TabItem'] },
+        ItemsControl: { Items: ['ContentControl', 'String'] },
+        ToolBar: { Items: ['Button', 'Separator', 'ComboBox', 'TextBlock'] },
+        StatusBar: { Items: ['StatusBarItem', 'Separator'] },
+        ToolBarTray: { ToolBars: ['ToolBar'] },
+        Grid: { RowDefinitions: ['RowDefinition'], ColumnDefinitions: ['ColumnDefinition'] },
+        DataGrid: { Items: ['String'], Columns: ['DataGridTextColumn', 'DataGridCheckBoxColumn', 'DataGridComboBoxColumn', 'DataGridTemplateColumn'] },
+        GridView: { Columns: ['GridViewColumn'] }
+    };
+    COMMON_PROPS.push('ContextMenu');
+    for (const [type, collections] of Object.entries(XAML_COLLECTIONS)) {
+        const def = CONTROLS[type];
+        if (def) { def.props = [...new Set([...def.props, ...Object.keys(collections)])]; }
+        else { PANEL_PROPS[type] = [...new Set([...(PANEL_PROPS[type] ?? []), ...Object.keys(collections)])]; }
+    }
+
+    function xamlCollectionType(el) {
+        return XAML_CUSTOM[el?.localName]?.base ?? el?.localName;
+    }
+
+    function xamlCollectionTypes(el, prop = 'Items') {
+        if (!el) { return null; }
+        if (prop === 'ContextMenu' && !XAML_ITEM_DEFS[el.localName]?.object) { return ['MenuItem', 'Separator']; }
+        return XAML_COLLECTIONS[xamlCollectionType(el)]?.[prop] ?? null;
+    }
+
+    function xamlCollectionChoices(el, prop) {
+        const types = xamlCollectionTypes(el, prop) ?? [];
+        const flexible = prop === 'Items' && !['TabControl', 'TreeView', 'TreeViewItem'].includes(xamlCollectionType(el));
+        return [...new Set([...types, ...(flexible ? Object.keys(CONTROLS) : [])])];
+    }
+
+    function xamlCollectionHost(el, prop = 'Items', create = false) {
+        if (!xamlCollectionTypes(el, prop)) { return null; }
+        const doc = el.ownerDocument;
+        const property = (owner, name) => {
+            let node = collectionProperty(owner, name);
+            if (!node && create) {
+                node = doc.createElementNS(owner.namespaceURI ?? PRES_NS, `${owner.prefix ? `${owner.prefix}:` : ''}${owner.localName}.${name}`);
+                owner.appendChild(node);
+            }
+            return node;
+        };
+        if (prop === 'ContextMenu' || (xamlCollectionType(el) === 'ListView' && prop === 'Columns')) {
+            const name = prop === 'ContextMenu' ? 'ContextMenu' : 'View';
+            const type = prop === 'ContextMenu' ? 'ContextMenu' : 'GridView';
+            if (el.getAttribute(name) !== null) { return null; } // binding/resource owned
+            const wrapper = property(el, name);
+            let object = wrapper?.children[0];
+            if (object && object.localName !== type) { return null; }
+            if (!object && create) { object = doc.createElementNS(PRES_NS, type); wrapper.appendChild(object); }
+            return object ? (prop === 'ContextMenu' ? collectionProperty(object, 'Items') ?? object : property(object, 'Columns') ?? object) : null;
+        }
+        return prop === 'Items' || (xamlCollectionType(el) === 'ToolBarTray' && prop === 'ToolBars')
+            || (xamlCollectionType(el) === 'GridView' && prop === 'Columns')
+            ? collectionProperty(el, prop) ?? el : property(el, prop);
+    }
+
+    function collectionProperty(el, prop) {
+        return [...el.children].find(c => c.localName.endsWith(`.${prop}`)) ?? null;
+    }
+
+    function xamlCollectionChildren(el, prop = 'Items') {
+        const host = xamlCollectionHost(el, prop);
+        if (!host) { return []; }
+        if (host === el || host.localName === 'ContextMenu' || host.localName === 'GridView') { return elementChildren(host); }
+        return prop === 'Items' ? [...elementChildren(el), ...host.children] : [...host.children];
+    }
+
+    function xamlCollectionWritable(el, prop = 'Items') {
+        if (!xamlCollectionTypes(el, prop)) { return false; }
+        if (prop === 'Items' && (styleProp(el, 'ItemsSource') || collectionProperty(el, 'ItemsSource'))) { return false; }
+        if (prop === 'ContextMenu' || (xamlCollectionType(el) === 'ListView' && prop === 'Columns')) {
+            const name = prop === 'ContextMenu' ? 'ContextMenu' : 'View';
+            const type = prop === 'ContextMenu' ? 'ContextMenu' : 'GridView';
+            const child = collectionProperty(el, name)?.children[0];
+            return !styleProp(el, name) && (!child || child.localName === type);
+        }
+        return true;
+    }
+
+    function xamlCollectionLocation(item) {
+        const parent = item?.parentElement;
+        if (!parent) { return null; }
+        if (parent.localName.includes('.')) {
+            const prop = parent.localName.slice(parent.localName.indexOf('.') + 1);
+            const owner = parent.parentElement;
+            return xamlCollectionTypes(owner, prop) ? { owner, prop } : null;
+        }
+        for (const prop of Object.keys(XAML_COLLECTIONS[xamlCollectionType(parent)] ?? {})) {
+            if (xamlCollectionChildren(parent, prop).includes(item)) { return { owner: parent, prop }; }
+        }
+        return null;
+    }
+
+    function xamlCollectionProperties(el) {
+        const def = XAML_ITEM_DEFS[el.localName];
+        return [...new Set([...(def?.props ?? xamlDefOf(el.localName)?.props ?? PANEL_PROPS[el.localName] ?? []),
+            ...Object.keys(XAML_COLLECTIONS[xamlCollectionType(el)] ?? {}),
+            ...(def?.object ? [] : ['Name', ...COMMON_PROPS]),
+            ...[...el.attributes].map(a => a.name).filter(n => !/^xmlns(?::|$)/.test(n) && n !== 'x:Name' && n !== 'Name')])];
+    }
+
     /** Boolean properties without a dedicated ENUM_VALUES entry — rendered as
      *  (default)/True/False dropdowns like every other enum. */
     const XAML_BOOL_PROPS = new Set([
-        'IsDefault', 'IsCancel', 'IsThreeState', 'IsReadOnly', 'AllowDrop', 'ClipToBounds',
+        'IsDefault', 'IsCancel', 'IsThreeState', 'IsReadOnly', 'IsCheckable', 'StaysOpenOnClick', 'AllowDrop', 'ClipToBounds',
         'Focusable', 'IsTabStop', 'IsHitTestVisible', 'SnapsToDevicePixels', 'UseLayoutRounding',
         'ShowGridLines', 'IsSnapToTickEnabled', 'IsDirectionReversed', 'CanUserAddRows',
         'CanUserDeleteRows', 'CanUserReorderColumns', 'CanUserResizeColumns', 'CanUserSortColumns',
         'IsTodayHighlighted', 'AcceptsTab', 'IsDropDownOpen', 'StaysOpenOnEdit', 'CanContentScroll',
         'ShowInTaskbar', 'OverridesDefaultStyle', 'ForceCursor', 'IsManipulationEnabled',
-        'IsTextSearchEnabled', 'IsSynchronizedWithCurrentItem'
+        'IsTextSearchEnabled', 'IsSynchronizedWithCurrentItem', 'IsSelected', 'IsExpanded', 'AllowsColumnReorder', 'CanUserSort', 'CanUserResize', 'CanUserReorder'
     ]);
     const WINDOW_EVENTS = ['Loaded', 'Closing', 'KeyDown', 'KeyUp'];
 
@@ -819,6 +953,9 @@
         IsHitTestVisible: 'Behavior', IsTabStop: 'Behavior', TabIndex: 'Behavior',
         SnapsToDevicePixels: 'Appearance', UseLayoutRounding: 'Appearance',
         Command: 'Common', CommandParameter: 'Common', ClickMode: 'Behavior',
+        Items: 'Common', Header: 'Common', InputGestureText: 'Common',
+        Columns: 'Common', RowDefinitions: 'Layout', ColumnDefinitions: 'Layout', ToolBars: 'Common', ContextMenu: 'Common', Value: 'Common',
+        IsCheckable: 'Common', IsChecked: 'Common', StaysOpenOnClick: 'Behavior',
         IsDefault: 'Behavior', IsCancel: 'Behavior', IsThreeState: 'Behavior',
         HorizontalContentAlignment: 'Layout', VerticalContentAlignment: 'Layout',
         TextAlignment: 'Text', TextTrimming: 'Text', TextDecorations: 'Text',
@@ -954,6 +1091,11 @@
         PasswordChar: 'The masking character. Default: ●.',
         AcceptsTab: 'Insert a tab instead of moving focus. Default: False.',
         ItemsSource: 'The collection this list binds to, e.g. {Binding Items}.',
+        Items: 'Add, remove, reorder, and configure the items in this collection.',
+        Columns: 'Configure the columns in this control. ListView columns are saved in its GridView.',
+        RowDefinitions: 'Configure Grid row sizes, limits, and shared size groups.',
+        ColumnDefinitions: 'Configure Grid column sizes, limits, and shared size groups.',
+        ContextMenu: 'Configure the items of an inline context menu.',
         DisplayMemberPath: 'Property of each item to display, e.g. Name.',
         SelectedIndex: 'Index of the selected item. Default: -1 (none).',
         SelectionMode: 'Single, Multiple, or Extended selection. Default: Single (DataGrid/ListView: Extended).',
@@ -1031,6 +1173,11 @@
     let wfLang = 'cs';          // WinForms language: 'cs' (Designer.cs) | 'vb' (Designer.vb)
     let wfVbHandles = [];       // VB: [{handler, target}] Handles wiring from the code-behind
     const uiTabs = new Map();   // TabControl path/name -> active tab index
+    const uiMenus = new Set(); // Open MenuItem paths (preview only; never written to XAML)
+    let menuPreviews = [];     // Rendered menu rows and their popup containers
+    let collectionEditor = null;
+    const MENU_TYPES = new Set(['Menu', 'MenuItem', 'ContextMenu']);
+    const MENU_EVENTS = { MenuItem: ['Click', 'Checked', 'Unchecked', 'SubmenuOpened', 'SubmenuClosed'] };
     let activeTab = 'props';    // 'props' | 'events'
     let zoom = 1;
     let config = { gridSize: 8, snap: true, docName: 'Window.xaml' };
@@ -1098,9 +1245,11 @@
             if (msg.xaml) {
                 imageCache.set(`x:${msg.rel}`, msg.uri);
                 if (pendingXamlImage && !modelStale) {
-                    const { el, prop } = pendingXamlImage;
+                    const { el, prop, apply } = pendingXamlImage;
                     pendingXamlImage = null;
-                    if (prop === 'Source') {
+                    if (apply) {
+                        apply(msg.rel);
+                    } else if (prop === 'Source') {
                         el.setAttribute('Source', msg.rel);
                         commit();
                     } else {
@@ -1317,9 +1466,9 @@
         return idx.join('/');
     }
 
-    function elAtPath(path) {
-        if (!xamlDoc) { return null; }
-        let n = xamlDoc.documentElement;
+    function elAtPath(path, doc = xamlDoc) {
+        if (!doc) { return null; }
+        let n = doc.documentElement;
         if (path === '') { return n; }
         for (const i of path.split('/')) {
             n = n.children[Number(i)];
@@ -1371,7 +1520,7 @@
 
     function collectStylesFrom(container) {
         for (const node of container.children) {
-            if (node.localName === 'ResourceDictionary') { collectStylesFrom(node); continue; }
+            if (node.localName === 'ResourceDictionary' || node.localName === 'ResourceDictionary.MergedDictionaries') { collectStylesFrom(node); continue; }
             const key = node.getAttributeNS(X_NS, 'Key') || node.getAttribute('x:Key');
 
             // Brush/color resources referenced via {StaticResource}. A brush
@@ -1582,6 +1731,7 @@
     function renderEmpty() {
         surfaceEl.innerHTML = '';
         visuals = [];
+        menuPreviews = [];
         titleText.textContent = config.docName;
         windowBox.classList.add('ff-noresize');
         renderPanel();
@@ -1612,9 +1762,12 @@
         // boxes) flips to bright text on dark app themes for readability.
         surfaceEl.classList.toggle('ff-dark-surface', isDarkColor(bg));
         surfaceEl.classList.remove('ff-winforms'); // XAML keeps WPF default chrome
-        surfaceEl.style.color = resolveBrush(styleProp(windowEl, 'Foreground')) || '';
+        surfaceEl.style.color = resolveBrush(styleProp(windowEl, 'Foreground')) || '#000000';
         const winFf = styleProp(windowEl, 'FontFamily');
         surfaceEl.style.fontFamily = winFf && !winFf.includes('{') ? winFf : '';
+        surfaceEl.style.fontSize = `${num(styleProp(windowEl, 'FontSize'), 12)}px`;
+        surfaceEl.style.fontWeight = cssFontWeight(styleProp(windowEl, 'FontWeight') || 'Normal');
+        surfaceEl.style.fontStyle = (styleProp(windowEl, 'FontStyle') || 'normal').toLowerCase();
 
         // Grid dots follow the snap size.
         surfaceEl.style.backgroundImage = config.snap
@@ -1624,9 +1777,11 @@
         // Content tree.
         surfaceEl.innerHTML = '';
         visuals = [];
+        menuPreviews = [];
         if (contentRoot) {
             surfaceEl.appendChild(renderElement(contentRoot, 'cell'));
         }
+        syncMenuPreviews();
 
         applyZoomLayout();
         drawSelection();
@@ -1674,6 +1829,11 @@
             e.stopPropagation();
             if (e.ctrlKey || e.metaKey || e.shiftKey) {
                 select(el, true); // multi-select (delete/copy work on the group)
+                return;
+            }
+            if (type === 'MenuItem') {
+                toggleMenuPreview(el);
+                select(el);
                 return;
             }
             const wasGroup = multiSel.size > 1 && multiSel.has(el);
@@ -1732,7 +1892,7 @@
         const fw = styleProp(el, 'FontWeight');
         if (fw) { div.style.fontWeight = cssFontWeight(fw); }
         const fst = styleProp(el, 'FontStyle');
-        if (fst && fst.toLowerCase() === 'italic') { div.style.fontStyle = 'italic'; }
+        if (fst && /^(normal|italic|oblique)$/i.test(fst)) { div.style.fontStyle = fst.toLowerCase(); }
         const ff = styleProp(el, 'FontFamily');
         if (ff && !ff.includes('{')) { div.style.fontFamily = ff; }
         const tt = el.getAttribute('ToolTip');
@@ -1876,11 +2036,30 @@
                 singleCell(div);
                 for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'cell')); }
                 break;
-            case 'Menu': case 'ToolBar': case 'StatusBar': {
+            case 'Menu': {
+                div.style.display = 'flex';
+                div.style.flexDirection = 'row';
+                div.style.alignItems = 'stretch';
+                if (!div.style.background) { div.style.background = '#f0f0f0'; }
+                if (!div.style.color) { div.style.color = '#000000'; }
+                div.style.setProperty('--ff-menu-bg', div.style.background);
+                applyBorder(div, el);
+                for (const c of menuChildren(el)) { div.appendChild(renderElement(c, 'stack-h')); }
+                break;
+            }
+            case 'MenuItem':
+                buildMenuItem(div, el);
+                break;
+            case 'ToolBar': case 'StatusBar': {
                 div.style.display = 'flex';
                 div.style.flexDirection = 'row';
                 div.style.alignItems = 'center';
-                for (const c of elementChildren(el)) { div.appendChild(renderElement(c, 'stack-h')); }
+                for (const c of xamlCollectionChildren(el)) { div.appendChild(renderElement(c, 'stack-h')); }
+                break;
+            }
+            case 'ToolBarTray': {
+                div.style.display = 'flex'; div.style.flexDirection = 'column';
+                for (const c of xamlCollectionChildren(el, 'ToolBars')) { div.appendChild(renderElement(c, 'stack-v')); }
                 break;
             }
             case 'Canvas': {
@@ -1939,6 +2118,7 @@
                 break;
             case 'Separator':
                 div.classList.add('ff-look-separator');
+                if (menuOwner(el)?.localName === 'MenuItem') { div.classList.add('ff-menu-separator'); }
                 break;
             case 'TextBlock': {
                 const inner = document.createElement('div');
@@ -1954,7 +2134,7 @@
             default: {
                 // Leaf control chrome; nested element content renders inside it.
                 const inner = buildInner(type, el);
-                const kids = elementChildren(el).filter(c => c.localName !== 'ListBoxItem');
+                const kids = XAML_COLLECTIONS[type]?.Items ? [] : elementChildren(el);
                 if (kids.length === 1) {
                     inner.textContent = '';
                     singleCell(inner);
@@ -1972,6 +2152,115 @@
                 div.appendChild(inner);
             }
         }
+    }
+
+    /** Items property syntax is equivalent to direct menu children in WPF. */
+    function menuChildren(el) {
+        return [...elementChildren(el), ...(propertyElement(el, 'Items')?.children ?? [])];
+    }
+
+    function menuOwner(el) {
+        const parent = el?.parentElement;
+        return parent?.localName.endsWith('.Items') ? parent.parentElement : parent;
+    }
+
+    function menuItemAncestor(el) {
+        for (let node = el; node; node = node.parentElement) {
+            if (node.localName === 'MenuItem') { return node; }
+        }
+        return null;
+    }
+
+    /** WPF access-key markers are hidden until Alt is pressed; __ is literal. */
+    function menuCaption(text) {
+        return (text || '').replace(/_(.)/g, '$1');
+    }
+
+    function buildMenuItem(div, el) {
+        const topLevel = menuOwner(el)?.localName === 'Menu';
+        div.classList.add(topLevel ? 'ff-menu-top' : 'ff-menu-row');
+        const header = document.createElement('div');
+        header.className = 'ff-menu-header';
+        const padding = styleProp(el, 'Padding');
+        if (padding) {
+            const p = parseMargin(padding);
+            header.style.padding = `${p.t}px ${p.r}px ${p.b}px ${p.l}px`;
+        }
+        if (styleProp(el, 'IsEnabled') === 'False') { div.classList.add('ff-disabled-control'); }
+
+        if (!topLevel || el.getAttribute('Icon') || propertyElement(el, 'Icon')) {
+            const icon = document.createElement('span');
+            icon.className = 'ff-menu-icon';
+            if (styleProp(el, 'IsChecked') === 'True') {
+                icon.textContent = '✓';
+            } else {
+                const iconProp = propertyElement(el, 'Icon');
+                for (const c of iconProp?.children ?? []) { icon.appendChild(renderElement(c, 'cell')); }
+                const iconText = el.getAttribute('Icon');
+                if (!iconProp && iconText && !iconText.includes('{')) { icon.textContent = iconText; }
+            }
+            header.appendChild(icon);
+        }
+        const label = document.createElement('span');
+        label.className = 'ff-menu-caption';
+        const headerProp = propertyElement(el, 'Header');
+        if (headerProp?.children.length) {
+            for (const c of headerProp.children) {
+                if (c.localName === 'AccessText') {
+                    label.append(menuCaption(c.getAttribute('Text') ?? collapse(c.textContent)));
+                } else {
+                    label.appendChild(renderElement(c, 'scroll'));
+                }
+            }
+        } else {
+            label.textContent = menuCaption(styleProp(el, 'Header') ?? collapse(headerProp?.textContent));
+        }
+        header.appendChild(label);
+        const kids = menuChildren(el);
+        if (!topLevel) {
+            const gesture = document.createElement('span');
+            gesture.className = 'ff-menu-gesture';
+            gesture.textContent = styleProp(el, 'InputGestureText') || '';
+            const arrow = document.createElement('span');
+            arrow.className = 'ff-menu-arrow';
+            arrow.textContent = kids.length ? '▸' : '';
+            header.append(gesture, arrow);
+        }
+        div.appendChild(header);
+        let popup = null;
+        if (kids.length) {
+            popup = document.createElement('div');
+            popup.className = `ff-menu-popup${topLevel ? '' : ' ff-menu-submenu'}`;
+            popup.hidden = true;
+            const bg = resolveBrush(styleProp(el, 'Background'));
+            if (bg && !/^(transparent|rgba\([^)]*,\s*0(?:\.0+)?\))$/i.test(bg)) {
+                popup.style.background = bg;
+            }
+            for (const c of kids) { popup.appendChild(renderElement(c, 'stack-v')); }
+            div.appendChild(popup);
+        }
+        menuPreviews.push({ el, div, popup });
+    }
+
+    function syncMenuPreviews() {
+        for (const { el, div, popup } of menuPreviews) {
+            const open = !!popup && uiMenus.has(pathOf(el));
+            if (popup) { popup.hidden = !open; }
+            div.classList.toggle('ff-menu-open', open);
+            div.setAttribute('aria-expanded', String(open));
+        }
+    }
+
+    function toggleMenuPreview(el) {
+        const open = !uiMenus.has(pathOf(el));
+        uiMenus.clear();
+        // Keep only this branch open, like a native cascading menu. Selecting
+        // a leaf keeps its parents visible so its properties remain editable.
+        for (let node = open && menuChildren(el).length ? el : menuOwner(el);
+            node?.localName === 'MenuItem'; node = menuOwner(node)) {
+            uiMenus.add(pathOf(node));
+        }
+        syncMenuPreviews();
     }
 
     /** Draw a toggle switch (track + thumb + label) into `inner`, using the
@@ -2080,10 +2369,10 @@
         div.style.display = 'flex';
         div.style.flexDirection = 'column';
 
-        const items = elementChildren(el).filter(c => c.localName === 'TabItem');
+        const items = xamlCollectionChildren(el).filter(c => c.localName === 'TabItem');
         const key = pathOf(el);
-        let active = uiTabs.get(key) ?? 0;
-        if (active >= items.length) { active = 0; }
+        let active = uiTabs.get(key) ?? int(styleProp(el, 'SelectedIndex'), 0);
+        if (active < 0 || active >= items.length) { active = 0; }
 
         const strip = document.createElement('div');
         strip.className = 'ff-tab-strip';
@@ -2109,11 +2398,51 @@
         content.className = 'ff-tab-content';
         const activeItem = items[active];
         if (activeItem) {
-            const cc = elementChildren(activeItem)[0];
+            const cc = elementChildren(activeItem)[0] ?? propertyElement(activeItem, 'Content')?.children[0];
             if (cc) { content.appendChild(renderElement(cc, 'cell')); }
+            else { content.textContent = activeItem.getAttribute('Content') ?? ''; }
             visuals.push({ el: activeItem, div: content });
         }
         div.append(strip, content);
+    }
+
+    function xamlItemCaption(item) {
+        if (!item) { return ''; }
+        const content = propertyElement(item, 'Content') ?? propertyElement(item, 'Header');
+        return item.getAttribute('Content') ?? item.getAttribute('Header') ?? item.getAttribute('Text')
+            ?? content?.children[0]?.getAttribute('Text') ?? collapse((content ?? item).textContent);
+    }
+
+    function buildLiteralItems(inner, el, tree = false) {
+        const selectedIndex = int(styleProp(el, 'SelectedIndex'), -1);
+        function append(owner, depth = 0) {
+            xamlCollectionChildren(owner).forEach((item, index) => {
+                const row = document.createElement('div'); row.className = 'ff-list-item';
+                row.classList.toggle('active', item.getAttribute('IsSelected') === 'True' || (!depth && index === selectedIndex));
+                row.style.paddingLeft = `${6 + depth * 16}px`;
+                const children = tree ? xamlCollectionChildren(item) : [];
+                row.textContent = `${tree && children.length ? (item.getAttribute('IsExpanded') === 'True' ? '▾ ' : '▸ ') : ''}${xamlItemCaption(item)}`;
+                row.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); select(item); });
+                visuals.push({ el: item, div: row }); inner.appendChild(row);
+                if (children.length && item.getAttribute('IsExpanded') === 'True') { append(item, depth + 1); }
+            });
+        }
+        append(el);
+    }
+
+    function buildColumnHeaders(inner, el) {
+        const columns = xamlCollectionChildren(el, 'Columns');
+        if (!columns.length) { return; }
+        const header = document.createElement('div'); header.className = 'ff-grid-header';
+        for (const column of columns) {
+            const cell = document.createElement('span'); cell.textContent = menuHeaderValue(column) || 'Column';
+            if (column.getAttribute('Visibility') === 'Collapsed') { continue; }
+            const width = num(column.getAttribute('Width'), NaN);
+            if (Number.isFinite(width)) { cell.style.flex = `0 0 ${width}px`; }
+            cell.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); select(column); });
+            visuals.push({ el: column, div: cell }); header.appendChild(cell);
+        }
+        inner.appendChild(header);
     }
 
     /** Inner markup that mimics the WPF control's default look. */
@@ -2212,22 +2541,35 @@
                 inner.innerHTML = `<span class="ff-glyph ${el.getAttribute('IsChecked') === 'True' ? 'ff-radio-on' : 'ff-radio-off'}"></span>`;
                 inner.append(content || 'RadioButton');
                 break;
-            case 'ComboBox':
+            case 'ComboBox': {
                 inner.classList.add('ff-look-input');
-                inner.innerHTML = '<span class="ff-combo-arrow">▾</span>';
+                inner.style.overflow = 'visible'; inner.style.position = 'relative';
+                const items = xamlCollectionChildren(el);
+                const index = int(styleProp(el, 'SelectedIndex'), -1);
+                const current = items.find(i => i.getAttribute('IsSelected') === 'True') ?? items[index];
+                inner.textContent = el.getAttribute('Text') ?? xamlItemCaption(current);
+                const arrow = document.createElement('span'); arrow.className = 'ff-combo-arrow'; arrow.textContent = '▾'; inner.appendChild(arrow);
+                if (items.length) {
+                    const popup = document.createElement('div'); popup.className = 'ff-items-popup'; popup.hidden = true;
+                    buildLiteralItems(popup, el);
+                    // Preview choices without executing commands or changing
+                    // SelectedIndex in the source document.
+                    arrow.addEventListener('mousedown', e => {
+                        e.preventDefault(); e.stopPropagation(); select(el); popup.hidden = !popup.hidden;
+                    });
+                    inner.appendChild(popup);
+                }
                 break;
-            case 'ListBox': {
+            }
+            case 'ListBox': case 'ItemsControl': {
                 inner.classList.add('ff-look-list');
-                // Show literal ListBoxItem children when present.
-                const items = [...el.children].filter(c => c.localName === 'ListBoxItem');
-                inner.innerHTML = items.length
-                    ? items.map(i => `<div class="ff-list-item">${escapeHtml(i.textContent || i.getAttribute('Content') || '')}</div>`).join('')
-                    : '';
+                buildLiteralItems(inner, el);
                 break;
             }
             case 'DataGrid':
                 inner.classList.add('ff-look-list');
-                inner.innerHTML = '<div class="ff-grid-header"><span>Col1</span><span>Col2</span><span>Col3</span></div>';
+                buildColumnHeaders(inner, el);
+                if (!xamlCollectionChildren(el, 'Columns').length) { inner.innerHTML = '<div class="ff-grid-header"><span>Col1</span><span>Col2</span><span>Col3</span></div>'; }
                 break;
             case 'Image': {
                 inner.classList.add('ff-look-image');
@@ -2311,10 +2653,14 @@
                 break;
             case 'ListView':
                 inner.classList.add('ff-look-list');
-                inner.innerHTML = '<div class="ff-grid-header"><span>Name</span><span>Value</span></div>';
+                buildColumnHeaders(inner, el); buildLiteralItems(inner, el);
                 break;
             case 'TreeView':
                 inner.classList.add('ff-look-list');
+                buildLiteralItems(inner, el, true);
+                break;
+            case 'ComboBoxItem': case 'ListBoxItem': case 'ListViewItem': case 'StatusBarItem': case 'TreeViewItem':
+                inner.classList.add('ff-look-label'); inner.textContent = xamlItemCaption(el);
                 break;
             case 'RichTextBox':
                 inner.classList.add('ff-look-input', 'ff-look-textarea');
@@ -2423,6 +2769,10 @@
     const multiSel = new Set();
 
     function select(el, additive = false) {
+        if (docMode === 'xaml' && !menuItemAncestor(el)) {
+            uiMenus.clear();
+            syncMenuPreviews();
+        }
         if (additive && el) {
             if (multiSel.has(el) && multiSel.size > 1) {
                 multiSel.delete(el);
@@ -3639,6 +3989,489 @@
 
     // ========================================================== property panel
 
+    // Collection edits use a separate XML document until OK. This keeps
+    // Cancel side-effect free and retains arbitrary templates/bindings on items.
+    function menuHeaderValue(el) {
+        const header = propertyElement(el, 'Header');
+        return el.getAttribute('Header') ?? header?.children[0]?.getAttribute('Text') ?? collapse(header?.textContent);
+    }
+
+    function menuIconValue(el) {
+        const content = propertyElement(el, 'Icon');
+        const image = content?.children[0];
+        return el.getAttribute('Icon') ?? (image?.localName === 'Image' ? image.getAttribute('Source') ?? '' : content ? '(content)' : '');
+    }
+
+    function xamlPropertyCategory(el, prop) {
+        return el.localName === 'MenuItem' && prop === 'Icon' ? 'Common' : XAML_CATS[prop] ?? 'Common';
+    }
+
+    function setMenuIcon(el, value, doc) {
+        if (value === '(content)') { return; }
+        removePropertyElement(el, 'Icon');
+        el.removeAttribute('Icon');
+        if (!value) { return; }
+        if (/\.(png|jpe?g|gif|bmp|ico|webp|tiff?)(?:[?#].*)?$/i.test(value)) {
+            const prop = doc.createElementNS(PRES_NS, `${el.localName}.Icon`);
+            const image = doc.createElementNS(PRES_NS, 'Image');
+            image.setAttribute('Source', value);
+            image.setAttribute('Width', '16');
+            image.setAttribute('Height', '16');
+            prop.appendChild(image);
+            el.insertBefore(prop, el.firstChild);
+        } else {
+            el.setAttribute('Icon', value);
+        }
+    }
+
+    function menuIconRow(el, options = {}) {
+        const apply = value => {
+            if (options.write) { options.write('Icon', value.trim()); return; }
+            if (elAtPath(pathOf(el)) !== el || docMode !== 'xaml' || modelStale) { return; }
+            setMenuIcon(el, value.trim(), xamlDoc);
+            commit();
+        };
+        const row = propRow('Icon', menuIconValue(el), apply);
+        const pick = document.createElement('button');
+        pick.type = 'button';
+        pick.className = 'ff-img-btn';
+        pick.textContent = '…';
+        pick.title = 'Choose an icon image';
+        pick.addEventListener('click', () => {
+            pendingXamlImage = { apply: rel => {
+                if (!options.session || collectionEditor?.session === options.session) { apply(rel); }
+            } };
+            vscode.postMessage({ type: 'pickImage', xaml: true, prop: 'Icon' });
+        });
+        row.appendChild(pick);
+        return row;
+    }
+
+    function collectionRow(prop, count, edit) {
+        const row = document.createElement('div');
+        row.className = 'ff-prop-row';
+        row.dataset.prop = prop;
+        const label = document.createElement('label');
+        label.textContent = prop;
+        const value = document.createElement('span');
+        value.className = 'ff-collection-value';
+        value.textContent = `(Collection) · ${count} item${count === 1 ? '' : 's'}`;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ff-img-btn';
+        button.textContent = '…';
+        button.title = `Open ${prop} collection editor`;
+        button.setAttribute('aria-label', `Edit ${prop} collection`);
+        button.addEventListener('click', edit);
+        row.append(label, value, button);
+        return row;
+    }
+
+    function createXamlCollectionSession(owner, prop = 'Items') {
+        if (modelStale || docMode !== 'xaml' || !xamlCollectionTypes(owner, prop)) { return null; }
+        const ownerPath = pathOf(owner);
+        if (elAtPath(ownerPath) !== owner) { return null; }
+        const doc = new DOMParser().parseFromString(xamlText, 'text/xml');
+        if (doc.getElementsByTagName('parsererror').length) { return null; }
+        const draftOwner = elAtPath(ownerPath, doc);
+        return { doc, owner: draftOwner, scope: draftOwner, prop, trail: [], ownerPath, baseText: xamlText,
+            selected: xamlCollectionChildren(draftOwner, prop)[0] ?? null, error: '', handlers: new Map() };
+    }
+
+    function xamlCollectionContains(session, el) {
+        for (let n = el; n; n = n.parentElement) { if (n === session.owner) { return true; } }
+        return false;
+    }
+
+    function xamlCollectionSet(session, el, prop, value) {
+        session.error = '';
+        if (!xamlCollectionContains(session, el)) { return false; }
+        if (prop === 'ItemsSource' && value && value !== el.getAttribute(prop)
+            && xamlCollectionTypes(el, 'Items') && xamlCollectionChildren(el).length) {
+            session.error = 'Remove designer items before assigning ItemsSource.';
+            return false;
+        }
+        if (prop === 'Value' && el.localName === 'String') {
+            el.textContent = value;
+        } else if (prop === 'Name') {
+            const name = value.trim();
+            if (name && (!isCSharpIdentifier(name) || [...session.doc.getElementsByTagName('*')]
+                .some(n => n !== el && getName(n) === name))) {
+                session.error = 'Use a valid, unique control name.';
+                return false;
+            }
+            setName(el, name);
+        } else if (prop === 'Icon' && el.localName === 'MenuItem') {
+            setMenuIcon(el, value, session.doc);
+        } else {
+            if ((MENU_EVENTS[el.localName] ?? xamlDefOf(el.localName)?.events ?? []).includes(prop) && value && !isCSharpIdentifier(value)) {
+                session.error = 'Use a valid event handler name.';
+                return false;
+            }
+            collectionProperty(el, prop)?.remove();
+            if (value === '') { el.removeAttribute(prop); } else { el.setAttribute(prop, value); }
+        }
+        return true;
+    }
+
+    function xamlCollectionAdd(session, parent, type, prop = parent === session.scope ? session.prop : 'Items') {
+        session.error = '';
+        if (!xamlCollectionContains(session, parent) || !xamlCollectionWritable(parent, prop)) {
+            session.error = prop === 'Items'
+                ? 'ItemsSource supplies this collection. Clear ItemsSource to add designer items.'
+                : 'A binding or resource supplies this collection. Configure it in Collection properties before adding designer items.';
+            return null;
+        }
+        const choices = xamlCollectionChoices(parent, prop);
+        if (!choices.includes(type)) { session.error = 'This item type is not supported by the collection.'; return null; }
+        if (type === 'String' && !session.stringPrefix) {
+            const used = new Set([...session.doc.getElementsByTagName('*')].flatMap(n => [...n.attributes].filter(a => a.name.startsWith('xmlns:')).map(a => a.name.slice(6))));
+            let prefix = 'sys', i = 1;
+            while (used.has(prefix)) { prefix = `sys${i++}`; }
+            session.stringPrefix = prefix;
+            session.owner.setAttribute(`xmlns:${prefix}`, 'clr-namespace:System;assembly=mscorlib');
+        }
+        const item = session.doc.createElementNS(type === 'String' ? 'clr-namespace:System;assembly=mscorlib' : PRES_NS, type === 'String' ? `${session.stringPrefix}:String` : type);
+        if (type === 'String') { item.textContent = 'Item'; }
+        const attrs = type === 'MenuItem' ? { Header: 'MenuItem' } : XAML_ITEM_DEFS[type]?.attrs ?? CONTROLS[type]?.attrs ?? {};
+        for (const [key, value] of Object.entries(attrs)) { item.setAttribute(key, value); }
+        if (type === 'TabItem') {
+            item.setAttribute('Header', `Tab ${xamlCollectionChildren(parent, prop).length + 1}`);
+            item.appendChild(session.doc.createElementNS(PRES_NS, 'Grid'));
+        }
+        xamlCollectionHost(parent, prop, true).appendChild(item);
+        session.selected = item;
+        return item;
+    }
+
+    function moveCollectionItem(el, direction) {
+        const location = xamlCollectionLocation(el);
+        if (!location || !xamlCollectionWritable(location.owner, location.prop)) { return false; }
+        const kids = xamlCollectionChildren(location.owner, location.prop);
+        const index = kids.indexOf(el);
+        const next = index + direction;
+        if (index < 0 || next < 0 || next >= kids.length) { return false; }
+        const ref = direction < 0 ? kids[next] : kids[next + 1] ?? null;
+        (ref?.parentElement ?? kids[next].parentElement).insertBefore(el, ref);
+        return true;
+    }
+
+    function xamlCollectionRemove(session, el) {
+        const location = xamlCollectionLocation(el);
+        if (el === session.owner || !xamlCollectionContains(session, el) || !location || !xamlCollectionWritable(location.owner, location.prop)) { return false; }
+        const owner = location.owner;
+        const peers = xamlCollectionChildren(owner, location.prop);
+        const index = peers.indexOf(el);
+        el.remove();
+        session.selected = peers[index + 1] ?? peers[index - 1] ?? (owner === session.scope ? null : owner);
+        return true;
+    }
+
+    function applyXamlCollection(session) {
+        if (session.error) { return false; }
+        if (modelStale || docMode !== 'xaml' || xamlText !== session.baseText) {
+            session.error = 'The document changed while the editor was open. Cancel and reopen the collection to edit the latest version.';
+            return false;
+        }
+        const owner = elAtPath(session.ownerPath);
+        if (!owner || owner.localName !== session.owner.localName) { return false; }
+        const serializer = new XMLSerializer();
+        // Read handler requests before the fallback DOM moves the draft subtree.
+        const handlers = [...session.handlers].flatMap(([item, requests]) => [...requests.values()]
+            .filter(request => xamlCollectionContains(session, item) && item.getAttribute(request.event) === request.handler));
+        if (serializer.serializeToString(owner) === serializer.serializeToString(session.owner)) {
+            for (const request of handlers) { vscode.postMessage({ type: 'addHandler', ...request }); }
+            return true;
+        }
+        const replacement = xamlDoc.importNode ? xamlDoc.importNode(session.owner, true) : session.owner;
+        const contentPath = contentRoot ? pathOf(contentRoot) : null;
+        const layoutPath = layoutRoot ? pathOf(layoutRoot) : null;
+        owner.parentNode.replaceChild(replacement, owner);
+        if (windowEl === owner) { windowEl = replacement; }
+        if (!windowEl.getAttribute('xmlns:x') && [replacement, ...replacement.getElementsByTagName('*')]
+            .some(node => [...node.attributes].some(attr => attr.name.startsWith('x:')))) {
+            windowEl.setAttribute('xmlns:x', X_NS);
+        }
+        contentRoot = contentPath === null ? null : elAtPath(contentPath);
+        layoutRoot = layoutPath === null ? null : elAtPath(layoutPath);
+        // Paths can change when collections are reordered. Reset preview-only
+        // tab choices so SelectedIndex is respected on the new structure.
+        uiTabs.clear();
+        selected = replacement;
+        selectedPath = pathOf(replacement);
+        multiSel.clear();
+        multiSel.add(replacement);
+        uiMenus.clear();
+        for (let n = replacement; n?.localName === 'MenuItem'; n = menuOwner(n)) { uiMenus.add(pathOf(n)); }
+        collectStyles();
+        commit();
+        for (const request of handlers) { vscode.postMessage({ type: 'addHandler', ...request }); }
+        return true;
+    }
+
+    function xamlAddMenuChild(owner, type) {
+        const session = createXamlCollectionSession(owner);
+        if (!session) { return; }
+        const child = xamlCollectionAdd(session, session.owner, type);
+        if (!child) { setStatus(session.error); return; }
+        const childPath = pathOf(child);
+        if (applyXamlCollection(session)) {
+            const live = elAtPath(childPath);
+            select(live);
+        }
+    }
+
+    function xamlMoveMenuChild(el, direction) {
+        if (modelStale || !moveCollectionItem(el, direction)) { return; }
+        uiMenus.clear();
+        for (let n = menuOwner(el); n?.localName === 'MenuItem'; n = menuOwner(n)) { uiMenus.add(pathOf(n)); }
+        selectedPath = pathOf(el);
+        commit();
+    }
+
+    function closeCollectionEditor() {
+        if (!collectionEditor) { return; }
+        if (activeComboClose) { activeComboClose(); }
+        const { overlay, returnFocus } = collectionEditor;
+        collectionEditor = null;
+        overlay.remove();
+        $('ff-root').inert = false;
+        returnFocus?.focus();
+    }
+
+    function openXamlCollection(owner, prop = 'Items') {
+        const session = createXamlCollectionSession(owner, prop);
+        if (!session) { return; }
+        closeCollectionEditor();
+        hideContextMenu();
+        const overlay = document.createElement('div');
+        overlay.className = 'ff-collection-overlay';
+        const dialog = document.createElement('div');
+        dialog.className = 'ff-collection-dialog';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', 'ff-collection-title');
+        const title = document.createElement('div');
+        title.className = 'ff-collection-title';
+        title.id = 'ff-collection-title';
+        title.textContent = `Collection Editor: ${prop}`;
+        const nav = document.createElement('div');
+        nav.className = 'ff-collection-nav';
+        const main = document.createElement('div');
+        main.className = 'ff-collection-main';
+        const left = document.createElement('div');
+        left.className = 'ff-collection-left';
+        const list = document.createElement('div');
+        list.className = 'ff-collection-list';
+        list.setAttribute('role', 'tree');
+        list.setAttribute('aria-label', `${prop} collection`);
+        const tools = document.createElement('div');
+        tools.className = 'ff-collection-tools';
+        const properties = document.createElement('div');
+        properties.className = 'ff-collection-properties';
+        const error = document.createElement('div');
+        error.className = 'ff-collection-error';
+        error.setAttribute('role', 'alert');
+        const footer = document.createElement('div');
+        footer.className = 'ff-collection-footer';
+        function button(text, action, container = tools) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.textContent = text;
+            b.addEventListener('click', action); container.appendChild(b);
+            return b;
+        }
+        const typePicker = document.createElement('select');
+        typePicker.setAttribute('aria-label', 'New item type');
+        tools.appendChild(typePicker);
+        const add = button('Add', () => { xamlCollectionAdd(session, session.scope, typePicker.value); refresh(); });
+        const submenu = button('Add Submenu', () => {
+            const type = session.selected?.localName === 'TreeViewItem' ? 'TreeViewItem' : 'MenuItem';
+            xamlCollectionAdd(session, session.selected, type, 'Items'); refresh();
+        });
+        const remove = button('Remove', () => { xamlCollectionRemove(session, session.selected); refresh(); });
+        const up = button('↑', () => { moveCollectionItem(session.selected, -1); refresh(); });
+        up.setAttribute('aria-label', 'Move item up');
+        const down = button('↓', () => { moveCollectionItem(session.selected, 1); refresh(); });
+        down.setAttribute('aria-label', 'Move item down');
+        const ok = button('OK', () => { if (applyXamlCollection(session)) { closeCollectionEditor(); } else { refresh(); } }, footer);
+        button('Cancel', closeCollectionEditor, footer);
+        left.append(list, tools); main.append(left, properties);
+        dialog.append(title, nav, main, error, footer); overlay.appendChild(dialog);
+        collectionEditor = { session, overlay, returnFocus: document.activeElement };
+        $('ff-root').inert = true;
+        document.body.appendChild(overlay);
+
+        function update(prop, value, target) {
+            if (xamlCollectionSet(session, target, prop, value)) { refresh(); }
+            else { error.textContent = session.error; }
+        }
+
+        let previousPropertyItem = null;
+        const sectionStates = new Map();
+        let treeEntries = [];
+        function refresh() {
+            if (activeComboClose) { activeComboClose(); }
+            const scroll = previousPropertyItem === session.selected ? properties.scrollTop : 0;
+            previousPropertyItem = session.selected;
+            const listScroll = list.scrollTop;
+            for (const section of properties.querySelectorAll('details')) { sectionStates.set(section.dataset.group, section.open); }
+            list.innerHTML = ''; properties.innerHTML = ''; nav.innerHTML = '';
+            treeEntries = [];
+            error.textContent = session.error;
+            title.textContent = `Collection Editor: ${session.prop}`;
+            const previousType = typePicker.value;
+            typePicker.innerHTML = '';
+            const choices = xamlCollectionChoices(session.scope, session.prop);
+            for (const type of choices) {
+                const option = document.createElement('option'); option.value = type; option.textContent = type; typePicker.appendChild(option);
+            }
+            typePicker.value = choices.includes(previousType) ? previousType : choices[0] ?? '';
+            if (session.trail.length) {
+                button('← Back', () => {
+                    const previous = session.scope;
+                    const parent = session.trail.pop();
+                    session.scope = parent.scope; session.prop = parent.prop; session.selected = previous; refresh();
+                }, nav);
+            }
+            const caption = document.createElement('span');
+            caption.textContent = `${getName(session.scope) || menuCaption(menuHeaderValue(session.scope)) || session.scope.localName} · ${session.prop}`;
+            nav.appendChild(caption);
+            button('Collection properties', () => { session.selected = session.scope; refresh(); }, nav);
+            function tree(ownerNode, depth = 0, collectionProp = 'Items') {
+                xamlCollectionChildren(ownerNode, collectionProp).forEach((item, index) => {
+                    const row = document.createElement('button');
+                    row.type = 'button'; row.className = 'ff-collection-item';
+                    row.classList.toggle('active', session.selected === item);
+                    row.style.paddingLeft = `${8 + depth * 18}px`;
+                    row.setAttribute('role', 'treeitem');
+                    row.setAttribute('aria-level', String(depth + 1));
+                    row.setAttribute('aria-selected', String(session.selected === item));
+                    const label = menuCaption(menuHeaderValue(item)) || getName(item) || item.getAttribute('Content') || item.getAttribute('Text') || (item.localName === 'String' ? item.textContent : '');
+                    row.textContent = `[${index}] ${item.localName}${label ? ` — ${label}` : ''}`;
+                    row.addEventListener('click', () => { session.selected = item; refresh(); list.querySelector('.active')?.focus(); });
+                    treeEntries.push({ item, row });
+                    list.appendChild(row);
+                    if (xamlCollectionTypes(item, 'Items')) { tree(item, depth + 1); }
+                });
+            }
+            tree(session.scope, 0, session.prop);
+            if (!xamlCollectionChildren(session.scope, session.prop).length) {
+                const hint = document.createElement('div'); hint.className = 'ff-collection-hint';
+                hint.textContent = xamlCollectionWritable(session.scope, session.prop)
+                    ? 'This collection is empty. Choose an item type and click Add.'
+                    : 'A binding or resource supplies this collection. Use Collection properties to configure it.';
+                list.appendChild(hint);
+            }
+            add.disabled = !xamlCollectionWritable(session.scope, session.prop);
+            submenu.textContent = session.selected?.localName === 'TreeViewItem' ? 'Add Child' : 'Add Submenu';
+            submenu.hidden = !['Menu', 'MenuItem', 'ContextMenu', 'TreeView', 'TreeViewItem'].includes(session.scope.localName) && session.prop !== 'ContextMenu';
+            submenu.disabled = !['MenuItem', 'TreeViewItem'].includes(session.selected?.localName) || !xamlCollectionWritable(session.selected, 'Items');
+            const location = xamlCollectionLocation(session.selected);
+            remove.disabled = !session.selected || session.selected === session.scope || !location || !xamlCollectionWritable(location.owner, location.prop);
+            const peers = location ? xamlCollectionChildren(location.owner, location.prop) : [];
+            const position = peers.indexOf(session.selected);
+            up.disabled = remove.disabled || position <= 0;
+            down.disabled = remove.disabled || position < 0 || position >= peers.length - 1;
+            if (session.selected) {
+                const el = session.selected;
+                const propertyNames = xamlCollectionProperties(el);
+                const events = MENU_EVENTS[el.localName] ?? xamlDefOf(el.localName)?.events ?? [];
+                const groups = new Map();
+                for (const prop of propertyNames.filter(p => !events.includes(p) && p !== 'Loaded')) {
+                    const group = prop === 'Name' ? 'Design' : xamlPropertyCategory(el, prop);
+                    if (!groups.has(group)) { groups.set(group, []); }
+                    let row;
+                    if (el === session.scope && prop === session.prop && ['ContextMenu', 'Columns'].includes(prop)
+                        && (prop === 'ContextMenu' || el.localName === 'ListView') && !xamlCollectionWritable(el, prop)) {
+                        const source = prop === 'ContextMenu' ? 'ContextMenu' : 'View';
+                        row = propRow(source, el.getAttribute(source) ?? '(content)', v => {
+                            if (v !== '(content)') { update(source, v, el); }
+                        });
+                    }
+                    else if (prop === 'Name') { row = propRow(prop, getName(el), v => update(prop, v, el)); }
+                    else if (prop === 'Header') { row = propRow(prop, menuHeaderValue(el), v => update(prop, v, el)); }
+                    else {
+                        row = xamlPropRow(el, prop, [el], {
+                            write: (prop, value) => update(prop, value, el), session,
+                            editCollection: collectionProp => {
+                                session.trail.push({ scope: session.scope, prop: session.prop });
+                                session.scope = el; session.prop = collectionProp;
+                                session.selected = xamlCollectionChildren(el, collectionProp)[0] ?? null; refresh();
+                            },
+                            pickBackground: rel => {
+                                if (collectionEditor?.session !== session) { return; }
+                                el.removeAttribute('Background'); removePropertyElement(el, 'Background');
+                                const propNode = session.doc.createElementNS(PRES_NS, `${el.localName}.Background`);
+                                const brush = session.doc.createElementNS(PRES_NS, 'ImageBrush');
+                                brush.setAttribute('ImageSource', rel); propNode.appendChild(brush); el.appendChild(propNode); refresh();
+                            }
+                        });
+                    }
+                    row.dataset.prop = prop;
+                    if (el.getAttribute(prop) !== null || propertyElement(el, prop)) { row.classList.add('ff-set'); }
+                    groups.get(group).push(row);
+                }
+                for (const group of ['Common', 'Design', ...[...groups.keys()].filter(g => g !== 'Common' && g !== 'Design').sort()]) {
+                    if (!groups.has(group)) { continue; }
+                    const section = document.createElement('details'); section.dataset.group = group;
+                    section.open = sectionStates.get(group) ?? (['Common', 'Design', 'Behavior'].includes(group)
+                        || (group === 'Layout' && XAML_ITEM_DEFS[el.localName]?.object));
+                    const heading = document.createElement('summary'); heading.textContent = group;
+                    section.append(heading, ...groups.get(group)); properties.appendChild(section);
+                }
+                if (events.length) {
+                    const section = document.createElement('details'); section.dataset.group = 'Events'; section.open = sectionStates.get('Events') ?? true;
+                    const heading = document.createElement('summary'); heading.textContent = 'Events'; section.appendChild(heading);
+                    for (const event of events) {
+                        const row = propRow(event, el.getAttribute(event) ?? '', v => update(event, v.trim(), el));
+                        const wire = document.createElement('button'); wire.type = 'button'; wire.className = 'ff-wire'; wire.textContent = '⚡';
+                        wire.title = `Create ${event} handler when OK is pressed`;
+                        wire.addEventListener('click', () => {
+                            const handler = el.getAttribute(event) || `${getName(el) || el.localName}_${event}`;
+                            if (xamlCollectionSet(session, el, event, handler)) {
+                                if (!session.handlers.has(el)) { session.handlers.set(el, new Map()); }
+                                session.handlers.get(el).set(event, { event, handler }); refresh();
+                            }
+                        });
+                        row.appendChild(wire); section.appendChild(row);
+                    }
+                    properties.appendChild(section);
+                }
+            } else {
+                const hint = document.createElement('div'); hint.className = 'ff-collection-hint';
+                hint.textContent = 'Select an item to edit its properties.'; properties.appendChild(hint);
+            }
+            properties.scrollTop = scroll; list.scrollTop = listScroll;
+        }
+        overlay.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                e.preventDefault(); e.stopPropagation();
+                if (activeComboClose) { activeComboClose(); } else { closeCollectionEditor(); }
+            }
+            else if (e.target.closest('.ff-collection-item') && ['Delete', 'Backspace', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+                e.preventDefault(); e.stopPropagation();
+                if (e.key === 'Delete' || e.key === 'Backspace') { xamlCollectionRemove(session, session.selected); }
+                else {
+                    const direction = e.key === 'ArrowUp' ? -1 : 1;
+                    if (e.ctrlKey || e.metaKey) { moveCollectionItem(session.selected, direction); }
+                    else {
+                        const index = treeEntries.findIndex(entry => entry.item === session.selected);
+                        const next = treeEntries[index + direction];
+                        if (next) { session.selected = next.item; }
+                    }
+                }
+                refresh(); list.querySelector('.active')?.focus();
+            }
+            else if (e.key === 'Tab') {
+                const inputs = [...dialog.querySelectorAll('button, input, select, textarea')].filter(n => !n.disabled && n.getClientRects().length);
+                const first = inputs[0], last = inputs[inputs.length - 1];
+                if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+            }
+        }, true);
+        refresh(); ok.focus();
+    }
+
     // ------------------------------------------------------ VS-style prop grid
     // Shared by the XAML and WinForms panels: rows are grouped under
     // collapsible category headers (or flat A-Z), values set explicitly in the
@@ -3951,20 +4784,22 @@
         }
 
         const aliased = new Set((toggleAlias ?? []).map(([, prop]) => prop));
-        const listFor = t => [...(xamlDefOf(t.localName)?.props ?? PANEL_PROPS[t.localName] ?? []), ...COMMON_PROPS];
+        const listFor = t => xamlCollectionProperties(t).filter(p => p !== 'Name');
         let names = isWindow ? WINDOW_PROPS : listFor(el).filter(p => !aliased.has(p));
         // Multi-select: only the properties EVERY selected element supports,
         // like Visual Studio — edits then apply to all of them at once.
         if (multi) {
-            const shared = multi.filter(t => t !== el).map(t => new Set(listFor(t)));
-            names = names.filter(p => shared.every(s => s.has(p)));
+            const shared = multi.filter(t => t !== el).map(t => ({ el: t, props: new Set(listFor(t)) }));
+            names = names.filter(p => shared.every(s => s.props.has(p)
+                && Boolean(xamlCollectionTypes(s.el, p)) === Boolean(xamlCollectionTypes(el, p))));
         }
 
         for (const prop of names) {
             const node = xamlPropRow(el, prop, multi ?? [el]);
+            node.dataset.prop = prop;
             if (el.getAttribute(prop) !== null || propertyElement(el, prop)) { node.classList.add('ff-set'); }
             attachDesc(node, prop, XAML_DESCS[prop] ?? '');
-            rows.push({ label: prop, cat: XAML_CATS[prop] ?? 'Common', node });
+            rows.push({ label: prop, cat: xamlPropertyCategory(el, prop), node });
         }
         renderGrid(rows);
     }
@@ -3975,17 +4810,31 @@
      * suggestion lists, Image.Source a file picker — everything else stays a
      * free text row so bindings and resources can always be typed.
      */
-    function xamlPropRow(el, prop, targets = [el]) {
+    function xamlPropRow(el, prop, targets = [el], options = {}) {
         // Multi-select: one edit writes the attribute on every target and
         // commits once (a single undo step).
         const write = v => {
+            if (options.write) { options.write(prop, v); return; }
             for (const t of targets) {
+                if (prop === 'Value' && t.localName === 'String') { t.textContent = v; continue; }
                 removePropertyElement(t, prop); // an attribute replaces any expanded form
                 if (v === '') { t.removeAttribute(prop); } else { t.setAttribute(prop, v); }
             }
+            if (prop === 'SelectedIndex') { uiTabs.clear(); }
             commit();
         };
-        if (XAML_BRUSH_PROPS.has(prop)) { return xamlBrushRow(el, prop, write); }
+        if (xamlCollectionTypes(el, prop)) {
+            const row = collectionRow(prop, xamlCollectionChildren(el, prop).length,
+                () => options.editCollection ? options.editCollection(prop) : openXamlCollection(el, prop));
+            if (targets.length > 1) { row.querySelector('button').disabled = true; row.title = 'Select one control to edit its collection.'; }
+            return row;
+        }
+        if (prop === 'Value' && el.localName === 'String') { return propRow(prop, el.textContent, write); }
+        if (prop === 'Icon' && el.localName === 'MenuItem') {
+            return menuIconRow(el, options);
+        }
+        if (prop === 'Header') { return propRow(prop, menuHeaderValue(el), write); }
+        if (XAML_BRUSH_PROPS.has(prop)) { return xamlBrushRow(el, prop, write, prop, '', options); }
         if (['FontSize', 'FontFamily', 'FontWeight', 'FontStyle', 'Cursor'].includes(prop)) {
             return xamlFontRow(el, prop, write);
         }
@@ -3995,7 +4844,7 @@
         }
         if (ENUM_VALUES[prop]) { return xamlEnumRow(el, prop, write); }
         if (XAML_BOOL_PROPS.has(prop)) { return xamlEnumRow(el, prop, write, ['True', 'False']); }
-        if (prop === 'Source' && el.localName === 'Image') { return xamlImagePathRow(el, prop, write); }
+        if (prop === 'Source' && el.localName === 'Image') { return xamlImagePathRow(el, prop, write, options); }
         return propRow(prop, el.getAttribute(prop) ?? '', write);
     }
 
@@ -4057,7 +4906,7 @@
     }
 
     /** Brush row: color swatch (native picker) + named-color text + image button. */
-    function xamlBrushRow(el, prop, write, label = prop, fallbackCss = '') {
+    function xamlBrushRow(el, prop, write, label = prop, fallbackCss = '', options = {}) {
         const row = document.createElement('div');
         row.className = 'ff-prop-row';
         const lab = document.createElement('label');
@@ -4110,7 +4959,7 @@
             pick.textContent = '▨';
             pick.title = 'Use an image as the background (imports it into the project and writes an ImageBrush)';
             pick.addEventListener('click', () => {
-                pendingXamlImage = { el, prop };
+                pendingXamlImage = options.pickBackground ? { apply: options.pickBackground } : { el, prop };
                 vscode.postMessage({ type: 'pickImage', xaml: true, prop });
             });
             row.appendChild(pick);
@@ -4204,7 +5053,7 @@
     }
 
     /** Image.Source row: path text + "…" file picker. */
-    function xamlImagePathRow(el, prop, write) {
+    function xamlImagePathRow(el, prop, write, options = {}) {
         const row = propRow(prop, el.getAttribute(prop) ?? '', write);
         const pick = document.createElement('button');
         pick.type = 'button';
@@ -4212,7 +5061,9 @@
         pick.textContent = '…';
         pick.title = 'Import an image (.png, .jpg, .gif, .bmp, .ico) into the project';
         pick.addEventListener('click', () => {
-            pendingXamlImage = { el, prop };
+            pendingXamlImage = options.session ? { apply: rel => {
+                if (collectionEditor?.session === options.session) { write(rel); }
+            } } : { el, prop };
             vscode.postMessage({ type: 'pickImage', xaml: true, prop });
         });
         row.appendChild(pick);
@@ -4259,7 +5110,7 @@
     function renderEventsTab(el, isWindow) {
         const events = isWindow
             ? WINDOW_EVENTS
-            : [...(xamlDefOf(el.localName)?.events ?? []), 'Loaded'];
+            : [...(xamlDefOf(el.localName)?.events ?? MENU_EVENTS[el.localName] ?? []), 'Loaded'];
 
         const hint = document.createElement('div');
         hint.className = 'ff-events-hint';
@@ -4333,12 +5184,14 @@
             wfWireEvent(el, wdef?.defaultEvent ?? 'Click', el.events[wdef?.defaultEvent ?? 'Click'] || '');
             return;
         }
-        const def = xamlDefOf(el.localName);
+        const def = xamlDefOf(el.localName) ?? (el.localName === 'MenuItem' ? { defaultEvent: 'Click' } : null);
         if (!def) { return; }
+        const event = def.defaultEvent ?? def.events?.[0];
+        if (!event) { return; }
         // Switch to the events tab so the user sees what happened.
         switchPanelTab('events');
-        const existing = el.getAttribute(def.defaultEvent);
-        wireEvent(el, def.defaultEvent, existing || '', false);
+        const existing = el.getAttribute(event);
+        wireEvent(el, event, existing || '', false);
     }
 
     // =========================================================== serialization
@@ -4459,6 +5312,13 @@
     // ============================================================== keyboard
 
     document.addEventListener('keydown', e => {
+        if (collectionEditor) {
+            if (e.key === 'Escape') {
+                if (activeComboClose) { activeComboClose(); } else { closeCollectionEditor(); }
+                e.preventDefault();
+            }
+            return; // Collection editing owns its keys; never delete/nudge the canvas.
+        }
         // Ignore shortcuts while interacting with panel inputs/selects/buttons.
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
             || e.target instanceof HTMLButtonElement || e.target instanceof HTMLTextAreaElement) { return; }
@@ -4466,6 +5326,11 @@
         // Escape always closes an open context menu first.
         if (e.key === 'Escape' && ctxMenuEl) {
             hideContextMenu();
+            e.preventDefault();
+            return;
+        }
+        if (e.key === 'Escape' && docMode === 'xaml' && uiMenus.size) {
+            select(null);
             e.preventDefault();
             return;
         }
@@ -4865,25 +5730,52 @@
     function xamlControlMenu(el) {
         const type = el.localName;
         const items = [{ label: `${getName(el) || type} : ${type}`, header: true }];
+        if (MENU_TYPES.has(type)) {
+            items.push({ label: 'Edit Items…', action: () => openXamlCollection(el) });
+            items.push({ label: 'Add MenuItem', disabled: !xamlCollectionWritable(el), action: () => xamlAddMenuChild(el, 'MenuItem') });
+            items.push({ label: 'Add Separator', disabled: !xamlCollectionWritable(el), action: () => xamlAddMenuChild(el, 'Separator') });
+            items.push('—');
+        }
+        for (const prop of Object.keys(XAML_COLLECTIONS[xamlCollectionType(el)] ?? {}).filter(p => p !== 'Items' || !MENU_TYPES.has(type))) {
+            items.push({ label: `Edit ${prop}…`, action: () => openXamlCollection(el, prop) });
+        }
+        if (!XAML_ITEM_DEFS[type]?.object) { items.push({ label: 'Edit ContextMenu…', action: () => openXamlCollection(el, 'ContextMenu') }); }
+        if (type === 'MenuItem' || menuOwner(el)?.localName === 'MenuItem') {
+            const owner = menuOwner(el);
+            const peers = owner ? menuChildren(owner) : [];
+            const index = peers.indexOf(el);
+            items.push({ label: 'Move Up', disabled: !xamlCollectionWritable(owner) || index <= 0, action: () => xamlMoveMenuChild(el, -1) });
+            items.push({ label: 'Move Down', disabled: !xamlCollectionWritable(owner) || index < 0 || index >= peers.length - 1, action: () => xamlMoveMenuChild(el, 1) });
+            items.push('—');
+        }
+        if (type === 'MenuItem') {
+            items.push({ label: 'Edit Text', action: () => {
+                select(el); switchPanelTab('props');
+                const input = propsBody.querySelector('[data-prop="Header"] input');
+                input?.focus(); input?.select();
+            } });
+            items.push({ label: '⚡ Handle Click', action: () => wireDefaultEvent(el) });
+        }
         if (type === 'TabControl') {
-            items.push({ label: 'Add Tab', action: () => xamlAddTab(el) });
+            items.push({ label: 'Add Tab', disabled: !xamlCollectionWritable(el), action: () => xamlAddTab(el) });
             items.push('—');
         } else if (type === 'TabItem') {
-            const tc = el.parentNode;
+            const tc = xamlCollectionLocation(el)?.owner;
             if (tc && tc.nodeType === Node.ELEMENT_NODE) {
-                items.push({ label: 'Add Tab', action: () => xamlAddTab(tc) });
-                items.push({ label: 'Remove This Tab', danger: true, action: () => xamlRemoveTab(el) });
+                items.push({ label: 'Add Tab', disabled: !xamlCollectionWritable(tc), action: () => xamlAddTab(tc) });
+                items.push({ label: 'Remove This Tab', disabled: !xamlCollectionWritable(tc), danger: true, action: () => xamlRemoveTab(el) });
                 items.push('—');
             }
         }
-        if (xamlDefOf(type)) {
-            items.push({ label: `⚡ Handle ${xamlDefOf(type).defaultEvent}`, action: () => wireDefaultEvent(el) });
+        const defaultEvent = xamlDefOf(type)?.defaultEvent ?? xamlDefOf(type)?.events?.[0];
+        if (defaultEvent) {
+            items.push({ label: `⚡ Handle ${defaultEvent}`, action: () => wireDefaultEvent(el) });
         }
         items.push({ label: '</> View Code', action: openCode });
         items.push('—');
         items.push(...clipboardEntries());
         items.push({ label: 'Delete', key: 'Del', danger: true, action: deleteSelected });
-        const p = el.parentNode;
+        const p = xamlCollectionLocation(el)?.owner ?? el.parentNode;
         if (p && p.nodeType === Node.ELEMENT_NODE && p !== windowEl) {
             items.push('—');
             items.push({ label: `Select Parent (${getName(p) || p.localName})`, action: () => select(p) });
@@ -5046,12 +5938,12 @@
 
     /** Append a <TabItem> with an empty Grid to a XAML TabControl. */
     function xamlAddTab(tc) {
-        if (!xamlDoc) { return; }
-        const count = elementChildren(tc).filter(c => c.localName === 'TabItem').length;
+        if (!xamlDoc || !xamlCollectionWritable(tc)) { return; }
+        const count = xamlCollectionChildren(tc).filter(c => c.localName === 'TabItem').length;
         const ti = xamlDoc.createElementNS(PRES_NS, 'TabItem');
         ti.setAttribute('Header', `Tab ${count + 1}`);
         ti.appendChild(xamlDoc.createElementNS(PRES_NS, 'Grid'));
-        tc.appendChild(ti);
+        xamlCollectionHost(tc, 'Items', true).appendChild(ti);
         uiTabs.set(pathOf(tc), count);
         selected = ti;
         multiSel.clear();
@@ -5062,7 +5954,8 @@
 
     /** Remove one <TabItem> from its TabControl. */
     function xamlRemoveTab(ti) {
-        const tc = ti.parentNode;
+        const tc = xamlCollectionLocation(ti)?.owner;
+        if (!tc || !xamlCollectionWritable(tc)) { return; }
         ti.remove();
         if (tc && tc.nodeType === Node.ELEMENT_NODE) { uiTabs.set(pathOf(tc), 0); }
         selected = null;
@@ -5603,6 +6496,7 @@
     /** XAML toolbox definition for a custom WPF control. */
     function xamlDefOf(type) {
         if (CONTROLS[type]) { return CONTROLS[type]; }
+        if (XAML_ITEM_DEFS[type]) { return XAML_ITEM_DEFS[type]; }
         if (MODERN_CONTROLS[type]) { return MODERN_CONTROLS[type]; }
         const custom = XAML_CUSTOM[type];
         if (!custom) { return undefined; }
@@ -8589,6 +9483,11 @@
             wfApply,
             // XAML designer internals under test.
             addControlDefault, ensureWindowStyle, reorderSibling, elAtPath,
+            createXamlCollectionSession, xamlCollectionSet, xamlCollectionAdd, xamlCollectionRemove,
+            applyXamlCollection, moveCollectionItem, menuChildren, xamlControlMenu, xamlAddMenuChild,
+            xamlCollectionTypes, xamlCollectionChildren, xamlCollectionProperties, xamlCollectionWritable,
+            openXamlCollection,
+            visualAt: pathStr => visuals.find(v => v.el === elAtPath(pathStr))?.div ?? null,
             movabilityAt: pathStr => {
                 const target = pathStr === '' ? windowEl : elAtPath(pathStr);
                 return target ? movability(target) : null;

@@ -2,6 +2,8 @@
 
 **Design, build, and run .NET desktop apps — without ever leaving VS Code.**
 
+**Latest release: [v0.28.4](https://github.com/coolshrimp/WinForm-GUI-Maker/releases/tag/v0.28.4)** — shared WPF collection editing, menu previews, and improved theme resource and text rendering.
+
 UI Maker is an open-source Visual Studio Code extension that brings a drag-and-drop
 form designer, one-click build/run/debug/release buttons, and project scaffolding for
 .NET desktop applications (WPF and Windows Forms, **C# and Visual Basic**) directly
@@ -82,6 +84,17 @@ the far left) to open the side panel:
 ### 🎨 Visual Designer for XAML
 Open any `.xaml` window in the UI Maker Designer:
 
+- **Collection editor** — click **…** beside **Items** for menus, dropdowns,
+  lists, trees, tabs, toolbars, and status bars. The same editor handles
+  **Columns** for DataGrid and ListView, **RowDefinitions / ColumnDefinitions**
+  for Grid, **ToolBars** for ToolBarTray, and inline **ContextMenu** items.
+  Add, remove, reorder, and configure entries; edit nested submenus and tree
+  branches; set item content, headers, commands, styling, and events.
+  **OK** writes one document change; **Cancel** leaves the XAML unchanged.
+  Existing bindings, templates, and expanded property syntax are retained.
+  Collections supplied by a binding stay protected from manual additions.
+  Right-click a control for **Edit Items / Columns…**; menus also offer
+  **Add MenuItem**, **Add Separator**, **Edit Text**, and **Move Up/Down**.
 - **Toolbox** with a search box and Visual Studio's sections. WPF: Button,
   Label, TextBox, TextBlock, CheckBox, RadioButton, ComboBox, ListBox,
   DataGrid, Image, ProgressBar, Slider, Border, GroupBox, DatePicker,
@@ -366,7 +379,7 @@ file is for.
 ## Getting started
 
 1. Install the [.NET SDK](https://dotnet.microsoft.com/download) (8.0 or newer recommended).
-2. Install UI Maker (from source, see below — Marketplace listing planned).
+2. Download the `.vsix` from the [latest GitHub release](https://github.com/coolshrimp/WinForm-GUI-Maker/releases/latest), run **Extensions: Install from VSIX…** in VS Code, and select the downloaded file. Run **Developer: Reload Window** after updating.
 3. Run **`UI Maker: New .NET Desktop Project`** from the Command Palette
    (`Ctrl+Shift+P`), or open a folder that already contains a `.csproj`.
 4. Click the **UI Maker icon in the activity bar** and pick a window under
@@ -378,8 +391,8 @@ file is for.
 ### Running from source
 
 ```bash
-git clone <this repo>
-cd uimaker
+git clone https://github.com/coolshrimp/WinForm-GUI-Maker.git
+cd WinForm-GUI-Maker
 npm install
 npm run compile
 ```
@@ -475,15 +488,15 @@ deleted.
   that dragging a centered/stretched Grid child pins it to `Left`/`Top` +
   `Margin` (Blend's behavior) — its layout stops following window resizing
   until you restore the alignment in the Properties panel.
-- Styles and brush resources resolve from the document and App.xaml (one
-  level of merged dictionaries); a template's first `Border CornerRadius` is
+- Styles and brush resources resolve from the document, App.xaml, and
+  recursively linked local dictionaries; a template's first `Border CornerRadius` is
   approximated. Triggers, bindings, and full `ControlTemplate` visuals are
   ignored in the preview.
 - Images assigned in old projects as *local* form resources
   (`resources.GetObject(...)` with base64 in the form's `.resx`) render on the
   canvas when they are plain image bytes; BinaryFormatter-serialized ones
   cannot be previewed. Newly assigned images always use project resources.
-- Strip *Items* editing covers one level — nested sub-menus and per-item
+- WinForms strip *Items* editing covers one level — nested sub-menus and per-item
   icons/events still need the code view (roadmapped).
 - Structural WinForms containers can be deleted safely, but deep
   Cut/Copy/Duplicate of containers, generated menu items, and grid columns is
@@ -517,13 +530,15 @@ deleted.
 - [x] Docked controls that push each other for space; TabControl and tab-page drops
 - [x] Visual Basic WinForms designer (`*.Designer.vb` round-tripping, `Handles`-based events, VB scaffolding)
 - [x] Remaining VB parity: App Settings editor, classic→SDK conversion, `My.Resources` image import
-- [ ] Sub-menu (nested menu item) designing and item icons
+- [x] WPF menu and collection editing, including nested submenus, tree branches, and item icons
+- [ ] WinForms sub-menu (nested menu item) designing and item icons
 - [x] Drag-reordering inside StackPanel / WrapPanel / DockPanel children, drag re-parenting between panels, group move, XAML align tools
 - [x] "Modern (Styled)" toolbox section — ToggleSwitch, rounded buttons, cards, badges via injected styles
 - [x] "Create an Installer" for multi-file releases (Inno Setup script generation)
 - [x] Custom controls in the toolbox: automatic project scan + a Control Library for NuGet/DLL controls
 - [ ] Style/resource editing and live theme preview
-- [ ] Marketplace publishing and prebuilt VSIX releases
+- [x] Prebuilt VSIX downloads through tagged GitHub releases
+- [ ] Marketplace publishing
 
 ### Beyond 1.0 — premium ideas (v2.0)
 

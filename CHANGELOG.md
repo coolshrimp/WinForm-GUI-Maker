@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.28.4
+
+Connect the WPF collection editor to dropdown choices, tab items, list and tree items, toolbars, status bars, inline context menus, DataGrid and ListView columns, and Grid row/column definitions. Use the appropriate item types and properties for each collection, including nested tree branches and plain string choices. Preserve bindings, templates, expanded property syntax, and custom-control namespaces; keep binding-supplied collections protected from manual insertion. Preview saved choices, selected tabs and their content, tree branches, and column headers. Keep numeric properties such as UniformGrid.Columns separate from collection editors.
+
+## 0.28.3
+
+Add the WPF menu `Items` property and a collection editor with a hierarchy, item properties, add/remove/reorder controls, and submenu editing. Configure headers, shortcut hints, icons, checkmarks, commands, styling, and events. OK applies the draft as one document edit; Cancel leaves the XAML unchanged. Preserve existing bindings and expanded property content, and reject saving over source changes made while the editor was open. Add menu context actions for Edit Items, Add MenuItem, Add Separator, Edit Text, Move Up/Down, and Handle Click.
+
+## 0.28.2
+
+Render WPF menu bars with their actual headers and compact spacing instead of stacked placeholder boxes. Click menu items to preview floating dropdowns and nested submenus, including shortcut hints, separators, icons, and checkmarks. Menu previews keep the app layout in place and never change the XAML; select a menu item to edit its header and command properties.
+
+## 0.28.1
+
+Fix WPF preview text inheritance so window and parent font settings and foreground colors reach child controls. Load window-linked resource dictionaries (including nested dictionaries) so theme caption sizes, brushes, and styles appear in the designer.
+
 ## 0.28.0
 
 **Multi-select property editing** (user request: "select 3 Labels and set

@@ -425,6 +425,15 @@ html, body {
     min-height: 0;
 }
 
+/* WPF text properties inherit through panels and borders from the window. */
+#ff-surface:not(.ff-winforms) .ff-control {
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    font-style: inherit;
+}
+
 .ff-movable {
     cursor: move;
 }
@@ -507,6 +516,92 @@ html, body {
 }
 
 /* Approximations of WPF default control chrome. */
+.ff-c-menu {
+    position: relative;
+    z-index: 20;
+    min-height: 22px;
+}
+
+.ff-c-menuitem {
+    position: relative;
+    cursor: default;
+}
+
+.ff-menu-open {
+    z-index: 1;
+}
+
+.ff-menu-header {
+    display: flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 3px 8px;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.ff-menu-header:hover,
+.ff-menu-open > .ff-menu-header {
+    background: rgba(80, 150, 220, 0.18);
+    outline: 1px solid rgba(80, 150, 220, 0.45);
+    outline-offset: -1px;
+}
+
+.ff-menu-popup {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    z-index: 25;
+    min-width: 180px;
+    width: max-content;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 2px;
+    background: var(--ff-menu-bg, #f0f0f0);
+    border: 1px solid rgba(128, 128, 128, 0.7);
+    box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.25);
+}
+
+.ff-menu-popup[hidden] {
+    display: none;
+}
+
+.ff-menu-submenu {
+    left: 100%;
+    top: -3px;
+}
+
+.ff-menu-icon {
+    display: grid;
+    grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+    place-items: center;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+}
+
+.ff-menu-caption {
+    flex: 1 1 auto;
+}
+
+.ff-menu-gesture {
+    margin-left: 24px;
+    opacity: 0.8;
+}
+
+.ff-menu-arrow {
+    flex: 0 0 8px;
+}
+
+.ff-menu-popup > .ff-menu-separator {
+    height: 1px;
+    min-height: 1px;
+    margin: 4px 4px 4px 30px;
+    border: 0;
+    background: rgba(128, 128, 128, 0.6);
+}
+
 .ff-look-button {
     justify-content: center;
     background: #ddd;
@@ -562,6 +657,27 @@ html, body {
 .ff-list-item:nth-child(odd) {
     background: #f4f4f4;
 }
+
+.ff-list-item.active {
+    background: #cce8ff;
+    color: #111;
+}
+
+.ff-items-popup {
+    position: absolute;
+    top: 100%;
+    left: -1px;
+    right: -1px;
+    z-index: 1000;
+    max-height: 240px;
+    overflow: auto;
+    background: #fff;
+    color: #111;
+    border: 1px solid #888;
+    box-shadow: 0 3px 8px #0004;
+}
+
+.ff-items-popup[hidden] { display: none; }
 
 .ff-grid-header {
     display: flex;
@@ -1173,6 +1289,161 @@ html, body {
 }
 
 /* Strip Items editor: one item per line. */
+.ff-collection-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+}
+
+.ff-collection-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.ff-collection-dialog {
+    width: min(900px, 100%);
+    height: min(700px, 100%);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--vscode-editor-background, #1e1e1e);
+    color: var(--vscode-foreground, #ccc);
+    border: 1px solid var(--vscode-focusBorder, #007acc);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.ff-collection-title {
+    padding: 10px 14px;
+    background: var(--vscode-titleBar-activeBackground, #333);
+    font-weight: 600;
+}
+
+.ff-collection-nav,
+.ff-collection-footer,
+.ff-collection-tools {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 8px;
+    flex-wrap: wrap;
+}
+
+.ff-collection-nav > span {
+    flex: 1;
+    min-width: 0;
+}
+
+.ff-collection-dialog button,
+.ff-collection-tools select {
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #fff);
+    border: 1px solid var(--vscode-input-border, #555);
+    border-radius: 2px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font: inherit;
+}
+
+.ff-collection-dialog button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+.ff-collection-main {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
+    min-height: 0;
+    flex: 1;
+    gap: 10px;
+    padding: 0 10px;
+}
+
+.ff-collection-left {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+}
+
+.ff-collection-list {
+    flex: 1;
+    overflow: auto;
+    border: 1px solid var(--vscode-panel-border, #444);
+    padding: 4px;
+}
+
+.ff-collection-list .ff-collection-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    white-space: nowrap;
+}
+
+.ff-collection-item.active {
+    background: var(--vscode-list-activeSelectionBackground, #094771);
+    color: var(--vscode-list-activeSelectionForeground, #fff);
+}
+
+.ff-collection-properties {
+    min-width: 0;
+    overflow: auto;
+    border: 1px solid var(--vscode-panel-border, #444);
+}
+
+.ff-collection-properties summary {
+    padding: 5px 8px;
+    cursor: pointer;
+    font-weight: 600;
+    background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.15));
+}
+
+.ff-collection-properties .ff-prop-row label {
+    flex-basis: 125px;
+}
+
+.ff-collection-hint,
+.ff-collection-error {
+    padding: 10px;
+    font-size: 12px;
+}
+
+.ff-collection-error {
+    color: var(--vscode-errorForeground, #f48771);
+}
+
+.ff-collection-error:empty {
+    display: none;
+}
+
+.ff-collection-footer {
+    justify-content: flex-end;
+}
+
+.ff-collection-footer button:first-child {
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    min-width: 70px;
+}
+
+@media (max-width: 620px) {
+    .ff-collection-main {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .ff-collection-properties .ff-prop-row {
+        flex-wrap: wrap;
+    }
+}
+
 .ff-prop-row.ff-row-tall {
     align-items: flex-start;
 }
